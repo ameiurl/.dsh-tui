@@ -1,11 +1,11 @@
---- original/channel.d.ts	2026-08-23 23:58:53.077187072 +0800
-+++ backup/channel.d.ts	2026-08-23 22:55:21.795753121 +0800
-@@ -58,6 +58,10 @@
+--- original/channel.d.ts	2026-08-28 11:42:55.783018286 +0800
++++ backup/channel.d.ts	2026-08-28 11:25:21.426103880 +0800
+@@ -61,6 +61,10 @@
      /** Prior content, or null for a new file / no before-image. */
      readonly oldText: string | null;
      readonly newText: string;
-+    /** Optional 1-based first line of this hunk on the old/new side (Claude
-+     *  Code style unified rendering; absent for call-time raw diffs). */
++    /** 1-based first line of the hunk on each side — enables CC-style
++     *  numbered unified diffs (new-file hunks number from line 1). */
 +    readonly oldStart?: number;
 +    readonly newStart?: number;
  }

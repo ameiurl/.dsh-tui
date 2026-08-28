@@ -1,4 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import React from 'react';
 import * as JsDiff from 'diff';
 import { extname } from 'node:path';
 import { Box, Text, useTerminalSize } from '../../ui.js';
@@ -64,6 +65,10 @@ const TEXT_BODY_MAX_LINES = 3;
  *  preference — no hidden lines, no "+N lines" elision). Infinity keeps both
  *  the unified cap and SplitDiffView's maxRows uncapped. */
 const DIFF_BODY_MAX_LINES = Infinity;
+/** New-file preview cap: creating a file must not dump its whole body — the
+ *  diffstat row plus the first 10 content lines show, Ctrl+O (verbose)
+ *  expands to the full content. Edit/delete diffs stay uncapped. */
+const NEW_FILE_DIFF_MAX_LINES = 11;
 /** Minimum terminal width for the two-pane diff: below this the panes
  *  would squeeze under ~50 columns each and the unified view reads better. */
 const SPLIT_DIFF_MIN_COLS = 110;
@@ -123,10 +128,10 @@ function wordSegments(oldLine, newLine) {
  * Align one hunk's old/new sides into context/del/add rows via line diffs
  * (the same walk SplitDiffView uses). Equal-length removed→added blocks pair
  * line-for-line as modifications and carry word-level `segments` so changed
- * words get the Claude Code green/red bold treatment. `oldStart`/`newStart`
- * are 1-based when the payload carries them (dsh-tool-fs / str_replace_editor
- * result hunks); otherwise the counters are relative and the caller must not
- * show numbers.
+ * words get the Claude Code treatment. `oldStart`/`newStart` are 1-based
+ * when the payload carries them (dsh-tool-fs / str_replace_editor result
+ * hunks and new-file creates); otherwise the counters are relative and the
+ * caller must not show numbers.
  */
 function alignedDiffRows(oldText, newText, oldStart, newStart) {
     const rows = [];
@@ -163,11 +168,10 @@ function alignedDiffRows(oldText, newText, oldStart, newStart) {
     }
     return rows;
 }
-/** Render word-diff segments: on ADDED rows the changed parts get a light
- *  green background (`diffAddedWord`, #90EE90) with dark ink so the light
- *  band stays readable, and no bold; REMOVED rows stay unstyled — only the
- *  line band and `-` marker carry the deletion. An explicit `color`/`bold`
- *  on the segment wins (diffstat rows). */
+/** Render word-diff segments: on ADDED rows the changed parts get the light
+ *  green `diffAddedWord` background with the DEFAULT font color (no bold);
+ *  REMOVED rows stay unstyled — only the line band and `-` marker carry the
+ *  deletion. An explicit `color`/`bold` on the segment wins (diffstat rows). */
 function segmentNodes(segments, tone) {
     return segments.map((segment, index) => {
         const changed = segment.changed === true;
@@ -193,8 +197,8 @@ function toneColorOf(tone) {
                         : undefined;
 }
 /** Diff row background: Claude Code paints the whole row band (number, marker
- *  and content) and keeps the content in default text. The mist-blue theme's
- *  `*Dimmed` keys hold the Claude Code diffAdded/diffRemoved line colors. */
+ *  and content) and keeps the content in default text. The theme's
+ *  `*Dimmed` keys hold the CC diffAdded/diffRemoved line colors. */
 function diffRowBackground(tone) {
     return tone === 'add'
         ? 'diffAddedDimmed'
@@ -268,6 +272,7 @@ function diffLines(diffs) {
     }
     return out;
 }
+
 /** Join the text blocks of a view's content payload (read/generic cards). */
 function contentLines(content) {
     const text = (content ?? []).map(block => (block.type === 'text' ? block.text ?? '' : '')).join('').trimEnd();
@@ -329,7 +334,7 @@ function capLines(lines, max, verbose) {
         return lines;
     return [
         ...lines.slice(0, max),
-        dim(`… +${lines.length - max} lines (ctrl+o to expand)`),
+        { ...dim(`… +${lines.length - max} lines (ctrl+o to expand)`), revealOnHover: true },
     ];
 }
 /** Header title from the presentation view: terminal cards keep the
@@ -348,16 +353,52 @@ function clipHeaderArgs(args) {
         return args;
     return `${args.slice(0, HEADER_ARGS_BUDGET)}…`;
 }
-function HeaderTitle({ name, title, isTerminal, displayArgs, argsLanguage, nameColor }) {
+/** Fold a multi-line terminal command title to its first SOURCE line.
+ *  Counts '\n' separators in place instead of materializing a line array —
+ *  running cards re-render every second and a streamed command can reach
+ *  hundreds of KB, and the exact cost the HEADER_ARGS_BUDGET comment above
+ *  keeps out of the header must not sneak back in through folding. (Lone-\r
+ *  titles are not a thing presentCall produces; CRLF is normalized on the
+ *  first line only.) Single-line titles return undefined: nothing to fold,
+ *  rendering stays byte-identical to the unfolded card. */
+function foldTerminalTitle(title) {
+    const firstEnd = title.indexOf('\n');
+    if (firstEnd === -1)
+        return undefined;
+    let separators = 1;
+    for (let at = title.indexOf('\n', firstEnd + 1); at !== -1; at = title.indexOf('\n', at + 1))
+        separators++;
+    // Same trailing-newline rule as sideLines: a terminator is not a line.
+    const hidden = separators - (title.endsWith('\n') ? 1 : 0);
+    if (hidden <= 0)
+        return undefined;
+    const first = title.slice(0, title.charCodeAt(firstEnd - 1) === 13 ? firstEnd - 1 : firstEnd);
+    return { first, hidden };
+}
+function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguage, nameColor, filePath, onOpenFile }) {
     if (title === undefined) {
         return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
     }
     if (isTerminal) {
-        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", children: _jsxs(Text, { children: ["(", title, ")"] }) })] }));
+        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), _jsx(Text, { dimColor: true, children: ` … +${folded.hidden} lines (ctrl+o to expand)` })] })) })] }));
     }
     const trimmed = title.trim();
     if (trimmed === '') {
         return (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }));
+    }
+    // Clickable path: when the caller resolved a file path that appears in
+    // the title (`Edit /path (1 - 100)`), render that segment underlined and
+    // clickable. The click stops propagation so the row's fold toggle does
+    // not fire. indexOf keeps the split exact even for paths with regex
+    // metacharacters.
+    if (onOpenFile !== undefined && filePath !== undefined && filePath !== '' && trimmed.includes(filePath)) {
+        const at = trimmed.indexOf(filePath);
+        const before = trimmed.slice(0, at);
+        const after = trimmed.slice(at + filePath.length);
+        return (_jsxs(Box, { flexWrap: "nowrap", children: [_jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: before }), _jsx(Box, { onClick: (event) => {
+                        event.stopImmediatePropagation();
+                        onOpenFile(filePath);
+                    }, children: _jsx(Text, { underline: true, wrap: "truncate-end", children: filePath }) }), after !== '' && (_jsx(Text, { bold: false, color: "text", wrap: "truncate-end", children: after }))] }));
     }
     const space = trimmed.indexOf(' ');
     const head = space === -1 ? trimmed : trimmed.slice(0, space);
@@ -370,7 +411,7 @@ function HeaderTitle({ name, title, isTerminal, displayArgs, argsLanguage, nameC
  * output, read content — instead of the raw result dump (mirroring Claude Code's `AssistantToolUseMessage.tsx` + the dsh-tools presentation views the
  * channel captures per call).
  */
-export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', }) {
+export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, }) {
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
     const displayArgs = verbose ? tool.argsFull ?? tool.argsText : tool.argsText;
@@ -388,6 +429,14 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // command) — then the call view's title stands.
     const headerTitle = tool.resultView?.title ?? tool.callView?.title;
     const headerIsTerminal = view?.card === 'terminal';
+    // Fold only the terminal header: multi-line command script, folding on,
+    // and the card not verbose/expanded (Ctrl+O and row click both land in
+    // `verbose`, so expansion reuses the existing state machine). Memoized on
+    // the title reference: settled titles never change, so the 1s
+    // useAnimationFrame tick of a running card re-renders without rescanning.
+    const foldedHeader = React.useMemo(() => headerIsTerminal && foldTerminalCommand && !verbose && headerTitle !== undefined
+        ? foldTerminalTitle(headerTitle)
+        : undefined, [headerIsTerminal, foldTerminalCommand, verbose, headerTitle]);
     // Live elapsed clock while the call runs (CC's bash elapsed timer): the
     // 1s tick re-renders the card; elapsed derives from wall-clock refs.
     const [viewportRef] = useAnimationFrame(isRunning ? 1000 : null);
@@ -420,7 +469,10 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
             body = [dim(`Running… (${formatDuration(Math.max(0, Date.now() - (tool.startedAt ?? Date.now())))})`)];
         }
     }
-    const cap = view?.card === 'diff' ? DIFF_BODY_MAX_LINES : TEXT_BODY_MAX_LINES;
+    // New files preview the first few lines (creating a file must not dump
+    // its whole body); every other diff body stays uncapped.
+    const newFileOnlyDiff = view?.card === 'diff' && (view.diffs ?? []).length > 0 && view.diffs.every(diff => diff.oldText === null);
+    const cap = view?.card === 'diff' ? (newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES) : TEXT_BODY_MAX_LINES;
     const bodySource = body.map(line => line.text).join('\n');
     const argsLanguage = jsonArgsLanguage(displayArgs);
     // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
@@ -435,16 +487,29 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
         : ordinaryToolBackground === 'strong'
             ? 'toolCardBackground'
             : undefined;
+    // Hover affordance for the click-to-toggle row: the theme's tool-card blue
+    // face marks the call's content area while the pointer dwells (the
+    // toolBackground treatment steps up one level to the strong card face), the
+    // collapsed `(ctrl+o to expand)` hint steps from dim to text, the elapsed
+    // clock stops dimming, and a ▾/▴ discloses the row is a toggle.
+    // No layout change: the indicator is a fixed column on the header line, the
+    // body never moves.
+    const [hovered, setHovered] = React.useState(false);
+    const interactive = onClick !== undefined;
+    const hoverTint = interactive && hovered && !isSelected;
     return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: addMargin ? 1 : 0, width: "100%", onClick: onClick, 
         // Only selection paints a highlight; the configured treatment applies
         // to an ordinary card. Diff line tints stay - they are content, not chrome.
-        // No hover tint: the card stays visually quiet until clicked (user
-        // feedback — row-hover color changes read as noise in the transcript).
-        backgroundColor: isSelected ? 'messageActionsBackground' : ordinaryBackground, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name) }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: true, children: elapsedText }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground })] })) : (rendered.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
+        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground })] })) : (rendered.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
                                     ? 'diffAddedWord'
                                     : line.tone === 'del'
                                         ? 'diffRemovedWord'
                                         : line.tone === 'path'
                                             ? 'ide'
-                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, backgroundColor: diffRowBackground(line.tone), children: line.gutter !== undefined ? (_jsxs(_Fragment, { children: [_jsx(Text, { children: line.gutter }), _jsx(Text, { wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : (line.text === '' ? ' ' : line.text) })] })) : (_jsx(Text, { color: line.tone === 'add' || line.tone === 'del' ? undefined : toneColorOf(line.tone), dimColor: line.tone === 'dim', wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text) }) ) }) ] }, index)))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
+                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, backgroundColor: diffRowBackground(line.tone), children: line.gutter !== undefined ? (_jsxs(_Fragment, { children: [_jsx(Text, { children: line.gutter }), _jsx(Text, { wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : (line.text === '' ? ' ' : line.text) })] })) : line.tone === 'path' && onOpenFile !== undefined ? (_jsx(Box, { onClick: (event) => {
+                                    // Stop propagation so the row's fold toggle does not
+                                    // fire when clicking the path.
+                                    event.stopImmediatePropagation();
+                                    onOpenFile(line.text);
+                                }, children: _jsx(Text, { color: "ide", underline: true, children: line.text }) })) : (_jsx(Text, { color: line.tone === 'add' || line.tone === 'del' ? undefined : toneColorOf(line.tone), dimColor: line.tone === 'dim' && !(line.revealOnHover === true && hovered), wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text) })) })] }, index)))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
 }

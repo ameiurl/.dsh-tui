@@ -1,5 +1,5 @@
 --- original/dsh-tool-str-replace-editor.index.js	2026-08-23 23:58:53.075261613 +0800
-+++ backup/dsh-tool-str-replace-editor.index.js	2026-08-23 22:55:21.794607555 +0800
++++ backup/dsh-tool-str-replace-editor.index.js	2026-08-28 11:32:33.993042677 +0800
 @@ -3,6 +3,7 @@
  import { FsError } from "@deepseek-ai/dsh-fs";
  import { sandboxDenialMarker } from "@deepseek-ai/dsh-sandbox";

@@ -1,12 +1,15 @@
 import { type Agent, type AgentHandle, type AgentStatus } from '@deepseek-ai/dsh-agent';
-import type { LlmModelInfo } from '@deepseek-ai/dsh-llm';
+import type { LlmModelInfo, LlmProviderInfo } from '@deepseek-ai/dsh-llm';
 import { type ContentBlock } from '@deepseek-ai/dsh-llm';
+import { type RecapOutcome } from './recap.js';
+import { type BalanceResult } from '../deepseekBalance.js';
 import { type SessionEvent } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import { type CommandCompletion, type LocalCommand } from '../commands.js';
+import { type SessionTreeData } from './sessionTree.js';
 import { type PreviewEntry, type SessionSummary } from './sessions/index.js';
 import { type FileCandidate } from '../utils/fileSuggestions.js';
-import type { ProviderSetupHost } from './providerWizard.js';
+import type { OAuthProviderStatus, ProviderSetupHost } from './providerWizard.js';
 import { type SessionModeSpec } from '../sessionModes.js';
 import { type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
 import { type SubagentState } from './subagents.js';
@@ -58,8 +61,8 @@ export interface ToolFileDiff {
     /** Prior content, or null for a new file / no before-image. */
     readonly oldText: string | null;
     readonly newText: string;
-    /** Optional 1-based first line of this hunk on the old/new side (Claude
-     *  Code style unified rendering; absent for call-time raw diffs). */
+    /** 1-based first line of the hunk on each side — enables CC-style
+     *  numbered unified diffs (new-file hunks number from line 1). */
     readonly oldStart?: number;
     readonly newStart?: number;
 }
@@ -191,11 +194,30 @@ export interface ChatRow {
      *  exempt from the next fold pass so a restore is not instantly undone. */
     restored?: boolean;
 }
+/** One 计费时段（高峰/空闲）的 token 累计。 */
+export interface TokenBucket {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+}
 /** Running token totals across the session's assistant messages. */
 export interface TokenUsage {
     input: number;
     output: number;
+    /** Prompt-cache hit tokens across the session (priced at the hit rate). */
+    cacheRead: number;
+    /** Prompt-cache write tokens across the session (priced with uncached input). */
+    cacheWrite: number;
+    /** Peak-hour tokens (billed at peak rates) — each usage lands in a bucket
+     *  by its event time, so a session spanning both windows is priced per
+     *  window instead of all at the current rate. */
+    peak: TokenBucket;
+    /** Off-peak-hour tokens (billed at idle rates). */
+    idle: TokenBucket;
 }
+/** 全零 token 累计（新会话 / 复位用）。 */
+export declare function emptyTokenUsage(): TokenUsage;
 /** In-process working-line snapshot derived from the base session stream. */
 export type ActivityStatus = ActivityState;
 /** A transient status message shown above the prompt input. */
@@ -320,11 +342,32 @@ export interface Channel {
     readonly rows: readonly ChatRow[];
     readonly status: AgentStatus | 'starting' | 'disposed';
     readonly sessionTitle: string;
+    /** Per-session accent color name (`/color`), '' when unset — persisted via
+     *  a `session/color` log event so it survives resume/rewind. Renders as
+     *  the prompt-input border + session label chip accent (cc/sessionColors). */
+    readonly sessionColor: string;
     readonly agentId: string;
+    /** `dsh-tui.recapOnOpen` (default on): auto-summarize the session tail
+     *  into the dim AutoRecapRow when the session opens/resumes. Read live
+     *  (settings service), so a `/settings` change applies on the next
+     *  session switch; absent settings service → on. */
+    readonly autoRecapOnOpen: boolean;
     /** Resolved model id (from the plugin config). */
     readonly model: string;
     /** Provider route of the live agent. */
     readonly provider: string;
+    /** Raw cordis.yml `provider` key (undefined when unset) — the boot-time
+     *  pin `/reload` must never override. */
+    readonly configuredProvider: string | undefined;
+    /** Raw cordis.yml `model` key (undefined when unset). */
+    readonly configuredModel: string | undefined;
+    /** Explicit cordis.yml `preset` (undefined = roster default wins) — `/reload`
+     *  must not override a static deployment choice. */
+    readonly configuredPreset: string | undefined;
+    /** Explicit cordis.yml `activityFrames` (undefined = pref/default wins). */
+    readonly configuredActivityFrames: string | undefined;
+    /** Explicit cordis.yml `lang` (undefined = settings/lang.json wins). */
+    readonly configuredLang: string | undefined;
     /** Running token totals across the session's assistant messages. */
     readonly tokens: TokenUsage;
     /** Working directory of the session. */
@@ -335,6 +378,10 @@ export interface Channel {
     readonly gitBranch: string | undefined;
     /** True between turn/start and turn/end — drives the working spinner. */
     readonly working: boolean;
+    /** True while a user-requested abort (Ctrl+C/Esc interrupt) has not yet
+     *  converged — no turn/start or turn/end has retired the aborted turn.
+     *  Chat uses it so a repeated Ctrl+C during a stuck abort force-exits. */
+    readonly cancelPending: boolean;
     /** Which phase the spinner should present while working. */
     readonly spinnerMode: SpinnerMode;
     /** Chars streamed as text this turn (feeds the spinner token counter). */
@@ -384,6 +431,12 @@ export interface Channel {
      *  `dsh-tui.scrollGutter`: turn timeline / proportional scrollbar /
      *  nothing). */
     readonly scrollGutter: ScrollGutterMode;
+    /** Terminal-card header folding (settings `dsh-tui.foldTerminalCommand`):
+     *  collapse a multi-line command title to its first line + count hint. */
+    readonly foldTerminalCommand: boolean;
+    /** Whether the session-name chip shows on the prompt top border's right
+     *  side (settings `dsh-tui.promptSessionLabel`; off by default). */
+    readonly promptSessionLabel: boolean;
     /** Live status-footer visibility and compactness preferences. */
     readonly statusBar: Readonly<StatusBarConfig>;
     /** Whether the header's pixel whale art shows (settings `dsh-tui.whale`). */
@@ -488,7 +541,9 @@ export interface Channel {
     steer(text: string): void;
     /** Pull a pending message back out of the inbox (Alt+Up) for re-editing. */
     removePending(id: string): boolean;
-    /** Abort the in-flight turn (`Ctrl+C` while working). */
+    /** Abort the in-flight turn (`Ctrl+C` while working). While `cancelPending`
+     *  stays true the abort has not converged; Chat force-exits on the next
+     *  Ctrl+C press in that window. */
     cancel(): void;
     /** Abort the in-flight turn and process `texts` right away (Esc/Ctrl+Enter
      *  with queued input): each text is re-queued as a followup once the abort
@@ -509,6 +564,25 @@ export interface Channel {
     promptRewind(row: ChatRow): Promise<{
         modes: readonly TuiRewindMode[];
     } | 'cancel' | null>;
+    /**
+     * The session family tree for the /tree screen (pi's Session Tree): the
+     * live session's whole lineage — ancestors, siblings, descendants —
+     * stitched across fork sessions into one message-level tree. `null` (with
+     * a notify) when session persistence is unavailable or the live session
+     * swapped while the family loaded.
+     */
+    buildSessionTree(): Promise<SessionTreeData | null>;
+    /**
+     * Session-tree fork: `rewind` drops the picked user turn (its prompt comes
+     * back as the returned text), `fork` keeps the picked entry. `seq` is the
+     * tree entry's source event seq inside `sessionId`'s log; `sessionId` may
+     * be any family member (adopting a dead branch forks IT at the picked
+     * point). Null = refused (the channel notified why).
+     */
+    rewindToNode(sessionId: string, seq: number, mode?: 'rewind' | 'fork'): Promise<string | null>;
+    /** `/fork`: fork the current session at its tip into a persisted copy the
+     *  user enters via `/resume` — the live session keeps running untouched. */
+    forkSession(): Promise<boolean>;
     /** Switch the live agent to a persisted session, replaying its history. */
     resumeTo(sessionId: string): Promise<ResumeResult>;
     /** Start a fresh conversation (`/new`): a brand-new agent + session, the
@@ -579,6 +653,8 @@ export interface Channel {
     setActivityFrames(name: string): boolean;
     /** Advertised models across every registered provider route (empty when the LLM service is absent). */
     listModels(): Promise<readonly LlmModelInfo[]>;
+    /** Provider display identities for the same routes (picker group labels). */
+    listProviders(): Promise<readonly LlmProviderInfo[]>;
     /** The live agent's full skill catalog for `/skills` (issue #204) — name,
      *  description, invocation flags and source bucket. Undefined on a failed
      *  or incomplete registry read (the picker shows an error); empty only
@@ -586,10 +662,18 @@ export interface Channel {
     listSkills(): Promise<readonly SkillInfo[] | undefined>;
     /** Safe credential metadata for `/login`; undefined without the service. */
     describeCredential(ref: string): Promise<CredentialStatus | undefined>;
+    /** DeepSeek official account balance for `/balance`: resolves
+     *  `DEEPSEEK_API_KEY` through the credentials seam (env fallback) and
+     *  queries the official balance endpoint. The key is used only for the
+     *  request header — never logged, printed or persisted. */
+    balanceInfo(): Promise<BalanceResult>;
     /** Runtime capabilities for the `/provider` wizard, over the settings /
      *  credentials / llm seams; undefined when the composition lacks them
      *  (bare cordis.yml start without the dsh-base services). */
     providerSetup(): ProviderSetupHost | undefined;
+    /** OAuth sign-in states from a mounted dsh-auth-style plugin; undefined
+     *  without the plugin, so `/login` renders exactly what it did before. */
+    oauthProviderStatuses(): Promise<readonly OAuthProviderStatus[] | undefined>;
     /**
      * Runtime capabilities for the `/settings` screen, over the settings /
      * credentials seams; undefined when the composition lacks the settings
@@ -619,6 +703,17 @@ export interface Channel {
     /** Rename the current session (CC's /rename): appends a `session/title`
      *  event, which the status line and the /resume picker both read. */
     renameSession(title: string): void;
+    /** Set the current session's accent color (`/color <name>`): appends a
+     *  `session/color` event; '' clears it back to the theme default. */
+    setSessionColor(color: string): void;
+    /** Generate a recap of the session's recent activity (`/recap`): one
+     *  tool-less LLM call over the tail exchanges, returning a one-line
+     *  summary plus an optional proposed title. The answer is pure UI state
+     *  and never enters the session log. */
+    recapRecent(options?: {
+        signal?: AbortSignal;
+        onText?: (delta: string) => void;
+    }): Promise<RecapOutcome>;
     /** Delete a persisted session (`/resume` picker ctrl+d): removes its log
      *  directory, its last-used entry, and the resume marker when it points
      *  here. False for the live session or a missing/unwritable log. */
@@ -705,6 +800,8 @@ export interface ChannelState {
     rows: ChatRow[];
     status: AgentStatus | 'starting' | 'disposed';
     sessionTitle: string;
+    sessionColor: string;
+    autoRecapOnOpen: boolean;
     agentId: string;
     model: string;
     provider: string;
@@ -713,6 +810,8 @@ export interface ChannelState {
     displayCwd: string;
     gitBranch: string | undefined;
     working: boolean;
+    /** Whether a requested abort is still converging (see the public Channel type). */
+    cancelPending: boolean;
     spinnerMode: SpinnerMode;
     responseChars: number;
     activeToolCount: number;
@@ -743,6 +842,12 @@ export interface ChannelState {
     workingActivity: ActivityStatus | undefined;
     /** Working-activity indicator preset (see the public Channel type). */
     activityFrames: string | undefined;
+    /** Raw cordis.yml pins `/reload` must respect (see the public Channel type). */
+    configuredProvider: string | undefined;
+    configuredModel: string | undefined;
+    configuredPreset: string | undefined;
+    configuredActivityFrames: string | undefined;
+    configuredLang: string | undefined;
     /** Diff presentation preference (see the public Channel type). */
     diffLayout: 'auto' | 'split' | 'unified';
     /** Thinking-block display (see the public Channel type). */
@@ -751,6 +856,10 @@ export interface ChannelState {
     toolBackground: ToolBackground;
     /** Transcript gutter mode (see the public Channel type). */
     scrollGutter: ScrollGutterMode;
+    /** Terminal-card header folding (see the public Channel type). */
+    foldTerminalCommand: boolean;
+    /** Session-name chip on the prompt border (see the public Channel type). */
+    promptSessionLabel: boolean;
     /** Status-footer preferences (see the public Channel type). */
     statusBar: StatusBarConfig;
     /** Apply a diff-layout change (see the public Channel type). */
@@ -761,6 +870,10 @@ export interface ChannelState {
     setToolBackground(background: ToolBackground): void;
     /** Apply a transcript gutter mode change. */
     setScrollGutter(mode: ScrollGutterMode): void;
+    /** Apply a terminal-card header folding change. */
+    setFoldTerminalCommand(enabled: boolean): void;
+    /** Apply a prompt session-name chip change. */
+    setPromptSessionLabel(enabled: boolean): void;
     /** Apply status-footer preference changes. */
     setStatusBar(config: Partial<StatusBarConfig>): void;
     /** Whale header art switch (see the public Channel type). */
@@ -791,6 +904,13 @@ export interface ChannelState {
         answer: string | null;
         error?: string;
     }>;
+    /** 会话 recap（见 public Channel.recapRecent）。 */
+    recapRecent(options?: {
+        signal?: AbortSignal;
+        onText?: (delta: string) => void;
+    }): Promise<RecapOutcome>;
+    /** 会话强调色（见 public Channel.setSessionColor）。 */
+    setSessionColor(color: string): void;
     /** Effective slash commands (see the public Channel type). */
     commandList: readonly LocalCommand[];
     /** Context-aware slash completions (see the public Channel type). */
@@ -833,6 +953,12 @@ export interface ChannelState {
     promptRewind(row: ChatRow): Promise<{
         modes: readonly TuiRewindMode[];
     } | 'cancel' | null>;
+    /** @internal session-tree assembly (see the public Channel.buildSessionTree). */
+    buildSessionTree(): Promise<SessionTreeData | null>;
+    /** @internal tree-entry rewind/fork (see the public Channel.rewindToNode). */
+    rewindToNode(sessionId: string, seq: number, mode?: 'rewind' | 'fork'): Promise<string | null>;
+    /** @internal tip fork (see the public Channel.forkSession). */
+    forkSession(): Promise<boolean>;
     /** Switch the live agent to a persisted session, replaying its history. */
     resumeTo(sessionId: string): Promise<ResumeResult>;
     /** Start a fresh conversation (`/new`). */
@@ -874,12 +1000,18 @@ export interface ChannelState {
     /** Switch the working-activity indicator preset (see the public Channel). */
     setActivityFrames(name: string): boolean;
     listModels(): Promise<readonly LlmModelInfo[]>;
+    /** Provider display identities (see the public Channel type). */
+    listProviders(): Promise<readonly LlmProviderInfo[]>;
     /** The live agent's skill catalog for `/skills` (see the public Channel type). */
     listSkills(): Promise<readonly SkillInfo[] | undefined>;
     /** Safe credential metadata for `/login` (see the public Channel type). */
     describeCredential(ref: string): Promise<CredentialStatus | undefined>;
+    /** DeepSeek official balance for `/balance` (see the public Channel type). */
+    balanceInfo(): Promise<BalanceResult>;
     /** `/provider` wizard capabilities (see the public Channel type). */
     providerSetup(): ProviderSetupHost | undefined;
+    /** OAuth sign-in states (see the public Channel type). */
+    oauthProviderStatuses(): Promise<readonly OAuthProviderStatus[] | undefined>;
     /** `/settings` screen capabilities (see the public Channel type). */
     settingsHost(): SettingsHost | undefined;
     /** Plugin-declared settings sections (see the public Channel type). */
@@ -957,6 +1089,12 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     toolBackground?: ToolBackground;
     /** Transcript gutter mode; default `timeline` (settings `dsh-tui.scrollGutter`). */
     scrollGutter?: ScrollGutterMode;
+    /** Terminal-card header folding; default off (settings
+     *  `dsh-tui.foldTerminalCommand`). */
+    foldTerminalCommand?: boolean;
+    /** Session-name chip on the prompt top border; default off (settings
+     *  `dsh-tui.promptSessionLabel`). */
+    promptSessionLabel?: boolean;
     /** Status-footer field visibility and compactness. */
     statusBar?: Partial<StatusBarConfig>;
     /** Show the header's pixel whale art; default on. */
@@ -975,6 +1113,12 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
      *  only route a resume overrides the target's own record with. */
     configuredProvider?: string;
     configuredModel?: string;
+    /** cordis.yml's raw `lang` key, undefined when unset: `/reload` consults
+     *  it so a static deployment choice is never overridden by lang.json. */
+    configuredLang?: string;
+    /** cordis.yml's raw `activityFrames` key, undefined when unset: the
+     *  static choice `/reload` must not override. */
+    configuredActivityFrames?: string;
     /** The preset the initial agent's session runs under (from resolveAgent). */
     agentPreset?: string;
     /** Shift+Tab session-mode cycle from cordis.yml `modes`; undefined →
