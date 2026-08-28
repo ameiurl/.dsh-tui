@@ -7,7 +7,7 @@
     "diffRemoved": "#B3596B",
     "diffAddedDimmed": "#0B480B",
     "diffRemovedDimmed": "#480B0B",
-    "diffAddedWord": "#008700",
+    "diffAddedWord": "#005F00",
     "diffRemovedWord": "#C80000"
   }
 }
