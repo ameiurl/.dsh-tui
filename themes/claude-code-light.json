@@ -1,0 +1,13 @@
+{
+  "name": "claude-code-light",
+  "displayName": "Claude Code Light",
+  "base": "light",
+  "colors": {
+    "diffAdded": "#2F9D44",
+    "diffRemoved": "#D1454B",
+    "diffAddedDimmed": "#69DB7C",
+    "diffRemovedDimmed": "#FFA8B4",
+    "diffAddedWord": "#2F9D44",
+    "diffRemovedWord": "#D1454B"
+  }
+}

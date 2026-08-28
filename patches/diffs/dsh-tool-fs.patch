@@ -1,0 +1,45 @@
+--- original/dsh-tool-fs.index.js	2026-08-23 23:58:53.073982456 +0800
++++ backup/dsh-tool-fs.index.js	2026-08-23 22:55:21.794064431 +0800
+@@ -501,7 +501,11 @@
+ 		diffs.push({
+ 			path,
+ 			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
+-			newText: newLines.join("\n")
++			newText: newLines.join("\n"),
++			// 1-based first line of this hunk on each side — lets UIs render a
++			// Claude Code style unified diff with real line numbers.
++			oldStart: hunk.oldStart,
++			newStart: hunk.newStart
+ 		});
+ 	}
+ 	return diffs;
+@@ -644,10 +648,12 @@
+ 				type: "text",
+ 				text: formatWriteOutput(value.path, value)
+ 			}],
+-			presentationMeta: (args, value) => ({ diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
++			presentationMeta: (args, value) => ({ diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
+ 				path,
+ 				oldText,
+-				newText
++				newText,
++				oldStart,
++				newStart
+ 			})) })
+ 		},
+ 		async execute(args, exec) {
+@@ -793,10 +799,12 @@
+ 				type: "text",
+ 				text: formatEditOutput(value.path, args.replace_all ?? false)
+ 			}],
+-			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
++			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
+ 				path,
+ 				oldText,
+-				newText
++				newText,
++				oldStart,
++				newStart
+ 			})) })
+ 		},
+ 		async execute(args, exec) {

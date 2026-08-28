@@ -1,0 +1,13 @@
+--- original/channel.d.ts	2026-08-23 23:58:53.077187072 +0800
++++ backup/channel.d.ts	2026-08-23 22:55:21.795753121 +0800
+@@ -58,6 +58,10 @@
+     /** Prior content, or null for a new file / no before-image. */
+     readonly oldText: string | null;
+     readonly newText: string;
++    /** Optional 1-based first line of this hunk on the old/new side (Claude
++     *  Code style unified rendering; absent for call-time raw diffs). */
++    readonly oldStart?: number;
++    readonly newStart?: number;
+ }
+ /** Pending-call render intent (structural subset of dsh-tools ToolCallView). */
+ export type ToolCallView = {

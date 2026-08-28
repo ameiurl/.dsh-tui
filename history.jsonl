@@ -1,0 +1,200 @@
+{"text":"/permisson danger-full-access","ts":1787010575501}
+{"text":"/quit","ts":1787010778401}
+{"text":"/update","ts":1787010875320}
+{"text":"/permisson danger-full-access","ts":1787010923474}
+{"text":"帮我修改配置，默认启动就是danger-full-access权限","ts":1787011019329}
+{"text":"/quit","ts":1787011242160}
+{"text":"/resume","ts":1787011279598}
+{"text":"现在模型配置是high,但配置没有生效，是max模式？","ts":1787011327032}
+{"text":"/model","ts":1787011712452}
+{"text":"/quit","ts":1787012248976}
+{"text":"帮我看一下 @sync_multi.sh 双向同步有没有问题，可以优化的地方？","ts":1787274090977}
+{"text":"/quit","ts":1787274881985}
+{"text":"/resume","ts":1787274919778}
+{"text":"/quit","ts":1787275186339}
+{"text":"/resume","ts":1787275975929}
+{"text":"优化一下","ts":1787276000608}
+{"text":"/quit","ts":1787276536231}
+{"text":"/resume","ts":1787279648758}
+{"text":"/rrersume","ts":1787279659612}
+{"text":"/resume","ts":1787279720599}
+{"text":"/quit","ts":1787282653361}
+{"text":"在admin_frontend中，@src/views/goods/Edit.vue 是否使用规格,如果选择了 使用，要判断 商品规格 库存 价格 要填","ts":1787282956841}
+{"text":"/permissions","ts":1787283026908}
+{"text":"/permisson danger-full-access","ts":1787283048762}
+{"text":"/permission danger-full-access","ts":1787283083838}
+{"text":"/permissions","ts":1787283149380}
+{"text":"/permissons","ts":1787283157877}
+{"text":"/permissions","ts":1787283165588}
+{"text":"/permission danger-full-access","ts":1787283187004}
+{"text":"/quit","ts":1787283241180}
+{"text":"@sync_multi.sh 帮我测试一下双向同步各种情况有没有问题，和git的批量操作有没有问题？","ts":1787324345099}
+{"text":"/quit","ts":1787326485726}
+{"text":"/resume","ts":1787326557655}
+{"text":"已重启，上面有问题的可以再试一下","ts":1787326580939}
+{"text":"v6.9已重起","ts":1787327706230}
+{"text":"/quit","ts":1787328187747}
+{"text":"/resume","ts":1787359950378}
+{"text":"/quit","ts":1787406705501}
+{"text":"/update","ts":1787451776192}
+{"text":"@modules/admin/controllers/TransactionController.php 自救积分 直接取17号到现在的累加，不是取当天的","ts":1787451853801}
+{"text":"/model","ts":1787466566669}
+{"text":"@sync_multi.sh 帮我检测一下，双向删除文件会不会出现问题，大批量增加删除修改会不会问题，如git拉取一次性大量文件的修改增加删除的有没问题？确认稳定误删除误增加文件。","ts":1787466716619}
+{"text":"/quit","ts":1787468262944}
+{"text":"/resume","ts":1787474403049}
+{"text":"恩，修复#1（启动保护）、#2（窗口收窄）、#4（w2l_active 移入锁内）这三个问题","ts":1787475115231}
+{"text":"已重起，需要再测一下吗？","ts":1787476451655}
+{"text":"同一台电脑短时间不会两边一起操作，主要考虑是同一侧大批量操作，会不会回音误删除文件或退回修改增加文件的问题","ts":1787478226913}
+{"text":"同步的时，突然停机情况下很少，不考虑极小概率事件，把代码改复杂，出现在更多问题","ts":1787479929607}
+{"text":"/quit","ts":1787480198988}
+{"text":"/update","ts":1787492049246}
+{"text":"/resume","ts":1787492080008}
+{"text":"/theme","ts":1787492543150}
+{"text":"/vim","ts":1787492594854}
+{"text":"/quit","ts":1787492614997}
+{"text":"/resume","ts":1787492621410}
+{"text":"/vim","ts":1787492642095}
+{"text":"/clear","ts":1787493973564}
+{"text":"/quit","ts":1787493979090}
+{"text":"dsh --profile tui 帮我加个theme，diff跟claude code一样","ts":1787494106713}
+{"text":"/quit","ts":1787494838541}
+{"text":"/resume","ts":1787494907250}
+{"text":"diff还是左右显示，只是改了颜色？claude code 是如下显示：    562          $order->store_id = $storeId;                                                                                                                                                                          563 -        $order->order_no = 'IE' . date('YmdHis') . $user->id . mt_rand(1000, 9999);                                                                                                                           563 +        $order->order_no = 'BO' . date('YmdHis') . mt_rand(1000, 9999); // BO + 14位时间戳 + 4位随机 = 18位数字","ts":1787495003924}
+{"text":"/quit","ts":1787497048101}
+{"text":"/resume","ts":1787497156288}
+{"text":"列出修改的文件？","ts":1787497265208}
+{"text":"对比claude code ,现在没有背景色","ts":1787497445702}
+{"text":"/quit","ts":1787497620087}
+{"text":"/resume","ts":1787497716776}
+{"text":"cc 深红和深绿色","ts":1787497811912}
+{"text":"/quit","ts":1787497877566}
+{"text":"/resume","ts":1787498070275}
+{"text":"是的，不够深","ts":1787498169658}
+{"text":"/quit","ts":1787498186912}
+{"text":"/resume","ts":1787498223271}
+{"text":"深红是#5F0000  深绿是#005F00","ts":1787498345656}
+{"text":"/quit","ts":1787498395340}
+{"text":"/resume","ts":1787498400393}
+{"text":"#480B0B #008000","ts":1787498813237}
+{"text":"/quit","ts":1787498865078}
+{"text":"/resume","ts":1787498871216}
+{"text":"#600000 #006400","ts":1787498922331}
+{"text":"/quit","ts":1787498935917}
+{"text":"/resume","ts":1787498941432}
+{"text":"暗红色是对的，#480B0B 绿色帮我改成暗绿色的","ts":1787498993095}
+{"text":"/quit","ts":1787499026547}
+{"text":"/resume","ts":1787499042495}
+{"text":"如果diff 是修改，是不是也有颜色区别？还改动要显示行数","ts":1787499205105}
+{"text":"@modules/admin/controllers/UserController.php 帮我把chixiaodian 改成 haizhiyue","ts":1787499485565}
+{"text":"词级diff现在没有看出效果？","ts":1787499623633}
+{"text":"/quit","ts":1787499643261}
+{"text":"/resume","ts":1787499649430}
+{"text":"给词级diff加正绿色背景色","ts":1787499679735}
+{"text":"/quit","ts":1787499801692}
+{"text":"/resume","ts":1787499806739}
+{"text":"删除的背景颜色不要变，词级背景正常，但字体是黄色","ts":1787499982824}
+{"text":"/quit","ts":1787500069203}
+{"text":"/resume","ts":1787500073959}
+{"text":"暗红色的词级修改不需变化","ts":1787500142476}
+{"text":"/quit","ts":1787500225207}
+{"text":"/resume","ts":1787500229868}
+{"text":"/quit","ts":1787500253358}
+{"text":"/resume","ts":1787500260100}
+{"text":"删除行 的词级背景和字体还是没有删除？","ts":1787500300660}
+{"text":"/quit","ts":1787500339399}
+{"text":"/resume","ts":1787500345213}
+{"text":"这些改到时候插件升级后会退回去了，如何一键重新生效？","ts":1787500381999}
+{"text":"有备份文件吗，如果升级覆盖后，可以查找修改的","ts":1787500692638}
+{"text":"/quit","ts":1787500887335}
+{"text":"/resume","ts":1787529635725}
+{"text":"/quit","ts":1787529643187}
+{"text":"/resume","ts":1787529658555}
+{"text":"词级背景色是 #008000，字体不加粗","ts":1787529693096}
+{"text":"/quit","ts":1787529777331}
+{"text":"/resume","ts":1787529785635}
+{"text":"词级diff字体不变色","ts":1787529849751}
+{"text":"/quit","ts":1787529882118}
+{"text":"/resume","ts":1787529887108}
+{"text":"/clear","ts":1787530870503}
+{"text":"@modules/admin/models/TransactionImportForm.php 把\\Yii::info 改成debug_log","ts":1787530888147}
+{"text":"/quit","ts":1787531196487}
+{"text":"/resume","ts":1787531203836}
+{"text":"列出这个主题修改的文件","ts":1787531472188}
+{"text":"/quit","ts":1787533468358}
+{"text":"帮我默认模型改deepseek-v4-flash","ts":1787533759998}
+{"text":"@settings.yaml 这边改没有生效？","ts":1787533842789}
+{"text":"/quit","ts":1787534914446}
+{"text":"在admin_frontend中， @src/views/statistic/userWenpiaoList/index.vue 搜索框增加 搜索团队会员，框里输入手机号，搜索用户伞下的用户，包括用户自己，参考@modules/admin/models/UserForm.php getTeamMemberIds函数","ts":1787535689842}
+{"text":"1. 增加一个导出功能，导出的字段有：“用户姓名”、“用户编号（交易所ID）”、“待配票数”","ts":1787536068692}
+{"text":"导出增加手机号","ts":1787538284036}
+{"text":"/clear","ts":1787539919481}
+{"text":"在store_uniapp中，@user/wenpiao-exchange/index.vue 后端接口判断一下，用户未激活不能兑换。用户激活判断 cyy_user_extend表","ts":1787539973051}
+{"text":"/resume","ts":1787540235117}
+{"text":"导出的时候有两个文件 一个是用户文票列表，一个是undefined？","ts":1787540260357}
+{"text":"/quit","ts":1787544872176}
+{"text":"/resume","ts":1787556754004}
+{"text":"/quit","ts":1787558471217}
+{"text":"@modules/client/behaviors/StoreAdminLogin.php 31行，出现了不是入驻商也要登录入驻商的情况?","ts":1787629326397}
+{"text":"@jobs/DeferredImportRebateJob.php 78行，first_price是7.5，最后返利只有0.36，正常吗","ts":1787804112121}
+{"text":"返利订单不止0.36,还很多","ts":1787804801586}
+{"text":"本地查不到日志","ts":1787804849536}
+{"text":"需要哪些日志，我提供","ts":1787804861689}
+{"text":"price_send 是0.45","ts":1787805192276}
+{"text":"分流80%","ts":1787805209204}
+{"text":"user.reward 不止剩于0.45","ts":1787805390505}
+{"text":"@modules/admin/models/TransactionImportForm.php 1663行，如果不够查找下一个返利订单，不能只返利部份","ts":1787806764714}
+{"text":"@modules/common/controllers/DataFixController.php 在这个文件加个修复函数，我给出订单号，如果只扣部份返利的需要补上。","ts":1787807801163}
+{"text":"syntax error, unexpected '??' (T_COALESCE), expecting :: (T_PAAMAYIM_NEKUDOTAYIM)\n1. in /www/wwwroot/www.haizhiyue.com.cn/modules/common/controllers/DataFixController.php","ts":1787820598220}
+{"text":"/clear","ts":1787835661213}
+{"text":"@modules/admin/controllers/TransactionController.php 777行，自救积分，如果是user_id是48伞下的用户，从明天开始计算，伞下参考@modules/client/controllers/v1/ShareController.php 284行。","ts":1787835789843}
+{"text":"/resume","ts":1787836265043}
+{"text":"diff 修改的内容不要隐藏或只显示几行","ts":1787836333481}
+{"text":"/quit","ts":1787836463138}
+{"text":"/resume","ts":1787837590875}
+{"text":"/clear","ts":1787837643199}
+{"text":"@modules/common/controllers/DataFixController.php actionFixPartialRebate 这个是直推的补上漏的返利，现在竞拍订单导入也要补上，返利的程序是@jobs/DeferredImportRebateJob.php 71行","ts":1787837758493}
+{"text":"/quit","ts":1787837993503}
+{"text":"/resume","ts":1787837999230}
+{"text":"备注没改？","ts":1787838618549}
+{"text":"/quit","ts":1787839941478}
+{"text":"/update","ts":1787839954743}
+{"text":"/quit","ts":1787840619168}
+{"text":"/resume","ts":1787840630204}
+{"text":"/quit","ts":1787840679047}
+{"text":"/resume","ts":1787840852527}
+{"text":"/quit","ts":1787840891534}
+{"text":"/resume","ts":1787840899660}
+{"text":"/quit","ts":1787840919304}
+{"text":"/resume","ts":1787840970555}
+{"text":"/quit","ts":1787840993045}
+{"text":"/resume","ts":1787879492372}
+{"text":"/vim","ts":1787879781534}
+{"text":"/quit","ts":1787880457421}
+{"text":"/resume","ts":1787880521141}
+{"text":"resume展示的标题被截段，vim模式不能用？","ts":1787880572142}
+{"text":"2条要显示全文","ts":1787880930228}
+{"text":"/quit","ts":1787881078818}
+{"text":"/resume","ts":1787881086852}
+{"text":"/quit","ts":1787881095241}
+{"text":"/resume","ts":1787881129847}
+{"text":"resume 列出历史会话，宽度够吧，不用换行吧。之前的还未显示全部？","ts":1787881229693}
+{"text":"/quit","ts":1787881541724}
+{"text":"/resume","ts":1787881594244}
+{"text":"/quit","ts":1787881600906}
+{"text":"/resume","ts":1787881848810}
+{"text":"/quit","ts":1787881853605}
+{"text":"/model","ts":1787882643939}
+{"text":"词级diff 用浅绿色","ts":1787882704317}
+{"text":"/quit","ts":1787882795527}
+{"text":"/resume","ts":1787882801214}
+{"text":"改用#87FF87","ts":1787882849052}
+{"text":"/quit","ts":1787882893298}
+{"text":"resume","ts":1787882898660}
+{"text":"/resume","ts":1787882902568}
+{"text":"/quit","ts":1787883066532}
+{"text":"/resume","ts":1787883072628}
+{"text":"/quit","ts":1787883123326}
+{"text":"/resume","ts":1787883129468}
+{"text":"词级diff ，字体颜色不要变色，保留原来的字体颜色","ts":1787883293365}
+{"text":"/quit","ts":1787883370266}
+{"text":"/resume","ts":1787883433025}

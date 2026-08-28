@@ -1,0 +1,217 @@
+--- /home/amei/.dsh-tui/patches/original/AssistantToolUseMessage.js	2026-08-23 23:58:53.076180104 +0800
++++ /home/amei/.dsh-tui/patches/backup/AssistantToolUseMessage.js	2026-08-28 10:15:43.429785346 +0800
+@@ -1,4 +1,5 @@
+ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
++import * as JsDiff from 'diff';
+ import { extname } from 'node:path';
+ import { Box, Text, useTerminalSize } from '../../ui.js';
+ import { stringWidth } from '../../ink/stringWidth.js';
+@@ -59,9 +60,10 @@
+ }
+ /** CC's collapsed text body keeps 3 lines (renderTruncatedContent). */
+ const TEXT_BODY_MAX_LINES = 3;
+-/** Diff bodies cap at the upstream chat row's 8 (dsh-client-ui-tool's
+- *  CHAT_DIFF_MAX_LINES) — denser information than log output. */
+-const DIFF_BODY_MAX_LINES = 8;
++/** Diff bodies are never folded: the full change is always shown (user
++ *  preference — no hidden lines, no "+N lines" elision). Infinity keeps both
++ *  the unified cap and SplitDiffView's maxRows uncapped. */
++const DIFF_BODY_MAX_LINES = Infinity;
+ /** Minimum terminal width for the two-pane diff: below this the panes
+  *  would squeeze under ~50 columns each and the unified view reads better. */
+ const SPLIT_DIFF_MIN_COLS = 110;
+@@ -96,9 +98,120 @@
+         lines.pop();
+     return lines;
+ }
+-/** Diff hunks → add/del rows. The header already carries the path for the
+- *  common single-hunk case; with several hunks a path row separates files
+- *  and `⋯` separates scattered hunks of one file (upstream DiffBlock). */
++/** Strip the shared leading whitespace before word-diffing: otherwise the
++ *  whole indent reads as one changed blob (SplitDiffView's trick). */
++function wordSegments(oldLine, newLine) {
++    const oldIndent = /^\s*/.exec(oldLine)?.[0] ?? '';
++    const newIndent = /^\s*/.exec(newLine)?.[0] ?? '';
++    const sharedIndent = oldIndent === newIndent ? oldIndent : '';
++    const parts = JsDiff.diffWords(oldLine.slice(sharedIndent.length), newLine.slice(sharedIndent.length));
++    const oldSegments = sharedIndent === '' ? [] : [{ text: sharedIndent, changed: false }];
++    const newSegments = sharedIndent === '' ? [] : [{ text: sharedIndent, changed: false }];
++    for (const part of parts) {
++        if (part.added)
++            newSegments.push({ text: part.value, changed: true });
++        else if (part.removed)
++            oldSegments.push({ text: part.value, changed: true });
++        else {
++            oldSegments.push({ text: part.value, changed: false });
++            newSegments.push({ text: part.value, changed: false });
++        }
++    }
++    return { old: oldSegments, new: newSegments };
++}
++/**
++ * Align one hunk's old/new sides into context/del/add rows via line diffs
++ * (the same walk SplitDiffView uses). Equal-length removed→added blocks pair
++ * line-for-line as modifications and carry word-level `segments` so changed
++ * words get the Claude Code green/red bold treatment. `oldStart`/`newStart`
++ * are 1-based when the payload carries them (dsh-tool-fs / str_replace_editor
++ * result hunks); otherwise the counters are relative and the caller must not
++ * show numbers.
++ */
++function alignedDiffRows(oldText, newText, oldStart, newStart) {
++    const rows = [];
++    const parts = JsDiff.diffLines(oldText ?? '', newText);
++    let o = oldStart;
++    let n = newStart;
++    for (let i = 0; i < parts.length; i++) {
++        const part = parts[i];
++        const lines = part.value.replace(/\n$/, '').split('\n');
++        if (!part.added && !part.removed) {
++            for (const line of lines)
++                rows.push({ kind: 'context', oldNo: o++, newNo: n++, text: line });
++        }
++        else if (part.removed) {
++            const addedPart = parts[i + 1]?.added === true ? parts[i + 1] : undefined;
++            const addedLines = addedPart === undefined ? [] : addedPart.value.replace(/\n$/, '').split('\n');
++            if (addedPart !== undefined && lines.length === addedLines.length) {
++                for (let k = 0; k < lines.length; k++) {
++                    const pair = wordSegments(lines[k], addedLines[k]);
++                    rows.push({ kind: 'del', oldNo: o++, newNo: undefined, text: lines[k], segments: pair.old });
++                    rows.push({ kind: 'add', oldNo: undefined, newNo: n++, text: addedLines[k], segments: pair.new });
++                }
++                i++;
++            }
++            else {
++                for (const line of lines)
++                    rows.push({ kind: 'del', oldNo: o++, newNo: undefined, text: line });
++            }
++        }
++        else {
++            for (const line of lines)
++                rows.push({ kind: 'add', oldNo: undefined, newNo: n++, text: line });
++        }
++    }
++    return rows;
++}
++/** Render word-diff segments: on ADDED rows the changed parts get a light
++ *  green background (`diffAddedWord`, #90EE90) with dark ink so the light
++ *  band stays readable, and no bold; REMOVED rows stay unstyled — only the
++ *  line band and `-` marker carry the deletion. An explicit `color`/`bold`
++ *  on the segment wins (diffstat rows). */
++function segmentNodes(segments, tone) {
++    return segments.map((segment, index) => {
++        const changed = segment.changed === true;
++        const highlight = changed && tone === 'add';
++        const background = highlight ? 'diffAddedWord' : undefined;
++        const color = segment.color;
++        const bold = segment.bold ?? false;
++        return _jsx(Text, { color: color, backgroundColor: background, bold: bold, children: segment.text }, `seg-${index}`);
++    });
++}
++/** Line-body color by tone (unified diff marker/content). */
++function toneColorOf(tone) {
++    return tone === 'add'
++        ? 'diffAddedWord'
++        : tone === 'del'
++            ? 'diffRemovedWord'
++            : tone === 'error'
++                ? 'error'
++                : tone === 'hint'
++                    ? 'subtle'
++                    : tone === 'path'
++                        ? 'ide'
++                        : undefined;
++}
++/** Diff row background: Claude Code paints the whole row band (number, marker
++ *  and content) and keeps the content in default text. The mist-blue theme's
++ *  `*Dimmed` keys hold the Claude Code diffAdded/diffRemoved line colors. */
++function diffRowBackground(tone) {
++    return tone === 'add'
++        ? 'diffAddedDimmed'
++        : tone === 'del'
++            ? 'diffRemovedDimmed'
++            : undefined;
++}
++/**
++ * Diff hunks → display rows, Claude Code unified style: with line numbers in
++ * the payload, every row gets a right-aligned number gutter (`digits + 3`
++ * wide, exactly like Claude Code) plus a `+`/`-`/space marker, and context
++ * lines are included; without numbers (call-time raw diffs, older sessions)
++ * rows fall back to plain `+`/`-` markers but still align shared context
++ * lines instead of double-listing them. The header already carries the path
++ * for the common single-hunk case; with several hunks a path row separates
++ * files and `⋯` separates scattered hunks of one file (upstream DiffBlock).
++ */
+ function diffLines(diffs) {
+     const out = [];
+     let prevPath;
+@@ -110,12 +223,48 @@
+                 out.push(dim('⋯'));
+         }
+         prevPath = diff.path;
+-        if (diff.oldText !== null) {
+-            for (const line of sideLines(diff.oldText))
+-                out.push(del(`- ${line}`));
++        const numbered = typeof diff.oldStart === 'number' && typeof diff.newStart === 'number';
++        const rows = alignedDiffRows(diff.oldText, diff.newText, diff.oldStart ?? 1, diff.newStart ?? 1);
++        // Claude Code change-count summary (`+N -M`, green/red bold) above the
++        // hunk body — the same line CC prints under the file header.
++        const adds = rows.filter(row => row.kind === 'add').length;
++        const dels = rows.filter(row => row.kind === 'del').length;
++        if (adds > 0 || dels > 0) {
++            const stat = [];
++            if (adds > 0)
++                stat.push({ text: `+${adds}${dels > 0 ? ' ' : ''}`, color: 'diffAddedWord', bold: true });
++            if (dels > 0)
++                stat.push({ text: `-${dels}`, color: 'diffRemovedWord', bold: true });
++            out.push({
++                text: `${adds > 0 ? `+${adds}` : ''}${adds > 0 && dels > 0 ? ' ' : ''}${dels > 0 ? `-${dels}` : ''}`,
++                tone: 'diffstat',
++                segments: stat,
++            });
++        }
++        if (numbered) {
++            const last = rows.reduce((max, row) => Math.max(max, row.oldNo ?? 0, row.newNo ?? 0), 1);
++            const width = String(last).length + 3;
++            for (const row of rows) {
++                const marker = row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' ';
++                const no = row.kind === 'add' ? row.newNo : row.oldNo;
++                out.push({
++                    text: row.text,
++                    tone: row.kind === 'add' ? 'add' : row.kind === 'del' ? 'del' : 'plain',
++                    gutter: `${String(no).padStart(width)} ${marker}`,
++                    ...(row.segments !== undefined ? { segments: row.segments } : {}),
++                });
++            }
++        }
++        else {
++            for (const row of rows) {
++                if (row.kind === 'add')
++                    out.push({ text: `+ ${row.text}`, tone: 'add', ...(row.segments !== undefined ? { segments: [{ text: '+ ', changed: false }, ...row.segments] } : {}) });
++                else if (row.kind === 'del')
++                    out.push({ text: `- ${row.text}`, tone: 'del', ...(row.segments !== undefined ? { segments: [{ text: '- ', changed: false }, ...row.segments] } : {}) });
++                else
++                    out.push(plain(`  ${row.text}`));
++            }
+         }
+-        for (const line of sideLines(diff.newText))
+-            out.push(add(`+ ${line}`));
+     }
+     return out;
+ }
+@@ -297,15 +446,5 @@
+                                         ? 'diffRemovedWord'
+                                         : line.tone === 'path'
+                                             ? 'ide'
+-                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, children: _jsx(Text, { color: line.tone === 'add'
+-                                    ? 'diffAddedWord'
+-                                    : line.tone === 'del'
+-                                        ? 'diffRemovedWord'
+-                                        : line.tone === 'error'
+-                                            ? 'error'
+-                                            : line.tone === 'hint'
+-                                                ? 'subtle'
+-                                                : line.tone === 'path'
+-                                                    ? 'ide'
+-                                                    : undefined, dimColor: line.tone === 'dim', wrap: "wrap", children: line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text) }) })] }, index)))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
++                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, backgroundColor: diffRowBackground(line.tone), children: line.gutter !== undefined ? (_jsxs(_Fragment, { children: [_jsx(Text, { children: line.gutter }), _jsx(Text, { wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : (line.text === '' ? ' ' : line.text) })] })) : (_jsx(Text, { color: line.tone === 'add' || line.tone === 'del' ? undefined : toneColorOf(line.tone), dimColor: line.tone === 'dim', wrap: "wrap", children: line.segments !== undefined ? segmentNodes(line.segments, line.tone) : line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text) }) ) }) ] }, index)))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
+ }

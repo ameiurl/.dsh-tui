@@ -1,0 +1,130 @@
+--- original/dsh-tool-str-replace-editor.index.js	2026-08-23 23:58:53.075261613 +0800
++++ backup/dsh-tool-str-replace-editor.index.js	2026-08-23 22:55:21.794607555 +0800
+@@ -3,6 +3,7 @@
+ import { FsError } from "@deepseek-ai/dsh-fs";
+ import { sandboxDenialMarker } from "@deepseek-ai/dsh-sandbox";
+ import { defineTool } from "@deepseek-ai/dsh-tools";
++import { structuredPatch } from "diff";
+ //#region lib/types/index.js
+ /**
+ * Model-facing `str_replace_editor` over the Harness filesystem seam.
+@@ -48,6 +49,43 @@
+ 		return line;
+ 	});
+ }
++/** One hunk diff between `before` and `after` (context: 3), carrying the
++ *  1-based hunk start on each side so UIs can render a Claude Code style
++ *  unified diff with real line numbers. Mirrors dsh-tool-fs
++ *  `computeHunkDiffs`. */
++function computeHunkDiffs(path, before, after) {
++	const patch = structuredPatch("", "", before, after, void 0, void 0, { context: 3 });
++	const diffs = [];
++	for (const hunk of patch.hunks) {
++		const oldLines = [];
++		const newLines = [];
++		for (const line of hunk.lines) {
++			if (line.startsWith("\\")) continue;
++			const text = line.slice(1);
++			if (line.startsWith("-")) oldLines.push(text);
++			else if (line.startsWith("+")) newLines.push(text);
++			else {
++				oldLines.push(text);
++				newLines.push(text);
++			}
++		}
++		diffs.push({
++			path,
++			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
++			newText: newLines.join("\n"),
++			oldStart: hunk.oldStart,
++			newStart: hunk.newStart
++		});
++	}
++	return diffs;
++}
++/** Whether a candidate meta diffs array carries valid FileDiff shapes. */
++function diffsFromMeta(meta) {
++	if (typeof meta !== "object" || meta === null) return void 0;
++	const diffs = meta.diffs;
++	if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "object" && d !== null && typeof d.path === "string" && (d.oldText === null || typeof d.oldText === "string") && typeof d.newText === "string")) return void 0;
++	return diffs;
++}
+ var MutationPolicy = class {
+ 	policy;
+ 	constructor(ctx) {
+@@ -166,9 +204,10 @@
+ 	const offset = offsets[0];
+ 	if (offset === void 0) throw new FsError(`No replacement was performed, old_str \`${oldValue}\` did not appear verbatim in ${target.displayPath}.`, "FS_EDIT_NOT_FOUND");
+ 	if (offsets.length > 1) throw new FsError(`No replacement was performed. Multiple occurrences of old_str \`${oldValue}\` in lines [${lineNumbersAt(before, offsets).join(", ")}]. Please ensure it is unique`, "FS_AMBIGUOUS_EDIT");
++	const after = before.slice(0, offset) + newValue + before.slice(offset + oldValue.length);
+ 	let outcome;
+ 	try {
+-		outcome = await ctx.fs.writeText(target, before.slice(0, offset) + newValue + before.slice(offset + oldValue.length), intent === void 0 ? {
++		outcome = await ctx.fs.writeText(target, after, intent === void 0 ? {
+ 			kind: "replaceIfVersion",
+ 			version: info.version
+ 		} : {
+@@ -182,7 +221,11 @@
+ 		kind: "present",
+ 		version: outcome.version
+ 	}, exec);
+-	return `The file ${target.displayPath} has been edited successfully.`;
++	return {
++		message: `The file ${target.displayPath} has been edited successfully.`,
++		before,
++		after
++	};
+ }
+ async function insertInFile(ctx, policy, path, insertLine, newStr, exec) {
+ 	if (insertLine === void 0) throw new Error("Parameter `insert_line` is required for command: insert");
+@@ -303,11 +346,28 @@
+ 			}
+ 		},
+ 		output: {
+-			schema: { type: "string" },
++			schema: {
++				oneOf: [
++					{ type: "string" },
++					{
++						type: "object",
++						additionalProperties: false,
++						properties: {
++							message: { type: "string", required: true },
++							before: { oneOf: [{ type: "string" }, { type: "null" }], required: true },
++							after: { type: "string", required: true }
++						}
++					}
++				]
++			},
+ 			render: (_args, value) => [{
+ 				type: "text",
+-				text: value
+-			}]
++				text: typeof value === "string" ? value : value.message
++			}],
++			presentationMeta: (args, value) => {
++				if (args.command !== "str_replace" || typeof value === "string" || value.before === null) return void 0;
++				return { diffs: computeHunkDiffs(args.path, value.before, value.after) };
++			}
+ 		},
+ 		async execute(args, exec) {
+ 			switch (args.command) {
+@@ -317,7 +377,17 @@
+ 				case "insert": return insertInFile(ctx, policy, args.path, args.insert_line, args.new_str, exec);
+ 			}
+ 		},
+-		presentCall: presentEditorCall
++		presentCall: presentEditorCall,
++		presentResult(args, result) {
++			if (result.isError || args.command !== "str_replace") return void 0;
++			const diffs = diffsFromMeta(result.meta);
++			if (diffs === void 0) return void 0;
++			return {
++				card: "diff",
++				title: `str_replace ${args.path}`,
++				diffs
++			};
++		}
+ 	}));
+ }
+ const name = "tool-str-replace-editor";

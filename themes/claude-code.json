@@ -1,0 +1,13 @@
+{
+  "name": "claude-code",
+  "displayName": "Claude Code Deep",
+  "base": "dark",
+  "colors": {
+    "diffAdded": "#38A660",
+    "diffRemoved": "#B3596B",
+    "diffAddedDimmed": "#0B480B",
+    "diffRemovedDimmed": "#480B0B",
+    "diffAddedWord": "#008700",
+    "diffRemovedWord": "#C80000"
+  }
+}
