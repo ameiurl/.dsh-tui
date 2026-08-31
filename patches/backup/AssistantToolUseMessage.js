@@ -8,7 +8,11 @@ import { useAnimationFrame } from '../../ink/hooks/use-animation-frame.js';
 import { ToolUseLoader } from '../ToolUseLoader.js';
 import { SplitDiffView } from '../SplitDiffView.js';
 import { SyntaxText } from '../SyntaxText.js';
+import { useTooltip } from '../Tooltip.js';
 import { formatDuration } from '../../cc/format.js';
+import { getRevealVersion, revealLinesOf, snapReveal, subscribeReveal } from '../smoothReveal.js';
+const NOOP_REVEAL_SUBSCRIBE = (_listener) => () => { };
+const getNoRevealVersion = () => 0;
 /** Tool display names: DSH emits lowercase tool ids (`bash`); Claude Code
  *  shows capitalized names (`Bash`). Map the common ones, fall back to the
  *  id with its first letter uppercased. */
@@ -103,8 +107,6 @@ function sideLines(text) {
         lines.pop();
     return lines;
 }
-/** Strip the shared leading whitespace before word-diffing: otherwise the
- *  whole indent reads as one changed blob (SplitDiffView's trick). */
 function wordSegments(oldLine, newLine) {
     const oldIndent = /^\s*/.exec(oldLine)?.[0] ?? '';
     const newIndent = /^\s*/.exec(newLine)?.[0] ?? '';
@@ -273,6 +275,7 @@ function diffLines(diffs) {
     return out;
 }
 
+
 /** Join the text blocks of a view's content payload (read/generic cards). */
 function contentLines(content) {
     const text = (content ?? []).map(block => (block.type === 'text' ? block.text ?? '' : '')).join('').trimEnd();
@@ -376,11 +379,21 @@ function foldTerminalTitle(title) {
     return { first, hidden };
 }
 function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguage, nameColor, filePath, onOpenFile }) {
+    // Hover tooltip: the header line truncates long paths/commands, so the
+    // full string (or the unfolded terminal script) pops up after a dwell.
+    // Empty content is a no-op inside the hook.
+    const headerTooltip = useTooltip(() => {
+        if (title === undefined)
+            return displayArgs;
+        if (isTerminal)
+            return title;
+        return title.trim();
+    });
     if (title === undefined) {
-        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
+        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", ...headerTooltip, children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
     }
     if (isTerminal) {
-        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), _jsx(Text, { dimColor: true, children: ` … +${folded.hidden} lines (ctrl+o to expand)` })] })) })] }));
+        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), _jsx(Text, { dimColor: true, children: ` … +${folded.hidden} lines (ctrl+o to expand)` })] })) })] }));
     }
     const trimmed = title.trim();
     if (trimmed === '') {
@@ -395,7 +408,7 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
         const at = trimmed.indexOf(filePath);
         const before = trimmed.slice(0, at);
         const after = trimmed.slice(at + filePath.length);
-        return (_jsxs(Box, { flexWrap: "nowrap", children: [_jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: before }), _jsx(Box, { onClick: (event) => {
+        return (_jsxs(Box, { flexWrap: "nowrap", ...headerTooltip, children: [_jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: before }), _jsx(Box, { onClick: (event) => {
                         event.stopImmediatePropagation();
                         onOpenFile(filePath);
                     }, children: _jsx(Text, { underline: true, wrap: "truncate-end", children: filePath }) }), after !== '' && (_jsx(Text, { bold: false, color: "text", wrap: "truncate-end", children: after }))] }));
@@ -403,7 +416,7 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
     const space = trimmed.indexOf(' ');
     const head = space === -1 ? trimmed : trimmed.slice(0, space);
     const tail = space === -1 ? '' : trimmed.slice(space);
-    return (_jsx(Box, { flexWrap: "nowrap", children: _jsxs(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: [head, _jsx(Text, { bold: false, color: "text", children: tail })] }) }));
+    return (_jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: _jsxs(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: [head, _jsx(Text, { bold: false, color: "text", children: tail })] }) }));
 }
 /**
  * Tool-call card: `● Edit /path` header with a blinking status dot, then the
@@ -411,7 +424,11 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
  * output, read content — instead of the raw result dump (mirroring Claude Code's `AssistantToolUseMessage.tsx` + the dsh-tools presentation views the
  * channel captures per call).
  */
-export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, }) {
+export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, smoothReveal = false, fresh = false, revealVersion, }) {
+    // MessageList owns the single production subscription and passes a version
+    // prop only to active reveal rows. Standalone consumers keep the fallback
+    // subscription so the component contract remains self-contained.
+    React.useSyncExternalStore(revealVersion === undefined ? subscribeReveal : NOOP_REVEAL_SUBSCRIBE, revealVersion === undefined ? getRevealVersion : getNoRevealVersion);
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
     const displayArgs = verbose ? tool.argsFull ?? tool.argsText : tool.argsText;
@@ -479,6 +496,21 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // long error body must not be the reason it disappears.
     const lines = capLines(body, cap, verbose);
     const rendered = footnote === undefined ? lines : [...lines, { text: footnote, tone: 'hint' }];
+    // Smooth reveal (line-unit, pending CALL body only): model-authored prose
+    // (diff hunks, write content) flows in at ~30fps; the settled RESULT view,
+    // error bodies, verbose/expanded cards, and replayed (non-fresh) cards all
+    // paint complete. `snapReveal` on every non-revealable render retires a
+    // cursor the moment its card stops qualifying (result arrived, user
+    // expanded) — idempotent, safe during render.
+    const revealKey = `tool:${tool.callId}`;
+    const revealable = smoothReveal && !isError && isRunning && view !== undefined &&
+        tool.resultView === undefined && !verbose && !isExpanded && fresh;
+    if (!revealable)
+        snapReveal(revealKey);
+    const revealedLineCount = revealable
+        ? revealLinesOf(revealKey, rendered.length, { enabled: true, active: true })
+        : rendered.length;
+    const shownLines = revealedLineCount >= rendered.length ? rendered : rendered.slice(0, revealedLineCount);
     // Nested split-diff context panes must also yield to interaction highlights.
     // `none` leaves them transparent so the selected/expanded root shows through.
     const ordinaryToolBackground = isSelected || isExpanded ? 'none' : toolBackground;
@@ -500,7 +532,7 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: addMargin ? 1 : 0, width: "100%", onClick: onClick, 
         // Only selection paints a highlight; the configured treatment applies
         // to an ordinary card. Diff line tints stay - they are content, not chrome.
-        backgroundColor: isSelected ? 'messageActionsBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground })] })) : (rendered.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
+        backgroundColor: isSelected ? 'messageActionsBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
                                     ? 'diffAddedWord'
                                     : line.tone === 'del'
                                         ? 'diffRemovedWord'

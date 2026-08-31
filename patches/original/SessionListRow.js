@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from 'react';
 import { Box, Text } from '../../ui.js';
 import { t } from '../../i18n.js';
+import { useTooltip } from '../Tooltip.js';
 import { formatBytes, formatWhen, kindMark, titleColor, truncateWidth, } from '../../sessions/format.js';
 /**
  * One session in the browser's list: a title line and a metadata line.
@@ -16,12 +17,13 @@ import { formatBytes, formatWhen, kindMark, titleColor, truncateWidth, } from '.
  * stay exactly two lines at every terminal width, and a row that wraps
  * destroys the alignment that lets the eye scan a list at all.
  */
-export function SessionListRow({ session, width, depth, focused, now, onClick, }) {
+export function SessionListRow({ session, width, depth, focused, pinned, now, onClick, onContextMenu, onTogglePin, }) {
     const indent = depth * 2;
     // Two cells for the focus marker, plus the indent for a nested run.
     const body = Math.max(8, width - 2 - indent);
     const mark = kindMark(session.kind);
     const [hovered, setHovered] = useState(false);
+    const pinTooltip = useTooltip(t(pinned ? 'resume-menu-unpin' : 'resume-menu-pin'));
     const facts = [formatWhen(session.updatedAt, now)];
     if (session.branch !== undefined)
         facts.push(session.branch);
@@ -33,5 +35,10 @@ export function SessionListRow({ session, width, depth, focused, now, onClick, }
     if (session.childCount > 0 && depth === 0) {
         facts.push(t('session-children', { n: session.childCount }));
     }
-    return (_jsxs(Box, { flexDirection: "column", flexShrink: 0, onClick: onClick, onMouseEnter: onClick !== undefined ? () => setHovered(true) : undefined, onMouseLeave: onClick !== undefined ? () => setHovered(false) : undefined, backgroundColor: hovered && !focused ? 'userMessageBackgroundHover' : undefined, children: [_jsxs(Box, { children: [_jsx(Text, { color: focused ? 'suggestion' : 'subtle', children: `${' '.repeat(indent)}${focused ? '❯ ' : '  '}` }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Text, { color: titleColor(session.title.source, focused), bold: focused, children: truncateWidth(session.label ?? session.title.text, body - (mark === undefined ? 0 : 2)) })] }), _jsx(Box, { children: _jsx(Text, { dimColor: true, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
+    return (_jsxs(Box, { flexDirection: "column", flexShrink: 0, onClick: onClick, onContextMenu: onContextMenu, onMouseEnter: onClick !== undefined || onContextMenu !== undefined ? () => setHovered(true) : undefined, onMouseLeave: onClick !== undefined || onContextMenu !== undefined ? () => setHovered(false) : undefined, backgroundColor: focused || hovered ? 'userMessageBackgroundHover' : undefined, children: [_jsxs(Box, { children: [_jsx(Text, { color: focused ? 'suggestion' : 'subtle', children: `${' '.repeat(indent)}${focused ? '❯ ' : '  '}` }), _jsx(Box, { ...pinTooltip, onClick: onTogglePin === undefined ? undefined : (event) => {
+                            // The star is a control on the row, not the row: a click here
+                            // toggles the pin and must never fall through to resume.
+                            event.stopImmediatePropagation();
+                            onTogglePin();
+                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Text, { color: titleColor(session.title.source, focused), bold: focused, children: truncateWidth(session.label ?? session.title.text, body - 2 - (mark === undefined ? 0 : 2)) })] }), _jsx(Box, { children: _jsx(Text, { dimColor: true, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
 }

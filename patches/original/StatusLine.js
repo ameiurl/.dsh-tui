@@ -1,0 +1,381 @@
+import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import React from 'react';
+import { Box, Text, useTerminalSize, useTheme } from '../ui.js';
+import { formatTokens } from '../cc/format.js';
+import { t } from '../i18n.js';
+import { formatContextUsage, DEFAULT_STATUS_BAR, normalizeStatusBar } from '../tuiDisplayPrefs.js';
+import { estimateSessionCostCny, estimateSessionCostSplitCny, isDeepSeekOfficialProvider, isPeakHour } from '../deepseekPricing.js';
+import { ActivityLine, contextPressurePct } from '../components/ActivityLine.js';
+import { GoalStatusChip } from '../components/GoalTodoPanel.js';
+import { formatJobDuration } from '../dsh-adapter/jobs.js';
+/** Stable fallback for stubbed channels: verify/repro harnesses render the
+ *  real Chat with partial channel literals that predate the jobs field. */
+const NO_BACKGROUND_JOBS = [];
+import { modeDisplayName } from '../sessionModes.js';
+import { MiniWake } from '../components/trajectory/MiniWake.js';
+import { ContextBarView } from '../components/ContextBarView.js';
+import { TooltipTarget } from '../components/Tooltip.js';
+import { formatProject } from '../sessions/format.js';
+import { homeDir } from '../utils/paths.js';
+import { USED_SEGMENTS, renderMiniContextBar, renderTpsGauge, renderTpsSparkline, speedColor, tpsStats, } from './StatusMetrics.js';
+/**
+ * Render field parts as sibling shrinkable Boxes joined by the Byline
+ * separator (` · `). The Box-per-field layout is what makes individual
+ * fields hoverable — a Byline inside one Text cannot carry per-field mouse
+ * rects — at the cost of truncating each field on its own under pressure
+ * instead of truncating the joined string's tail.
+ */
+function FieldLine({ parts, hoverProps, }) {
+    const visible = parts.filter(part => part.node !== null && part.node !== undefined && part.node !== false);
+    return (_jsx(_Fragment, { children: visible.map((part, index) => (_jsxs(React.Fragment, { children: [index > 0 ? _jsx(Text, { dimColor: true, children: " \u00B7 " }) : null, _jsx(Box, { flexShrink: 1, ...(part.id === undefined ? {} : hoverProps(part.id)), children: part.tooltip === undefined || part.tooltip === '' ? (_jsx(Text, { wrap: "truncate", children: part.node })) : (_jsx(TooltipTarget, { content: part.tooltip, children: _jsx(Text, { wrap: "truncate", children: part.node }) })) })] }, part.key))) }));
+}
+export function StatusLine({ channel, selectionActive = false, helpOpen = false, wake, }) {
+    const { columns } = useTerminalSize();
+    const [themeName] = useTheme();
+    const [hover, setHover] = React.useState(null);
+    const hoverProps = React.useCallback((id) => ({
+        onMouseEnter: () => setHover(id),
+        // Guarded leave: a late leave from a field the pointer already left must
+        // not clobber the field it entered.
+        onMouseLeave: () => setHover(current => (current === id ? null : current)),
+    }), []);
+    const statusBar = channel.minimal
+        // Minimal mode overrides every field switch: model + cwd only, so the
+        // footer can never grow decorations regardless of saved preferences.
+        ? { ...DEFAULT_STATUS_BAR, compact: true, model: true, cwd: true }
+        : normalizeStatusBar(channel.statusBar);
+    // Provider workspaces expose a remote display path alongside a host alias;
+    // only the local target has identical cwd/displayCwd values to fold.
+    const displayCwd = channel.displayCwd === channel.cwd
+        ? formatProject(channel.displayCwd, homeDir())
+        : channel.displayCwd;
+    const usage = channel.lastUsage;
+    const contextUsed = usage === undefined
+        ? undefined
+        : usage.input + usage.cacheRead + usage.cacheWrite;
+    const contextParts = [];
+    if (statusBar.thinking && channel.reasoningEffort !== undefined) {
+        contextParts.push({
+            key: 'effort',
+            node: _jsx(Text, { color: "inactiveShimmer", children: channel.reasoningEffort }),
+        });
+    }
+    if (statusBar.mode && channel.modeIndex > 0) {
+        contextParts.push({
+            key: 'mode',
+            node: (_jsx(Text, { color: channel.mode.plan === true ? 'planMode' : 'warning', children: modeDisplayName(channel.mode) })),
+        });
+    }
+    const formattedContext = statusBar.contextUsage
+        ? formatContextUsage(contextUsed, channel.contextWindow, statusBar.compact)
+        : undefined;
+    // The ctx field's two faces: the idle readout, and the hover state — an
+    // in-place pressure bar (the user-liked "text becomes a bar" morph).
+    //
+    // WIDTH-STABLE BY CONSTRUCTION: the idle variable part is
+    // `P + " (" + C + ")"` (either order; P = percent text, C = counts) —
+    // len(P)+len(C)+3 cells. The hover variant is `▕+bar+▏ + " " + P` —
+    // 3+barLen+len(P) cells. Sizing barLen = len(C) makes them equal, so the
+    // morph swaps glyphs in place and NO sibling field, separator, or the
+    // right-aligned group moves a single cell (the first attempt used a fixed
+    // 10-cell gauge and made the whole row jump).
+    const ctxParts = (() => {
+        if (formattedContext === undefined)
+            return undefined;
+        const open = formattedContext.indexOf(' (');
+        if (open < 0)
+            return undefined;
+        const first = formattedContext.slice(0, open);
+        const second = formattedContext.slice(open + 2, -1);
+        if (first.endsWith('%'))
+            return { percent: first, counts: second };
+        if (second.endsWith('%'))
+            return { percent: second, counts: first };
+        return undefined;
+    })();
+    const ctxHoverBarWidth = ctxParts?.counts.length ?? 0;
+    const ctxNode = formattedContext === undefined
+        ? undefined
+        : hover === 'ctx' &&
+            ctxParts !== undefined &&
+            ctxHoverBarWidth > 0 &&
+            contextUsed !== undefined &&
+            channel.contextWindow !== undefined
+            ? (_jsxs(Text, { color: "inactiveShimmer", children: [_jsx(Text, { dimColor: true, children: "ctx " }), renderMiniContextBar(contextUsed, channel.contextWindow, ctxHoverBarWidth), ' ', ctxParts.percent] }))
+            : (_jsxs(Text, { color: "inactiveShimmer", children: [_jsx(Text, { dimColor: true, children: "ctx " }), formattedContext] }));
+    if (statusBar.cache) {
+        const cacheRate = formatCacheHitRate(usage);
+        if (cacheRate !== undefined) {
+            contextParts.push({
+                key: 'cache',
+                id: 'cache',
+                node: (_jsxs(Text, { color: "inactiveShimmer", children: [_jsx(Text, { dimColor: true, children: t('status-cache-label') }), cacheRate] })),
+            });
+        }
+    }
+    let tpsPart;
+    if (statusBar.tps && channel.tps !== undefined) {
+        if (channel.working && channel.tpsSamples.length === 0) {
+            tpsPart = {
+                key: 'tps',
+                id: 'tps',
+                node: (_jsxs(Text, { children: [renderTpsGauge(channel.tps, channel.tps), ' ', _jsxs(Text, { dimColor: true, children: [Math.round(channel.tps), " tps"] })] })),
+            };
+        }
+        else if (channel.tpsSamples.length > 0) {
+            const peak = Math.max(...channel.tpsSamples.map(sample => sample.tps), channel.tps);
+            tpsPart = {
+                key: 'tps',
+                id: 'tps',
+                node: (_jsxs(Text, { children: [channel.working
+                            ? renderTpsGauge(channel.tps, peak)
+                            : renderTpsSparkline(channel.tpsSamples), ' ', speedColor(channel.tps, `${Math.round(channel.tps)}`), " tps"] })),
+            };
+        }
+        else {
+            tpsPart = {
+                key: 'tps',
+                id: 'tps',
+                node: _jsxs(Text, { dimColor: true, children: [Math.round(channel.tps), " t/s"] }),
+            };
+        }
+    }
+    // Background-job chip (ctx.jobs; /jobs): live count of running/stopping
+    // jobs, shown only while non-zero — a silent zero is not information.
+    // Not preference-gated: it is transient situational state like the goal
+    // chip, not chrome. Hover lists the live jobs with elapsed times.
+    // Marker is ●, NOT ⚙ (U+2699 is EA-ambiguous: ink measures 1 cell, CJK
+    // terminal fonts paint 2 → the count overlaps the glyph).
+    const liveJobs = (channel.backgroundJobs ?? NO_BACKGROUND_JOBS).filter(job => job.status === 'running' || job.status === 'stopping');
+    const jobsPart = liveJobs.length === 0
+        ? undefined
+        : {
+            key: 'jobs',
+            id: 'jobs',
+            node: (_jsxs(Text, { color: "toolDotTask", children: ['● ', liveJobs.length] })),
+        };
+    const leftFields = [
+        ...(statusBar.model
+            ? [{ key: 'model', node: _jsx(Text, { color: "inactiveShimmer", children: channel.model }) }]
+            : []),
+        ...(tpsPart !== undefined ? [tpsPart] : []),
+        ...(jobsPart !== undefined ? [jobsPart] : []),
+        ...contextParts,
+        ...(statusBar.tokens
+            ? [{
+                    key: 'tokens',
+                    id: 'tokens',
+                    node: (_jsxs(Text, { color: "inactiveShimmer", children: [formatTokens(channel.tokens.input), "\u2192", formatTokens(channel.tokens.output)] })),
+                }]
+            : []),
+        // Estimated session spend (≈¥): only for official DeepSeek providers
+        // whose model has a known price, and only once the estimate is non-zero
+        // (a fresh session showing ¥0.00 is noise). The trailing 峰/谷 marker
+        // shows the current billing window. Hover shows the breakdown.
+        ...(statusBar.cost && isDeepSeekOfficialProvider(channel.provider)
+            ? (() => {
+                const estimate = estimateSessionCostCny(channel.tokens, channel.model);
+                return estimate === undefined || estimate <= 0
+                    ? []
+                    : [{
+                            key: 'cost',
+                            id: 'cost',
+                            node: (_jsxs(Text, { color: "inactiveShimmer", children: [t('status-cost-label'), "\u00A5", estimate.toFixed(2), " ", t(isPeakHour() ? 'cost-now-peak' : 'cost-now-idle')] })),
+                        }];
+            })()
+            : []),
+    ];
+    const rightFields = [
+        // Goal chip first: session-level state outranks repo/location details.
+        ...(statusBar.goal && channel.goal !== undefined
+            ? [{
+                    key: 'goal',
+                    id: 'goal',
+                    node: _jsx(GoalStatusChip, { goal: channel.goal, minimal: channel.minimal }),
+                }]
+            : []),
+        ...(statusBar.gitBranch && channel.gitBranch
+            ? [
+                {
+                    key: 'git',
+                    node: _jsx(Text, { color: "professionalBlue", children: channel.gitBranch }),
+                },
+            ]
+            : []),
+        ...(statusBar.cwd
+            ? [{
+                    key: 'cwd',
+                    id: 'cwd',
+                    node: (_jsx(Text, { color: "inactiveShimmer", children: statusBar.compact ? basename(displayCwd) : displayCwd })),
+                }]
+            : []),
+        ...(statusBar.sessionTitle && channel.sessionTitle
+            ? [{
+                    key: 'title',
+                    id: 'title',
+                    // The title truncates mid-word when the right-aligned group
+                    // overflows; the tooltip carries the full string.
+                    tooltip: channel.sessionTitle,
+                    node: _jsx(Text, { dimColor: true, children: channel.sessionTitle }),
+                }]
+            : []),
+        // Short id last: a provenance tag trails the content it identifies, and
+        // the 8-char form is what the session log filename starts with, so a
+        // truncated rendering still names the right log for --resume.
+        ...(statusBar.sessionId && channel.agentId
+            ? [{
+                    key: 'sessionId',
+                    id: 'sessionId',
+                    node: _jsx(Text, { dimColor: true, children: `#${channel.agentId.slice(0, 8)}` }),
+                }]
+            : []),
+    ];
+    const hint = selectionActive
+        ? t('statusline-hint-select')
+        : channel.working
+            ? t('statusline-hint-working')
+            : statusBar.shortcutHint && !helpOpen
+                ? t('statusline-hint-shortcuts')
+                : '';
+    const activity = channel.workingActivity;
+    const showActivity = statusBar.activity &&
+        !channel.working &&
+        activity !== undefined &&
+        activity.line !== '' &&
+        activity.phase !== 'idle';
+    const showTrajectory = statusBar.trajectory && wake !== undefined;
+    const barWidth = columns - 4;
+    const barColors = themeName === 'light'
+        ? undefined
+        : { freeFill: '#2E3440', freeText: '#8D95A6' };
+    const barVisible = statusBar.contextBar &&
+        channel.contextBarEnabled &&
+        barWidth >= 14 &&
+        usage !== undefined &&
+        channel.contextWindow !== undefined;
+    // The supplemental-row readout for the hovered field: replaces the idle
+    // hint (never the activity line) while the pointer dwells on a field.
+    const detail = buildHoverDetail(hover, channel, usage, contextUsed);
+    const trailer = detail !== null
+        ? detail
+        : hint !== ''
+            ? _jsx(Text, { color: "inactiveShimmer", children: hint })
+            : null;
+    const compactFields = [...leftFields, ...rightFields];
+    const fullLeftFields = [
+        ...leftFields,
+        ...(ctxNode !== undefined ? [{ key: 'context', id: 'ctx', node: ctxNode }] : []),
+    ];
+    const hasStatusFields = compactFields.length > 0 || ctxNode !== undefined;
+    // The supplemental row is PERMANENTLY mounted (height pinned to 1)
+    // whenever the footer carries hoverable chrome — mounting it from nothing
+    // on hover is what made the footer grow mid-gesture and shoved the
+    // transcript up (user feedback). Idle it may sit blank: a stable footer
+    // outranks a reclaimable row, and hovering only ever swaps this line's
+    // content. Minimal mode keeps the old contract — no hover details, the
+    // row appears only for real content (which its defaults never produce).
+    const showSupplementalRow = (!channel.minimal && (hasStatusFields || barVisible)) ||
+        showActivity ||
+        showTrajectory ||
+        hint !== '';
+    return (_jsx(Box, { paddingX: 1, width: columns, flexShrink: 0, children: _jsxs(Box, { flexDirection: "column", width: "100%", children: [barVisible ? (_jsx(ContextBarView, { segments: channel.contextSegments, usedTokens: contextUsed ?? 0, contextWindow: channel.contextWindow ?? 0, width: barWidth, colors: barColors, onHover: segment => setHover(current => segment === null
+                        ? (current !== null && current.startsWith('segment:') ? null : current)
+                        : `segment:${segment}`) })) : null, hasStatusFields ? statusBar.compact ? (_jsxs(Box, { flexDirection: "row", justifyContent: "space-between", gap: 2, children: [_jsx(Box, { flexGrow: 1, flexShrink: 1, flexDirection: "row", overflow: "hidden", children: _jsx(FieldLine, { parts: compactFields, hoverProps: hoverProps }) }), ctxNode !== undefined ? (_jsx(Box, { flexShrink: 0, ...hoverProps('ctx'), children: _jsx(Text, { wrap: "truncate", children: ctxNode }) })) : null] })) : (_jsxs(Box, { flexDirection: "row", justifyContent: "space-between", gap: 2, children: [_jsx(Box, { flexGrow: 1, flexShrink: 1, flexDirection: "row", overflow: "hidden", children: _jsx(FieldLine, { parts: fullLeftFields, hoverProps: hoverProps }) }), _jsx(Box, { justifyContent: "flex-end", flexShrink: 2, flexDirection: "row", overflow: "hidden", children: _jsx(FieldLine, { parts: rightFields, hoverProps: hoverProps }) })] })) : null, showSupplementalRow ? _jsxs(Box, { height: 1, overflow: "hidden", flexDirection: "row", justifyContent: "space-between", gap: 2, children: [_jsxs(Box, { flexDirection: "row", flexGrow: 1, justifyContent: showActivity && trailer !== null ? 'space-between' : 'flex-start', gap: 2, children: [showActivity && activity !== undefined ? (_jsx(ActivityLine, { activity: activity, activityFrames: channel.activityFrames, warnPct: contextPressurePct(usage, channel.contextWindow), warnDanger: (contextPressurePct(usage, channel.contextWindow) ?? 0) >= 95 })) : trailer, showActivity ? trailer : null] }), showTrajectory && wake !== undefined ? (_jsx(MiniWake, { band: wake.band, hint: wake.hint, tick: wake.tick })) : null] }) : null] }) }));
+}
+/**
+ * The supplemental-row readout for a hovered footer field. Technical label
+ * tokens (ctx, free, read, sys…) stay unlocalized like the footer fields
+ * themselves; sentences go through t(). Returns null when nothing is
+ * hovered (or the hover outlived its data, which the field gating makes
+ * near-impossible).
+ */
+function buildHoverDetail(hover, channel, usage, contextUsed) {
+    if (hover === null)
+        return null;
+    const window = channel.contextWindow;
+    const dim = (label) => _jsx(Text, { dimColor: true, children: label });
+    if (hover.startsWith('segment:')) {
+        if (window === undefined || window <= 0 || contextUsed === undefined)
+            return null;
+        const key = hover.slice('segment:'.length);
+        const free = Math.max(0, window - contextUsed);
+        if (key === 'free') {
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('free '), formatTokens(free), " \u00B7 ", ((free / window) * 100).toFixed(1), "% ", t('status-detail-of-window')] }));
+        }
+        const segment = USED_SEGMENTS.find(s => s.key === key);
+        if (segment === undefined)
+            return null;
+        const tokens = channel.contextSegments[segment.key];
+        return (_jsxs(Text, { wrap: "truncate", children: [dim(`${segment.labels[1] ?? segment.key} `), formatTokens(tokens), " \u00B7", ' ', ((tokens / window) * 100).toFixed(1), "% ", t('status-detail-of-window')] }));
+    }
+    switch (hover) {
+        case 'ctx': {
+            if (contextUsed === undefined || window === undefined || window <= 0)
+                return null;
+            const free = Math.max(0, window - contextUsed);
+            // The hover payoff for the ctx ask: percent + counts + free, then the
+            // segment breakdown as the truncate-able tail (no bar — the row's
+            // in-place morph and the segment bar above already carry the gauge).
+            const segments = USED_SEGMENTS.map(segment => `${segment.labels[1] ?? segment.key} ${formatTokens(channel.contextSegments[segment.key])}`).join(' · ');
+            return (_jsxs(Text, { wrap: "truncate", children: [((contextUsed / window) * 100).toFixed(1), "% \u00B7", ' ', formatTokens(contextUsed), "/", formatTokens(window), " \u00B7 ", dim('free '), formatTokens(free), ' · ', segments] }));
+        }
+        case 'cache': {
+            const rate = formatCacheHitRate(usage);
+            if (usage === undefined || rate === undefined)
+                return null;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('cache '), rate, " \u00B7 ", dim('read '), formatTokens(usage.cacheRead), " \u00B7", ' ', dim('write '), formatTokens(usage.cacheWrite), " \u00B7 ", dim('input '), formatTokens(usage.input)] }));
+        }
+        case 'tps': {
+            if (channel.tps === undefined)
+                return null;
+            const stats = tpsStats(channel.tpsSamples, Date.now());
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('tps '), Math.round(channel.tps), " \u00B7 ", dim('avg60 '), stats.avg.toFixed(1), " \u00B7", ' ', dim('mean '), stats.mean.toFixed(1), " \u00B7 ", dim('p95 '), stats.p95.toFixed(1)] }));
+        }
+        case 'tokens': {
+            const { input, output } = channel.tokens;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('in '), input.toLocaleString(), " \u00B7 ", dim('out '), output.toLocaleString(), " \u00B7", ' ', dim('total '), (input + output).toLocaleString()] }));
+        }
+        case 'cost': {
+            const split = estimateSessionCostSplitCny(channel.tokens, channel.model);
+            if (split === undefined)
+                return null;
+            const { input, output, cacheRead } = channel.tokens;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('≈¥'), split.total.toFixed(2), " \u00B7 ", dim('peak '), "\u00A5", split.peak.toFixed(2), ' · ', dim('idle '), "\u00A5", split.idle.toFixed(2), " \u00B7 ", dim('in '), formatTokens(input), ' · ', dim('out '), formatTokens(output), " \u00B7 ", dim('cache '), formatTokens(cacheRead), ' · ', t('status-cost-note')] }));
+        }
+        case 'goal': {
+            const goal = channel.goal;
+            if (goal === undefined)
+                return null;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('goal '), goal.phase, " \u00B7 ", dim('r'), goal.roundsStarted, "/", goal.maxGoalRounds, " \u00B7", ' ', goal.objective] }));
+        }
+        case 'jobs': {
+            const live = (channel.backgroundJobs ?? NO_BACKGROUND_JOBS).filter(job => job.status === 'running' || job.status === 'stopping');
+            if (live.length === 0)
+                return null;
+            const shown = live.slice(0, 3);
+            const rest = live.length - shown.length;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('jobs '), shown.map(job => `${job.id} ${job.label} (${formatJobDuration(job)})`).join(' · '), rest > 0 ? ` · +${rest}` : ''] }));
+        }
+        case 'sessionId':
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('# '), channel.agentId, " \u00B7 ", t('status-detail-session-id')] }));
+        case 'cwd':
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('cwd '), channel.displayCwd] }));
+        case 'title':
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('title '), channel.sessionTitle] }));
+        default:
+            return null;
+    }
+}
+/** Return the prompt-cache hit rate, or nothing when usage is unavailable. */
+export function formatCacheHitRate(usage) {
+    if (usage === undefined)
+        return undefined;
+    const total = usage.input + usage.cacheRead + usage.cacheWrite;
+    if (!Number.isFinite(total) || total <= 0)
+        return undefined;
+    return `${((usage.cacheRead / total) * 100).toFixed(1)}%`;
+}
+function basename(path) {
+    const parts = path.split(/[\\/]/);
+    return parts[parts.length - 1] ?? path;
+}

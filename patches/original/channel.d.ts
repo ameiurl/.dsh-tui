@@ -14,6 +14,7 @@ import { type SessionModeSpec } from '../sessionModes.js';
 import { type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
 import { type SubagentState } from './subagents.js';
 export type { SubagentState } from './subagents.js';
+import { type BackgroundJobState, type BackgroundJobStatus } from './jobs.js';
 import type { SpinnerMode } from '../components/Spinner/spinnerMode.js';
 import { type ActivityState } from 'dsh-working-activity/status';
 import { type TuiWorkspaceCommand, type TuiWorkspaceCommandResult, type TuiWorkspaceTarget } from './workspaces.js';
@@ -138,6 +139,14 @@ export interface ToolViewPresenter {
 export interface SubagentControl {
     interrupt(agentId: string): boolean;
 }
+/**
+ * Background-job row control (`/jobs` panel): cancellation with the same
+ * authority the owning agent itself would use (`job_kill`). Returns false
+ * when the jobs service is absent or the job is unknown/foreign.
+ */
+export interface JobControl {
+    kill(id: string): boolean;
+}
 export interface SubagentRow {
     agentId: string;
     runId?: string;
@@ -156,6 +165,18 @@ export interface SubagentRow {
     stopReason?: string;
     error?: string;
 }
+/** One background job as a live transcript card (see `kind: 'job'`). */
+export interface JobRow {
+    id: string;
+    kind: string;
+    label: string;
+    status: BackgroundJobStatus;
+    detail?: string;
+    startedAt: number;
+    finishedAt?: number;
+    /** Mirrored `job_output` tail feeding the card's three-line waterfall. */
+    outputLines: readonly string[];
+}
 /**
  * One rendered transcript row. The DSH session log is the source of truth:
  * rows are derived from `session/event` records (and the initial
@@ -163,7 +184,7 @@ export interface SubagentRow {
  */
 export interface ChatRow {
     id: number;
-    kind: 'user' | 'assistant' | 'tool' | 'notice' | 'reasoning' | 'interrupt' | 'local' | 'local-output' | 'compact' | 'subagent';
+    kind: 'user' | 'assistant' | 'tool' | 'notice' | 'reasoning' | 'interrupt' | 'local' | 'local-output' | 'compact' | 'subagent' | 'job';
     /** Extra label for non-human user rows (e.g. `steering`). */
     label?: string;
     /** Actual execution location for `!command` rows. */
@@ -175,6 +196,8 @@ export interface ChatRow {
     tool?: ToolRow;
     /** Present on `subagent` rows; the subagent state snapshot. */
     subagent?: SubagentRow;
+    /** Present on `job` rows; the background-job state snapshot. */
+    job?: JobRow;
     /** Event wall-clock time (transcript-mode metadata, assistant rows). */
     time?: number;
     /** Present on `reasoning` rows once settled: thinking wall-clock duration. */
@@ -189,6 +212,11 @@ export interface ChatRow {
     /** True when loadOlder() restored this row from the log; restored rows are
      *  exempt from the next fold pass so a restore is not instantly undone. */
     restored?: boolean;
+    /** True on rows created by LIVE event handling (not replay/resume/fold
+     *  restore) — the smooth-streaming reveal animates freshly-arrived
+     *  content only; replayed history must paint complete. Set once at
+     *  creation; never mutated afterwards. */
+    fresh?: boolean;
 }
 /** One 计费时段（高峰/空闲）的 token 累计。 */
 export interface TokenBucket {
@@ -269,8 +297,8 @@ export interface CredentialStatus {
     source?: string;
     writable: boolean;
 }
-/** One entry of the latest todo-list snapshot (mirrors the session domain's
- *  `TodoItem`; declared locally for the same reason as {@link ChannelGoal}). */
+/** One entry of the latest todo-list snapshot (mirrors dsh-tool-todo's
+ *  `TodoItem`; declared locally so the adapter needn't depend on that plugin). */
 export interface TodoPanelItem {
     content: string;
     status: 'pending' | 'in_progress' | 'completed';
@@ -343,6 +371,8 @@ export interface Channel {
      *  the prompt-input border + session label chip accent (cc/sessionColors). */
     readonly sessionColor: string;
     readonly agentId: string;
+    /** TUI-owned generation that changes on every live Agent rebind. */
+    readonly agentBindingGeneration: number;
     /** `dsh-tui.recapOnOpen` (default on): auto-summarize the session tail
      *  into the dim AutoRecapRow when the session opens/resumes. Read live
      *  (settings service), so a `/settings` change applies on the next
@@ -433,6 +463,15 @@ export interface Channel {
     /** Whether the session-name chip shows on the prompt top border's right
      *  side (settings `dsh-tui.promptSessionLabel`; off by default). */
     readonly promptSessionLabel: boolean;
+    /** Whether the fullscreen draft editor is enabled (settings
+     *  `dsh-tui.expandEditor`; on by default) — gates the ⛶ affordance and
+     *  the expandEditor shortcut. */
+    readonly expandEditor: boolean;
+    /** Smooth streaming reveal (settings `dsh-tui.smoothStreaming`; on by
+     *  default): live-arriving assistant text, expanded thinking, and tool
+     *  call bodies paint through a ~30fps reveal instead of jumping per
+     *  provider burst. */
+    readonly smoothStreaming: boolean;
     /** Live status-footer visibility and compactness preferences. */
     readonly statusBar: Readonly<StatusBarConfig>;
     /** Whether the header's pixel whale art shows (settings `dsh-tui.whale`). */
@@ -526,6 +565,15 @@ export interface Channel {
     readonly subagents: readonly SubagentState[];
     /** Native control operations; unavailable providers safely return false. */
     readonly subagentControl: SubagentControl;
+    /**
+     * Background jobs of the current session (`run_in_background` tool work),
+     * live-tracked from the harness job registry. Empty when the composition
+     * has no jobs service. Drives the `/jobs` panel, transcript job cards and
+     * the status-line chip.
+     */
+    readonly backgroundJobs: readonly BackgroundJobState[];
+    /** Cancellation of a background job with the owning agent's authority. */
+    readonly jobControl: JobControl;
     subscribe: (listener: () => void) => () => void;
     /** Validate and persist a pasted image, returning its prompt placeholder. */
     stageImage(input: StagedImageInput): Promise<string>;
@@ -616,6 +664,8 @@ export interface Channel {
     readonly modeIndex: number;
     /** Shift+Tab: advance to the next configured session mode. */
     cycleMode(): Promise<void>;
+    /** Read the official permission preset roster and current identity. */
+    permissionPresets(): PermissionPresetSnapshot;
     /** The preset the CURRENT session runs under (issue #8), resolved from its
      *  log at create/resume time; undefined when no roster is mounted. */
     readonly agentPreset: string | undefined;
@@ -770,6 +820,27 @@ export interface PresetOption {
     broken?: string;
     isDefault: boolean;
 }
+export type PermissionPresetAvailability = 'runtime' | 'legacy' | 'unavailable';
+export interface PermissionPresetOption {
+    readonly value: string;
+    readonly name: string;
+    readonly description?: string;
+}
+export interface PermissionPresetCurrent {
+    readonly value: string;
+    readonly name: string;
+    readonly description?: string;
+    readonly kind: 'preset' | 'custom';
+}
+/**
+ * Adapter-owned permission roster snapshot. `options` never contains the
+ * official `custom` sentinel; it is represented only by `current`.
+ */
+export interface PermissionPresetSnapshot {
+    readonly availability: PermissionPresetAvailability;
+    readonly options: readonly PermissionPresetOption[];
+    readonly current?: PermissionPresetCurrent;
+}
 /** @internal */
 /** One user message submitted while the model was working, not yet claimed
  *  by a turn. `steer` lands at the next step boundary of the running turn;
@@ -799,6 +870,8 @@ export interface ChannelState {
     sessionColor: string;
     autoRecapOnOpen: boolean;
     agentId: string;
+    /** TUI-owned generation that changes on every live Agent rebind. */
+    agentBindingGeneration: number;
     model: string;
     provider: string;
     tokens: TokenUsage;
@@ -856,6 +929,10 @@ export interface ChannelState {
     foldTerminalCommand: boolean;
     /** Session-name chip on the prompt border (see the public Channel type). */
     promptSessionLabel: boolean;
+    /** Fullscreen draft editor gate (see the public Channel type). */
+    expandEditor: boolean;
+    /** Smooth streaming reveal (see the public Channel type). */
+    smoothStreaming: boolean;
     /** Status-footer preferences (see the public Channel type). */
     statusBar: StatusBarConfig;
     /** Apply a diff-layout change (see the public Channel type). */
@@ -870,6 +947,10 @@ export interface ChannelState {
     setFoldTerminalCommand(enabled: boolean): void;
     /** Apply a prompt session-name chip change. */
     setPromptSessionLabel(enabled: boolean): void;
+    /** Apply a fullscreen-editor gate change. */
+    setExpandEditor(enabled: boolean): void;
+    /** Apply a smooth-streaming reveal change. */
+    setSmoothStreaming(enabled: boolean): void;
     /** Apply status-footer preference changes. */
     setStatusBar(config: Partial<StatusBarConfig>): void;
     /** Whale header art switch (see the public Channel type). */
@@ -930,6 +1011,9 @@ export interface ChannelState {
     /** Active subagents roster (see the public Channel type). */
     subagents: readonly SubagentState[];
     subagentControl: SubagentControl;
+    /** Background jobs of the current session (see the public Channel type). */
+    backgroundJobs: readonly BackgroundJobState[];
+    jobControl: JobControl;
     subscribe: (listener: () => void) => () => void;
     stageImage(input: StagedImageInput): Promise<string>;
     /** @internal event bump (the public `notify(text)` posts a notification). */
@@ -980,6 +1064,8 @@ export interface ChannelState {
     modeIndex: number;
     /** Shift+Tab session-mode advance (see the public Channel type). */
     cycleMode(): Promise<void>;
+    /** Read the official permission preset roster and current identity. */
+    permissionPresets(): PermissionPresetSnapshot;
     /** The preset the current session runs under (see the public Channel type). */
     agentPreset: string | undefined;
     /** The roster's presets for the `/preset` picker (see the public Channel type). */
@@ -1091,6 +1177,12 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     /** Session-name chip on the prompt top border; default off (settings
      *  `dsh-tui.promptSessionLabel`). */
     promptSessionLabel?: boolean;
+    /** Fullscreen draft editor entry points; default on (settings
+     *  `dsh-tui.expandEditor`). */
+    expandEditor?: boolean;
+    /** Smooth streaming reveal; default on (settings
+     *  `dsh-tui.smoothStreaming`). */
+    smoothStreaming?: boolean;
     /** Status-footer field visibility and compactness. */
     statusBar?: Partial<StatusBarConfig>;
     /** Show the header's pixel whale art; default on. */

@@ -28,6 +28,11 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
   "$TUI_PKG/lib/types/dsh-adapter/channel.d.ts|channel.d.ts"
   "$TUI_PKG/lib/types/components/sessions/SessionListRow.js|SessionListRow.js"
+  "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
+  "$TUI_PKG/lib/types/screens/Chat.js|Chat.js"
+  "$TUI_PKG/lib/types/screens/StatusLine.js|StatusLine.js"
+  "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
+  "$TUI_PKG/lib/types/i18n.js|i18n.js"
 )
 
 needs_apply=0
