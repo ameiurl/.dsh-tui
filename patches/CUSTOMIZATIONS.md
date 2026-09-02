@@ -71,11 +71,14 @@
   历史会话（扁平列表）；文案按此对齐（`全部项目`/`all projects`）。
 - **验证**：打开 resume，应看到所有目录的历史会话，而非只有当前目录。
 
-### F4 — vim 模式：默认开启，且 NORMAL 起手
-- **文件**：`…/dsh-tui/lib/types/components/PromptInput.js`
-- **行为**：启动即 vim ON、submode=NORMAL（键盘按 vim 键位走）；`/vim` 仍可切换；
-  使能时停在 NORMAL（`i/a/o` 进 INSERT）。
-- **验证**：新开输入框，按字母应是 vim 键位而非上屏，底部见 `-- NORMAL --`。
+### F4 — vim 模式：默认开启，且 INSERT 起手
+- **文件**：`…/dsh-tui/lib/types/components/PromptInput.js`（初始 submode + `/vim` 使能
+  落点）+ `…/screens/Chat.js`（状态栏指示初始值同步为 INSERT）
+- **行为**：启动即 vim ON、submode=INSERT —— 开箱可直接打字、不打断输入；按 `Esc`
+  进 NORMAL 用 vim 键位（`h/j/k/l`、`d/w`…），`i/a/o` 回 INSERT；`/vim` 仍可切换，
+  使能时同样落在 INSERT 起手（与默认一致）。
+- **验证**：新开输入框即可直接输入（底部状态栏见 `-- INSERT --`）；按 `Esc` 出现
+  `-- NORMAL --` 且字母键走 vim 键位，`i` 回 INSERT。
 
 ### F5 — vim 指示从输入框移到底部状态栏
 - **文件**：`PromptInput.js`（上报）+ `…/lib/types/screens/Chat.js`（持状态/接线）+

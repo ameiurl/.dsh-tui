@@ -1,5 +1,5 @@
---- /home/amei/.dsh-tui/patches/original/Chat.js	2026-09-02 14:59:34.556993563 +0800
-+++ /home/amei/.dsh-tui/patches/backup/Chat.js	2026-09-02 14:59:34.559826998 +0800
+--- original/Chat.js	2026-09-02 15:22:42.232762781 +0800
++++ backup/Chat.js	2026-09-02 15:38:08.268978892 +0800
 @@ -707,6 +707,10 @@
      // Live view into the prompt's text for the Ctrl+C rule (clears text when
      // non-empty; the double-press exit only arms on an empty input).
@@ -7,7 +7,7 @@
 +    // Vim-mode indicator state: PromptInput reports every toggle/submode
 +    // switch through onVimChange; the status line renders `-- INSERT --` /
 +    // `-- NORMAL --` after the cwd (moved out of the input box).
-+    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: false });
++    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: true });
      // Publish the external-injection controller (dsh.nvim etc.) every render so
      // the adapter-owned socket can append to the prompt and submit. `submit`
      // mirrors an Enter press: `channel.submit` routes through the DSH inbox

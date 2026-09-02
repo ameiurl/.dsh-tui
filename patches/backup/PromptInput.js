@@ -309,13 +309,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
      * i/a/o (…) return to INSERT. Enabled in insert mode so the transition
      * is seamless; the mode is session-scoped (not persisted).
      */
-    // vim mode is ON by default and starts in NORMAL submode (user
-    // preference); `/vim` still toggles it off/on.
+    // vim mode is ON by default and starts in INSERT submode (user
+    // preference — type straight away; Esc drops to NORMAL for vim keys).
+    // `/vim` still toggles it off/on.
     const [vimEnabled, setVimEnabled] = React.useState(true);
     /** Insert submode (false = vim NORMAL). */
-    const [vimInsert, setVimInsert] = React.useState(false);
+    const [vimInsert, setVimInsert] = React.useState(true);
     const vimEnabledRef = React.useRef(true);
-    const vimInsertRef = React.useRef(false);
+    const vimInsertRef = React.useRef(true);
     vimEnabledRef.current = vimEnabled;
     vimInsertRef.current = vimInsert;
     /** Report vim mode changes to the caller (status-line indicator): called
@@ -438,14 +439,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
                 const next = !vimEnabledRef.current;
                 vimEnabledRef.current = next;
                 setVimEnabled(next);
-                // /vim lands in NORMAL mode when ENABLING (user preference —
-                // keys are vim keys from the start; i/a/o return to INSERT).
+                // Enabling lands in INSERT (user preference — vim is ready but
+                // typing continues; Esc drops to NORMAL for vim keys).
                 // Turning the mode off also clears the undo stack — a later
                 // re-enable must never `u` its way back past edits made while
                 // vim was off.
-                vimInsertRef.current = !next;
-                setVimInsert(!next);
-                notifyVimChange(next, !next);
+                vimInsertRef.current = true;
+                setVimInsert(true);
+                notifyVimChange(next, true);
                 vimPendingRef.current = '';
                 vimUndoRef.current = [];
                 return next;

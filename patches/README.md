@@ -52,7 +52,7 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.1-rc.2`,
 | `dsh-tui .../channel.d.ts` | `ToolFileDiff` type gains optional `oldStart`/`newStart` |
 | `dsh-tui .../sessions/SessionListRow.js` | session list title shows the full text (no `truncateWidth` cut) — one line, no wrap |
 | `dsh-tui .../screens/SessionBrowser.js` | resume browser drops the workspace rail & current-directory scope — always shows the full session history flat |
-| `dsh-tui .../components/PromptInput.js` | vim mode ON by default starting in NORMAL (`/vim` still toggles); `INSERT/NORMAL` text moved OUT of the input box and reported via `onVimChange`; ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
+| `dsh-tui .../components/PromptInput.js` | vim mode ON by default starting in INSERT (type straight away; Esc enters NORMAL for vim keys; `/vim` still toggles, enabling also lands in INSERT); `INSERT/NORMAL` text moved OUT of the input box and reported via `onVimChange`; ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
 | `dsh-tui .../screens/Chat.js` | holds the vim-mode state, passes `onVimChange` to PromptInput and `vim` to StatusLine |
 | `dsh-tui .../screens/StatusLine.js` | renders `-- INSERT --` / `-- NORMAL --` right after the cwd in the status line |
 | `dsh-tui .../i18n.js` | resume/session-browser copy aligned to the no-workspace-rail browser (`全部项目` / `all projects` scope label + hints) |

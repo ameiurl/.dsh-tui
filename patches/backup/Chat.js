@@ -710,7 +710,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // Vim-mode indicator state: PromptInput reports every toggle/submode
     // switch through onVimChange; the status line renders `-- INSERT --` /
     // `-- NORMAL --` after the cwd (moved out of the input box).
-    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: false });
+    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: true });
     // Publish the external-injection controller (dsh.nvim etc.) every render so
     // the adapter-owned socket can append to the prompt and submit. `submit`
     // mirrors an Enter press: `channel.submit` routes through the DSH inbox
