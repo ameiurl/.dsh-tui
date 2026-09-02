@@ -1,56 +1,3 @@
-{"text":"/quit","ts":1787529643187}
-{"text":"/resume","ts":1787529658555}
-{"text":"词级背景色是 #008000，字体不加粗","ts":1787529693096}
-{"text":"/quit","ts":1787529777331}
-{"text":"/resume","ts":1787529785635}
-{"text":"词级diff字体不变色","ts":1787529849751}
-{"text":"/quit","ts":1787529882118}
-{"text":"/resume","ts":1787529887108}
-{"text":"/clear","ts":1787530870503}
-{"text":"@modules/admin/models/TransactionImportForm.php 把\\Yii::info 改成debug_log","ts":1787530888147}
-{"text":"/quit","ts":1787531196487}
-{"text":"/resume","ts":1787531203836}
-{"text":"列出这个主题修改的文件","ts":1787531472188}
-{"text":"/quit","ts":1787533468358}
-{"text":"帮我默认模型改deepseek-v4-flash","ts":1787533759998}
-{"text":"@settings.yaml 这边改没有生效？","ts":1787533842789}
-{"text":"/quit","ts":1787534914446}
-{"text":"在admin_frontend中， @src/views/statistic/userWenpiaoList/index.vue 搜索框增加 搜索团队会员，框里输入手机号，搜索用户伞下的用户，包括用户自己，参考@modules/admin/models/UserForm.php getTeamMemberIds函数","ts":1787535689842}
-{"text":"1. 增加一个导出功能，导出的字段有：“用户姓名”、“用户编号（交易所ID）”、“待配票数”","ts":1787536068692}
-{"text":"导出增加手机号","ts":1787538284036}
-{"text":"/clear","ts":1787539919481}
-{"text":"在store_uniapp中，@user/wenpiao-exchange/index.vue 后端接口判断一下，用户未激活不能兑换。用户激活判断 cyy_user_extend表","ts":1787539973051}
-{"text":"/resume","ts":1787540235117}
-{"text":"导出的时候有两个文件 一个是用户文票列表，一个是undefined？","ts":1787540260357}
-{"text":"/quit","ts":1787544872176}
-{"text":"/resume","ts":1787556754004}
-{"text":"/quit","ts":1787558471217}
-{"text":"@modules/client/behaviors/StoreAdminLogin.php 31行，出现了不是入驻商也要登录入驻商的情况?","ts":1787629326397}
-{"text":"@jobs/DeferredImportRebateJob.php 78行，first_price是7.5，最后返利只有0.36，正常吗","ts":1787804112121}
-{"text":"返利订单不止0.36,还很多","ts":1787804801586}
-{"text":"本地查不到日志","ts":1787804849536}
-{"text":"需要哪些日志，我提供","ts":1787804861689}
-{"text":"price_send 是0.45","ts":1787805192276}
-{"text":"分流80%","ts":1787805209204}
-{"text":"user.reward 不止剩于0.45","ts":1787805390505}
-{"text":"@modules/admin/models/TransactionImportForm.php 1663行，如果不够查找下一个返利订单，不能只返利部份","ts":1787806764714}
-{"text":"@modules/common/controllers/DataFixController.php 在这个文件加个修复函数，我给出订单号，如果只扣部份返利的需要补上。","ts":1787807801163}
-{"text":"syntax error, unexpected '??' (T_COALESCE), expecting :: (T_PAAMAYIM_NEKUDOTAYIM)\n1. in /www/wwwroot/www.haizhiyue.com.cn/modules/common/controllers/DataFixController.php","ts":1787820598220}
-{"text":"/clear","ts":1787835661213}
-{"text":"@modules/admin/controllers/TransactionController.php 777行，自救积分，如果是user_id是48伞下的用户，从明天开始计算，伞下参考@modules/client/controllers/v1/ShareController.php 284行。","ts":1787835789843}
-{"text":"/resume","ts":1787836265043}
-{"text":"diff 修改的内容不要隐藏或只显示几行","ts":1787836333481}
-{"text":"/quit","ts":1787836463138}
-{"text":"/resume","ts":1787837590875}
-{"text":"/clear","ts":1787837643199}
-{"text":"@modules/common/controllers/DataFixController.php actionFixPartialRebate 这个是直推的补上漏的返利，现在竞拍订单导入也要补上，返利的程序是@jobs/DeferredImportRebateJob.php 71行","ts":1787837758493}
-{"text":"/quit","ts":1787837993503}
-{"text":"/resume","ts":1787837999230}
-{"text":"备注没改？","ts":1787838618549}
-{"text":"/quit","ts":1787839941478}
-{"text":"/update","ts":1787839954743}
-{"text":"/quit","ts":1787840619168}
-{"text":"/resume","ts":1787840630204}
 {"text":"/quit","ts":1787840679047}
 {"text":"/resume","ts":1787840852527}
 {"text":"/quit","ts":1787840891534}
@@ -198,3 +145,56 @@
 {"text":"/命令 有让选择的，现在不能上下切换了","ts":1788186943771}
 {"text":"/quit","ts":1788187193081}
 {"text":"/resume","ts":1788187218039}
+{"text":"/quit","ts":1788319107703}
+{"text":"/resume","ts":1788319115275}
+{"text":"/quit","ts":1788319142532}
+{"text":"/resume","ts":1788319149615}
+{"text":"/quit","ts":1788319185001}
+{"text":"/resume","ts":1788319192275}
+{"text":"/quit","ts":1788319218277}
+{"text":"/resume","ts":1788319237973}
+{"text":"hi","ts":1788319758263}
+{"text":"/quit","ts":1788319760811}
+{"text":"在admin_frontend中，@src/views/tools/auction/import/index.vue 头部增加一个标签，提货设置，然后可以设置  是否赠送增值积分 元启厅、鸿运厅、鑫瑞厅、元宝厅 列出这些展厅，可以勾选保存；@modules/client/controllers/v1/UserController.php 225行，在这边判断，是否勾选的展厅，如果是已勾选的展厅才生成返利订单。需求不明确跟我确认一下。","ts":1788321679470}
+{"text":"/permission","ts":1788322064181}
+{"text":"/permission danger-full-access","ts":1788322085885}
+{"text":"开启权限了，直接修改到admin_frontend","ts":1788322121627}
+{"text":"把 勾选展厅 改成 是否赠送增值积分展厅，去掉 是否赠送增值积分 @modules/client/controllers/v1/UserController.php 277行改回去","ts":1788324096732}
+{"text":"导入数据 的时候也要判断是否是 是否赠送增值积分展厅,如果不在设置里，不会自动生成订单","ts":1788324423379}
+{"text":"/permission","ts":1788324720386}
+{"text":"[2026-09-02 12:48:45] ⚠️ [mallphp] 错误 [12], 重试 1/10 (4s)... 出现在这个问题？现有网络是有线的。公司的电脑会，家里的电脑不会","ts":1788325462831}
+{"text":"/quit","ts":1788325502447}
+{"text":"/resume","ts":1788325512004}
+{"text":"/quit","ts":1788325525352}
+{"text":"/resume","ts":1788327544876}
+{"text":"/quit","ts":1788327966318}
+{"text":"/resume","ts":1788330029546}
+{"text":"/quit","ts":1788330036905}
+{"text":"/resume","ts":1788330105313}
+{"text":"/quit","ts":1788330130945}
+{"text":"/resume","ts":1788330172436}
+{"text":"/quit","ts":1788330187310}
+{"text":"/resume","ts":1788330198767}
+{"text":"/quit","ts":1788330202693}
+{"text":"/resume","ts":1788330211375}
+{"text":"/quit","ts":1788330216378}
+{"text":"/resume","ts":1788330234232}
+{"text":"/quit","ts":1788330255759}
+{"text":"/update","ts":1788330278999}
+{"text":"/quit","ts":1788330306783}
+{"text":"/resume","ts":1788330318118}
+{"text":"/quit","ts":1788330452086}
+{"text":"/resume","ts":1788331228883}
+{"text":"/quit","ts":1788331251610}
+{"text":"/resume","ts":1788331260607}
+{"text":"/quit","ts":1788331555525}
+{"text":"/resume","ts":1788331564290}
+{"text":"/quit","ts":1788331906692}
+{"text":"/resume","ts":1788331916724}
+{"text":"/vim","ts":1788331926349}
+{"text":"/quit","ts":1788332418056}
+{"text":"/resume","ts":1788332431208}
+{"text":"/quit","ts":1788332545387}
+{"text":"resume","ts":1788332956791}
+{"text":"/resume","ts":1788332959655}
+{"text":"/quit","ts":1788332964809}
