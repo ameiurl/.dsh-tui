@@ -1,5 +1,7 @@
 # Claude Code style diff in dsh-tui
 
+> 📖 **升级后把全部定制补回来，请看 [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md)**（功能清单 + 重打手册）。
+
 Makes `dsh --profile dsh-tui` render edit/write diffs exactly like Claude Code:
 **unified layout with real line numbers, context lines and `+`/`-` markers**
 (instead of the default side-by-side panes), plus a Claude Code diff palette.
