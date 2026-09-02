@@ -1,6 +1,6 @@
 # Claude Code style diff in dsh-tui
 
-Makes `dsh --profile tui` render edit/write diffs exactly like Claude Code:
+Makes `dsh --profile dsh-tui` render edit/write diffs exactly like Claude Code:
 **unified layout with real line numbers, context lines and `+`/`-` markers**
 (instead of the default side-by-side panes), plus a Claude Code diff palette.
 
@@ -38,9 +38,9 @@ was built against (`patch-base-version`).
 | `original/` | pristine upstream files (from the exact npm versions listed below) |
 | `diffs/*.patch` | unified diffs original→patched — **view what was changed**: `cat ~/.dsh-tui/patches/diffs/AssistantToolUseMessage.patch` |
 
-Sources: `@deepseek-ai/dsh-tool-fs@0.1.0-rc.8`,
-`@deepseek-ai/dsh-tool-str-replace-editor@0.1.0-rc.8`,
-`@deepseek-harness-tui/dsh-tui@0.10.0-beta.3`.
+Sources: `@deepseek-ai/dsh-tool-fs@0.1.1-rc.2`,
+`@deepseek-ai/dsh-tool-str-replace-editor@0.1.1-rc.2` (byte-identical to 0.1.0-rc.8),
+`@deepseek-harness-tui/dsh-tui@0.10.0-beta.4`.
 
 | file | change |
 | --- | --- |
@@ -49,14 +49,11 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.0-rc.8`,
 | `dsh-tui .../AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded (`DIFF_BODY_MAX_LINES = Infinity`) |
 | `dsh-tui .../channel.d.ts` | `ToolFileDiff` type gains optional `oldStart`/`newStart` |
 | `dsh-tui .../sessions/SessionListRow.js` | session list title shows the full text (no `truncateWidth` cut) — one line, no wrap |
-| `dsh-tui .../components/PromptInput.js` | vim mode indicator moved OUT of the input box: reports every toggle/submode switch via `onVimChange` |
+| `dsh-tui .../screens/SessionBrowser.js` | resume browser drops the workspace rail & current-directory scope — always shows the full session history flat |
+| `dsh-tui .../components/PromptInput.js` | vim mode ON by default starting in NORMAL (`/vim` still toggles); `INSERT/NORMAL` text moved OUT of the input box and reported via `onVimChange`; ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
 | `dsh-tui .../screens/Chat.js` | holds the vim-mode state, passes `onVimChange` to PromptInput and `vim` to StatusLine |
 | `dsh-tui .../screens/StatusLine.js` | renders `-- INSERT --` / `-- NORMAL --` right after the cwd in the status line |
-
-Additional user preferences in the renderer patch: hovering a tool card never
-changes its background (only selection highlights), and NEW-file diffs preview
-only the `+N` stat plus the first 10 lines (`… +N lines (ctrl+o to expand)`,
-Ctrl+O shows everything) — edit/delete diffs stay uncapped.
+| `dsh-tui .../i18n.js` | resume/session-browser copy aligned to the no-workspace-rail browser (`全部项目` / `all projects` scope label + hints) |
 
 The component patch is version-sensitive: `apply-diff-patches.sh` refuses to
 install a backup that no longer passes `node --check` against a newer upstream.

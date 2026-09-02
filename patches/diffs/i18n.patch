@@ -1,6 +1,6 @@
---- original/i18n.js	2026-08-31 22:11:11.692038036 +0800
-+++ backup/i18n.js	2026-08-31 22:11:11.692905580 +0800
-@@ -613,7 +613,7 @@
+--- /home/amei/.dsh-tui/patches/original/i18n.js	2026-09-02 14:59:34.669982389 +0800
++++ /home/amei/.dsh-tui/patches/backup/i18n.js	2026-09-02 14:59:34.674549979 +0800
+@@ -679,7 +679,7 @@
      'session-kind-fork': { zh: '回溯分支', en: 'Rewound branch' },
      'session-kind-subagent': { zh: '子 agent 运行', en: 'Sub-agent run' },
      'session-project-unknown': { zh: '（未记录目录）', en: '(no directory recorded)' },
@@ -9,7 +9,7 @@
      'session-search-placeholder': { zh: '输入以搜索 · {{scope}}', en: 'Type to search · {{scope}}' },
      'session-workspace-scope': { zh: '工作目录', en: 'Working directory' },
      'session-workspace-switch': { zh: '← 选择目录', en: '← choose directory' },
-@@ -649,9 +649,9 @@
+@@ -715,9 +715,9 @@
      // Three widths of the same hint. The browser picks the widest that fits the
      // terminal, because a hint that wraps costs the rows the list needs and can
      // push its own tail off the bottom of the screen.

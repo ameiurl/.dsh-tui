@@ -1,5 +1,5 @@
---- original/SessionBrowser.js	2026-08-31 22:06:32.070920817 +0800
-+++ backup/SessionBrowser.js	2026-08-31 22:06:32.071666908 +0800
+--- patches/original/SessionBrowser.js	2026-09-02 14:51:05.595064146 +0800
++++ patches/backup/SessionBrowser.js	2026-09-02 14:51:05.599443868 +0800
 @@ -6,21 +6,19 @@
  import { SearchBox } from '../components/SearchBox.js';
  import { SessionListRow } from '../components/sessions/SessionListRow.js';

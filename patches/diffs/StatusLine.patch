@@ -1,5 +1,5 @@
---- original/StatusLine.js	2026-08-31 21:48:50.623903471 +0800
-+++ backup/StatusLine.js	2026-08-31 21:48:50.629017523 +0800
+--- /home/amei/.dsh-tui/patches/original/StatusLine.js	2026-09-02 14:59:34.606546242 +0800
++++ /home/amei/.dsh-tui/patches/backup/StatusLine.js	2026-09-02 14:59:34.608944243 +0800
 @@ -29,7 +29,7 @@
      const visible = parts.filter(part => part.node !== null && part.node !== undefined && part.node !== false);
      return (_jsx(_Fragment, { children: visible.map((part, index) => (_jsxs(React.Fragment, { children: [index > 0 ? _jsx(Text, { dimColor: true, children: " \u00B7 " }) : null, _jsx(Box, { flexShrink: 1, ...(part.id === undefined ? {} : hoverProps(part.id)), children: part.tooltip === undefined || part.tooltip === '' ? (_jsx(Text, { wrap: "truncate", children: part.node })) : (_jsx(TooltipTarget, { content: part.tooltip, children: _jsx(Text, { wrap: "truncate", children: part.node }) })) })] }, part.key))) }));
@@ -9,7 +9,7 @@
      const { columns } = useTerminalSize();
      const [themeName] = useTheme();
      const [hover, setHover] = React.useState(null);
-@@ -209,6 +209,14 @@
+@@ -212,6 +212,14 @@
                      node: (_jsx(Text, { color: "inactiveShimmer", children: statusBar.compact ? basename(displayCwd) : displayCwd })),
                  }]
              : []),

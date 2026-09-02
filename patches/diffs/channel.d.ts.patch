@@ -1,5 +1,5 @@
---- original/channel.d.ts	2026-08-31 21:49:00.860700373 +0800
-+++ backup/channel.d.ts	2026-08-31 21:48:50.626834484 +0800
+--- original/channel.d.ts	2026-09-02 14:38:31.684976332 +0800
++++ backup/channel.d.ts	2026-09-02 14:38:31.702584394 +0800
 @@ -62,6 +62,10 @@
      /** Prior content, or null for a new file / no before-image. */
      readonly oldText: string | null;

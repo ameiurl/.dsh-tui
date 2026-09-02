@@ -9,9 +9,8 @@ import { SplitDiffView } from '../SplitDiffView.js';
 import { SyntaxText } from '../SyntaxText.js';
 import { useTooltip } from '../Tooltip.js';
 import { formatDuration } from '../../cc/format.js';
-import { getRevealVersion, revealLinesOf, snapReveal, subscribeReveal } from '../smoothReveal.js';
-const NOOP_REVEAL_SUBSCRIBE = (_listener) => () => { };
-const getNoRevealVersion = () => 0;
+import { revealLinesOf, snapReveal } from '../smoothReveal.js';
+import { useRevealVersion } from '../../hooks/useRevealVersion.js';
 /** Tool display names: DSH emits lowercase tool ids (`bash`); Claude Code
  *  shows capitalized names (`Bash`). Map the common ones, fall back to the
  *  id with its first letter uppercased. */
@@ -276,7 +275,10 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // MessageList owns the single production subscription and passes a version
     // prop only to active reveal rows. Standalone consumers keep the fallback
     // subscription so the component contract remains self-contained.
-    React.useSyncExternalStore(revealVersion === undefined ? subscribeReveal : NOOP_REVEAL_SUBSCRIBE, revealVersion === undefined ? getRevealVersion : getNoRevealVersion);
+    // DefaultLane on purpose (useRevealVersion): a useSyncExternalStore wakeup
+    // forces a SyncLane render per tick, and repeated sync commits ending with
+    // streaming work pending feed React's nested-update counter (error #185).
+    useRevealVersion(revealVersion === undefined);
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
     const displayArgs = verbose ? tool.argsFull ?? tool.argsText : tool.argsText;

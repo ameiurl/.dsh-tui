@@ -60,7 +60,10 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
             node: _jsx(Text, { color: "inactiveShimmer", children: channel.reasoningEffort }),
         });
     }
-    if (statusBar.mode && channel.modeIndex > 0) {
+    const modeNeedsExplicitMarker = channel.mode.plan === true
+        || channel.mode.sandbox === 'danger-full-access'
+        || channel.mode.approval === 'never';
+    if (statusBar.mode && (channel.modeIndex > 0 || modeNeedsExplicitMarker)) {
         contextParts.push({
             key: 'mode',
             node: (_jsx(Text, { color: channel.mode.plan === true ? 'planMode' : 'warning', children: modeDisplayName(channel.mode) })),

@@ -1,5 +1,5 @@
---- original/AssistantToolUseMessage.js	2026-08-31 21:48:50.617892833 +0800
-+++ backup/AssistantToolUseMessage.js	2026-08-31 21:48:50.624981232 +0800
+--- original/AssistantToolUseMessage.js	2026-09-02 14:38:31.682369696 +0800
++++ backup/AssistantToolUseMessage.js	2026-09-02 14:38:31.699363468 +0800
 @@ -1,5 +1,6 @@
  import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
  import React from 'react';
@@ -7,7 +7,7 @@
  import { extname } from 'node:path';
  import { Box, Text, useTerminalSize } from '../../ui.js';
  import { stringWidth } from '../../ink/stringWidth.js';
-@@ -64,9 +65,14 @@
+@@ -63,9 +64,14 @@
  }
  /** CC's collapsed text body keeps 3 lines (renderTruncatedContent). */
  const TEXT_BODY_MAX_LINES = 3;
@@ -25,13 +25,15 @@
  /** Minimum terminal width for the two-pane diff: below this the panes
   *  would squeeze under ~50 columns each and the unified view reads better. */
  const SPLIT_DIFF_MIN_COLS = 110;
-@@ -101,9 +107,117 @@
+@@ -100,9 +106,119 @@
          lines.pop();
      return lines;
  }
 -/** Diff hunks → add/del rows. The header already carries the path for the
 - *  common single-hunk case; with several hunks a path row separates files
 - *  and `⋯` separates scattered hunks of one file (upstream DiffBlock). */
++/** Strip the shared leading whitespace before word-diffing: otherwise the
++ *  whole indent reads as one changed blob (SplitDiffView's trick). */
 +function wordSegments(oldLine, newLine) {
 +    const oldIndent = /^\s*/.exec(oldLine)?.[0] ?? '';
 +    const newIndent = /^\s*/.exec(newLine)?.[0] ?? '';
@@ -146,7 +148,7 @@
  function diffLines(diffs) {
      const out = [];
      let prevPath;
-@@ -115,15 +229,53 @@
+@@ -114,15 +230,52 @@
                  out.push(dim('⋯'));
          }
          prevPath = diff.path;
@@ -201,11 +203,10 @@
      return out;
  }
 +
-+
  /** Join the text blocks of a view's content payload (read/generic cards). */
  function contentLines(content) {
      const text = (content ?? []).map(block => (block.type === 'text' ? block.text ?? '' : '')).join('').trimEnd();
-@@ -334,7 +486,10 @@
+@@ -336,7 +489,10 @@
              body = [dim(`Running… (${formatDuration(Math.max(0, Date.now() - (tool.startedAt ?? Date.now())))})`)];
          }
      }
@@ -217,7 +218,7 @@
      const bodySource = body.map(line => line.text).join('\n');
      const argsLanguage = jsonArgsLanguage(displayArgs);
      // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
-@@ -364,39 +519,29 @@
+@@ -366,39 +522,29 @@
          : ordinaryToolBackground === 'strong'
              ? 'toolCardBackground'
              : undefined;
