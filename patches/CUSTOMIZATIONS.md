@@ -50,9 +50,15 @@
   - tool 包改动：hunk 携带 1-based `oldStart`/`newStart`（`computeHunkDiffs`/
     `presentationMeta`）；`str_replace` 返回 `{message,before,after}` + 结果期带行号
     hunk diff（`presentResult`，模型可见输出文本不变）。
-  - **个人偏好**：hover 工具卡不变底色（只有选中高亮）；NEW 文件 diff 只预览 `+N` +
-    前 10 行（`… +N lines (ctrl+o to expand)`，Ctrl+O 展开全部）。
-- **验证**：触发一次 Edit/Write，看是否 CC 统一式（行号 + 绿红底）；NEW 文件预览行数。
+  - **个人偏好**（以下 diff 行为是重移植时最容易弄丢的，务必保留）：
+    - **diff 正文永不隐藏 / 不折叠**：`DIFF_BODY_MAX_LINES = Infinity` —— 编辑/删除
+      diff 全量展示，正文不出现 `… +N lines` 折叠行。
+    - **新建文件只预览前 10 行**：`NEW_FILE_DIFF_MAX_LINES = 11` —— write 建新文件时
+      只显示 `+N` stat 行 + 前 10 行内容，其余以 `… +N lines (ctrl+o to expand)` 收起；
+      Ctrl+O（verbose）展开全部。
+    - hover 工具卡不变底色（只有选中高亮）。
+- **验证**：触发一次 Edit/Write，看是否 CC 统一式（行号 + 绿红底）；NEW 文件只出
+  前 10 行（`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行。
 
 ### F2 — 会话列表标题不截断
 - **文件**：`…/dsh-tui/lib/types/components/sessions/SessionListRow.js`
