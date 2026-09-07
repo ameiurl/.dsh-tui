@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Box, Text } from '../../ui.js';
 import { t } from '../../i18n.js';
 import { useTooltip } from '../Tooltip.js';
-import { formatBytes, formatWhen, kindMark, titleColor, truncateWidth, } from '../../sessions/format.js';
+import { formatAbsolute, formatBytes, formatWhen, kindMark, titleColor, truncateWidth, } from '../../sessions/format.js';
 /**
  * One session in the browser's list: a title line and a metadata line.
  *
@@ -24,6 +24,23 @@ export function SessionListRow({ session, width, depth, focused, pinned, now, on
     const mark = kindMark(session.kind);
     const [hovered, setHovered] = useState(false);
     const pinTooltip = useTooltip(t(pinned ? 'resume-menu-unpin' : 'resume-menu-pin'));
+    // Title hover tooltip: the row truncates a long title mid-word; when it
+    // does, the float leads with the full title. The absolute timestamp and
+    // cwd ride along in every case — the facts line shows only relative time
+    // and never the working directory, so that pair is always new information
+    // for telling look-alike sessions apart.
+    const titleText = session.label ?? session.title.text;
+    const titleBudget = body - 2 - (mark === undefined ? 0 : 2);
+    const shownTitle = truncateWidth(titleText, titleBudget);
+    const titleTooltip = useTooltip(() => {
+        const parts = [];
+        if (shownTitle !== titleText)
+            parts.push(titleText);
+        parts.push(formatAbsolute(session.updatedAt));
+        if (session.cwd !== '')
+            parts.push(session.cwd);
+        return parts.join('\n');
+    });
     const facts = [formatWhen(session.updatedAt, now)];
     if (session.branch !== undefined)
         facts.push(session.branch);

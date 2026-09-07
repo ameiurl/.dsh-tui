@@ -10,6 +10,7 @@ import { hasPath } from '../dsh-adapter/settingsEditor.js';
 import { planReload } from '../reload.js';
 import { AlternateScreen, Box, Text, useInput, ScrollBox, useTheme, useTerminalSize } from '../ui.js';
 import * as tuiKit from '../ui.js';
+import { usePageInset } from '../components/PageMargin.js';
 import { POINTER } from '../cc/figures.js';
 import { isPlainReturnInput, modLabel } from '../utils/modifiers.js';
 import { actionMatches } from '../utils/keymap.js';
@@ -1892,7 +1893,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 return true;
             case 'vim': {
                 // `/vim`（CC vim 编辑模式）：切换输入框的 vim 编辑开关。状态在
-                // PromptInput 内部（controllerRef.toggleVim），每次切换落回 normal
+                // PromptInput 内部（controllerRef.toggleVim），每次切换落回 insert
                 // 子模式；Esc 进 normal、i/a/o 回 insert。会话级、不持久化。
                 setHelpOpen(false);
                 const on = promptControllerRef.current?.toggleVim() ?? false;
@@ -2092,6 +2093,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
      * every animation tick. The tick only re-colours the cells it already has.
      */
     const { columns: terminalColumns } = useTerminalSize();
+    const pageInsetX = usePageInset().x;
     const wakeWidth = miniWakeWidth(terminalColumns);
     const wakeBand = React.useMemo(() => wakeWidth === 0
         ? undefined
@@ -3197,7 +3199,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             } }));
         return fullscreen ? scene : _jsx(AlternateScreen, { children: scene });
     }
-    // Subagent dashboard: displays all active and completed subagents.
+    // Jobs panel: background jobs (running/killed) with kill/inspect actions.
     // Like the browser and settings, it replaces the conversation entirely.
     if (jobsPanelOpen) {
         const panel = (_jsx(JobsPanel, { jobs: channel.backgroundJobs ?? [], onClose: () => setJobsPanelOpen(false), onKill: (id) => {
@@ -3269,7 +3271,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                         seekRow(anchorUserRowId);
                     else
                         handle?.scrollToBottom();
-                } })), _jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, width: "100%", children: [_jsxs(ScrollBox, { ref: setHandle, flexDirection: "column", flexGrow: 1, flexShrink: 1, stickyScroll: true, children: [_jsx(LogoHeader, { model: channel.model, effort: channel.reasoningEffort, cwd: channel.displayCwd, whale: channel.whale, 
+                } })), _jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, marginRight: -pageInsetX, children: [_jsxs(ScrollBox, { ref: setHandle, flexDirection: "column", flexGrow: 1, flexShrink: 1, stickyScroll: true, children: [_jsx(LogoHeader, { model: channel.model, effort: channel.reasoningEffort, cwd: channel.displayCwd, whale: channel.whale, 
                                 // Resuming a long session skips the ~3.4s opening animation: it
                                 // keeps firing low-frequency React commits that compete with the
                                 // transcript mount batches (and the first wheel events) for the

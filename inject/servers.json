@@ -1,9 +1,9 @@
 [
   {
-    "pid": 996186,
-    "sessionId": "b53df6c3-a848-4665-abb5-f5c76cd8da80",
-    "cwd": "/server/www/mallphp",
-    "socketPath": "/home/amei/.dsh-tui/inject/b53df6c3-a848-4665-abb5-f5c76cd8da80.sock",
-    "startedAt": 1788334752295
+    "pid": 2073208,
+    "sessionId": "18344f89-856a-47a3-a420-7d59d814dd43",
+    "cwd": "/home/amei/.dsh-tui",
+    "socketPath": "/home/amei/.dsh-tui/inject/18344f89-856a-47a3-a420-7d59d814dd43.sock",
+    "startedAt": 1788770413332
   }
 ]

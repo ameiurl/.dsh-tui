@@ -11,7 +11,7 @@ import { type PreviewEntry, type SessionSummary } from './sessions/index.js';
 import { type FileCandidate } from '../utils/fileSuggestions.js';
 import type { OAuthProviderStatus, ProviderSetupHost } from './providerWizard.js';
 import { type SessionModeSpec } from '../sessionModes.js';
-import { type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
+import { type PageMarginSetting, type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
 import { type SubagentState } from './subagents.js';
 export type { SubagentState } from './subagents.js';
 import { type BackgroundJobState, type BackgroundJobStatus } from './jobs.js';
@@ -184,7 +184,7 @@ export interface JobRow {
 /**
  * One rendered transcript row. The DSH session log is the source of truth:
  * rows are derived from `session/event` records (and the initial
- * `agent.session.events` replay), never from optimistic local state.
+ * `snapshotLiveSessionEvents(agent.session)` replay), never from optimistic local state.
  */
 export interface ChatRow {
     id: number;
@@ -510,6 +510,12 @@ export interface Channel {
      *  `dsh-tui.scrollGutter`: turn timeline / proportional scrollbar /
      *  nothing). */
     readonly scrollGutter: ScrollGutterMode;
+    /** Root page inset (settings `dsh-tui.pageMargin`): a preset name
+     *  (`none` / `slim` / `normal` (default) / `roomy`) or a custom `NxM`
+     *  spec (columns per side × rows top/bottom) inset the whole UI from the
+     *  terminal edges — terminals without their own viewport padding (bare
+     *  WSL, tmux, SSH) otherwise hug the screen border. */
+    readonly pageMargin: PageMarginSetting;
     /** Terminal-card header folding (settings `dsh-tui.foldTerminalCommand`):
      *  collapse a multi-line command title to its first line + count hint. */
     readonly foldTerminalCommand: boolean;
@@ -1025,6 +1031,8 @@ export interface ChannelState {
     toolBackground: ToolBackground;
     /** Transcript gutter mode (see the public Channel type). */
     scrollGutter: ScrollGutterMode;
+    /** Root page inset setting (see the public Channel type). */
+    pageMargin: PageMarginSetting;
     /** Terminal-card header folding (see the public Channel type). */
     foldTerminalCommand: boolean;
     /** Session-name chip on the prompt border (see the public Channel type). */
@@ -1043,6 +1051,8 @@ export interface ChannelState {
     setToolBackground(background: ToolBackground): void;
     /** Apply a transcript gutter mode change. */
     setScrollGutter(mode: ScrollGutterMode): void;
+    /** Apply a root page-inset setting change (drives the PageMargin box). */
+    setPageMargin(setting: PageMarginSetting): void;
     /** Apply a terminal-card header folding change. */
     setFoldTerminalCommand(enabled: boolean): void;
     /** Apply a prompt session-name chip change. */
@@ -1303,6 +1313,8 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     toolBackground?: ToolBackground;
     /** Transcript gutter mode; default `timeline` (settings `dsh-tui.scrollGutter`). */
     scrollGutter?: ScrollGutterMode;
+    /** Root page inset setting; default `normal` (settings `dsh-tui.pageMargin`). */
+    pageMargin?: PageMarginSetting;
     /** Terminal-card header folding; default off (settings
      *  `dsh-tui.foldTerminalCommand`). */
     foldTerminalCommand?: boolean;

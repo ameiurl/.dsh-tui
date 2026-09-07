@@ -42,7 +42,7 @@ was built against (`patch-base-version`).
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.1.1-rc.2`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.1.1-rc.2` (byte-identical to 0.1.0-rc.8),
-`@deepseek-harness-tui/dsh-tui@0.10.0-beta.4`.
+`@deepseek-harness-tui/dsh-tui@0.10.0-beta.5`.
 
 | file | change |
 | --- | --- |

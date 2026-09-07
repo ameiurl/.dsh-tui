@@ -4,6 +4,7 @@ import { Box, Text, useInput, useTerminalSize } from '../ui.js';
 import { Divider } from '../components/design-system/Divider.js';
 import { HintLine } from '../components/design-system/HintLine.js';
 import { SearchBox } from '../components/SearchBox.js';
+import { PageInsetContext } from '../components/PageMargin.js';
 import { SessionListRow } from '../components/sessions/SessionListRow.js';
 import { SessionPreview } from '../components/sessions/SessionPreview.js';
 import { WorkspaceListRow } from '../components/sessions/WorkspaceListRow.js';
@@ -110,6 +111,7 @@ function fitHint(candidates, budget) {
  */
 export function SessionBrowser({ channel, home, sameProject, onClose, }) {
     const { columns, rows } = useTerminalSize();
+    const inset = React.useContext(PageInsetContext);
     const isTerminalFocused = useTerminalFocus();
     const [sessions, setSessions] = React.useState([]);
     const [loaded, setLoaded] = React.useState(false);
@@ -901,7 +903,7 @@ export function SessionBrowser({ channel, home, sameProject, onClose, }) {
                 }, onMouseEnter: () => setConfirmHovered(true), onMouseLeave: () => setConfirmHovered(false), backgroundColor: confirmHovered ? 'userMessageBackgroundHover' : undefined, children: _jsx(Text, { color: "warning", children: ` ${truncateWidth(t('session-clean-confirm', { n: view.emptyCount }), inputBudget)}` }) })), mode === 'rename' && (_jsx(Box, { flexShrink: 0, children: _jsx(SearchBox, { query: tailWidth(renameText, inputBudget), isFocused: true, isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(t('resume-rename-placeholder'), inputBudget), prefix: "\u270E", borderless: true, 
                     // 同搜索卡片：自适应宽度会让窗口化预算跟随内容收缩，
                     // 追加字符后预填标题的头部被丢弃。
-                    width: "100%" }) })), rules.has(2) && (_jsx(Box, { flexShrink: 0, children: _jsx(Divider, { width: columns }) })), _jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: hint }) }) }), menu !== undefined && menuTarget !== undefined && (_jsx(Box, { position: "absolute", left: Math.max(0, Math.min(menu.col + 1, columns - MENU_WIDTH)), top: Math.max(0, Math.min(menu.row + 1, rows - MENU_HEIGHT)), width: MENU_WIDTH, height: MENU_HEIGHT, flexDirection: "column", flexShrink: 0, borderStyle: "round", borderColor: "permission", backgroundColor: "toolCardBackground", children: MENU_ACTIONS.map((action, index) => (_jsx(Box, { height: 1, flexShrink: 0, backgroundColor: index === menu.item ? 'userMessageBackgroundHover' : undefined, onMouseEnter: () => setMenu(m => (m === undefined ? m : { ...m, item: index })), onClick: () => {
+                    width: "100%" }) })), rules.has(2) && (_jsx(Box, { flexShrink: 0, children: _jsx(Divider, { bleed: true }) })), _jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: hint }) }) }), menu !== undefined && menuTarget !== undefined && (_jsx(Box, { position: "absolute", left: Math.max(inset.x, Math.min(menu.col + 1, inset.x + Math.max(0, columns - MENU_WIDTH))), top: Math.max(inset.y, Math.min(menu.row + 1, inset.y + Math.max(0, rows - MENU_HEIGHT))), width: MENU_WIDTH, height: MENU_HEIGHT, flexDirection: "column", flexShrink: 0, borderStyle: "round", borderColor: "permission", backgroundColor: "toolCardBackground", children: MENU_ACTIONS.map((action, index) => (_jsx(Box, { height: 1, flexShrink: 0, backgroundColor: index === menu.item ? 'userMessageBackgroundHover' : undefined, onMouseEnter: () => setMenu(m => (m === undefined ? m : { ...m, item: index })), onClick: () => {
                         if (actionPendingRef.current)
                             return;
                         activateMenu(menuTarget, index);

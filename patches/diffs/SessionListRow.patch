@@ -1,9 +1,9 @@
---- original/SessionListRow.js	2026-09-02 14:38:31.689288222 +0800
-+++ backup/SessionListRow.js	2026-09-02 14:38:31.707078940 +0800
-@@ -40,5 +40,5 @@
+--- original/SessionListRow.js	2026-09-07 16:37:51.764294353 +0800
++++ backup/SessionListRow.js	2026-09-07 16:37:51.766711653 +0800
+@@ -57,5 +57,5 @@
                              // toggles the pin and must never fall through to resume.
                              event.stopImmediatePropagation();
                              onTogglePin();
--                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Text, { color: titleColor(session.title.source, focused), bold: focused, children: truncateWidth(session.label ?? session.title.text, body - 2 - (mark === undefined ? 0 : 2)) })] }), _jsx(Box, { children: _jsx(Text, { dimColor: true, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
+-                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Box, { ...titleTooltip, children: _jsx(Text, { color: titleColor(session.title.source, focused), bold: focused, children: shownTitle }) })] }), _jsx(Box, { children: _jsx(Text, { dimColor: true, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
 +                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Text, { color: titleColor(session.title.source, focused), bold: focused, children: session.label ?? session.title.text })] }), _jsx(Box, { children: _jsx(Text, { dimColor: true, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
  }

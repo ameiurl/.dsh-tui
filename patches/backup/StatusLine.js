@@ -159,7 +159,7 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
         };
     const leftFields = [
         ...(statusBar.model
-            ? [{ key: 'model', node: _jsx(Text, { color: "inactiveShimmer", children: channel.model }) }]
+            ? [{ key: 'model', id: 'model', node: _jsx(Text, { color: "inactiveShimmer", children: channel.model }) }]
             : []),
         ...(tpsPart !== undefined ? [tpsPart] : []),
         ...(jobsPart !== undefined ? [jobsPart] : []),
@@ -201,6 +201,7 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
             ? [
                 {
                     key: 'git',
+                    id: 'git',
                     node: _jsx(Text, { color: "professionalBlue", children: channel.gitBranch }),
                 },
             ]
@@ -366,6 +367,16 @@ function buildHoverDetail(hover, channel, usage, contextUsed) {
             const shown = live.slice(0, 3);
             const rest = live.length - shown.length;
             return (_jsxs(Text, { wrap: "truncate", children: [dim('jobs '), shown.map(job => `${job.id} ${job.label} (${formatJobDuration(job)})`).join(' · '), rest > 0 ? ` · +${rest}` : ''] }));
+        }
+        case 'model': {
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('model '), channel.model, " \u00B7 ", dim('provider '), channel.provider, channel.contextWindow !== undefined
+                        ? _jsxs(_Fragment, { children: [" \u00B7 ", dim('ctx '), formatTokens(channel.contextWindow)] })
+                        : null] }));
+        }
+        case 'git': {
+            if (channel.gitBranch === undefined)
+                return null;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('git '), channel.gitBranch] }));
         }
         case 'sessionId':
             return (_jsxs(Text, { wrap: "truncate", children: [dim('# '), channel.agentId, " \u00B7 ", t('status-detail-session-id')] }));
