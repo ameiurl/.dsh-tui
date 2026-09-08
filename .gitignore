@@ -1,0 +1,21 @@
+# ============================================================
+# dsh-tui 配置目录 .gitignore
+# 原则: 只版本化“配置/定制”内容(model.json、theme.json、
+# themes/、patches/ 等)，运行时状态、日志、会话数据不入库。
+# ============================================================
+
+# ---- 会话与历史数据(含对话内容，属个人数据) ----
+history.jsonl
+session-index.json
+resume.txt
+
+# ---- 运行时状态 ----
+last-used.json
+
+# ---- 日志 / 账本 ----
+effect-ledger.jsonl
+restart.log
+
+# ---- 注入(inject)运行时：活动进程注册表 + unix socket ----
+inject/servers.json
+inject/*.sock

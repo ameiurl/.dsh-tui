@@ -9,9 +9,10 @@ import { SplitDiffView } from '../SplitDiffView.js';
 import { SyntaxText } from '../SyntaxText.js';
 import { useTooltip } from '../Tooltip.js';
 import { formatDuration } from '../../cc/format.js';
-import { getRevealVersion, revealLinesOf, snapReveal, subscribeReveal } from '../smoothReveal.js';
-const NOOP_REVEAL_SUBSCRIBE = (_listener) => () => { };
-const getNoRevealVersion = () => 0;
+import { formatClock } from '../../trajectory/format.js';
+import { t } from '../../i18n.js';
+import { revealLinesOf, snapReveal } from '../smoothReveal.js';
+import { useRevealVersion } from '../../hooks/useRevealVersion.js';
 /** Tool display names: DSH emits lowercase tool ids (`bash`); Claude Code
  *  shows capitalized names (`Bash`). Map the common ones, fall back to the
  *  id with its first letter uppercased. */
@@ -226,16 +227,63 @@ function foldTerminalTitle(title) {
     const first = title.slice(0, title.charCodeAt(firstEnd - 1) === 13 ? firstEnd - 1 : firstEnd);
     return { first, hidden };
 }
-function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguage, nameColor, filePath, onOpenFile }) {
-    // Hover tooltip: the header line truncates long paths/commands, so the
-    // full string (or the unfolded terminal script) pops up after a dwell.
-    // Empty content is a no-op inside the hook.
+/** Addendum line appended to the header hover tooltip when the header hides
+ *  content (folded script / clipped args / width-truncated title): start or
+ *  finish wall-clock and the terminal result's exit code / signal —
+ *  everything the header's relative `· 2m` chip and the body's
+ *  `Running… (…)` line do NOT say. Durations stay out on purpose: showing
+ *  a value twice, once on the card and once in the float, is exactly the
+ *  noise class this tooltip exists to avoid. A fully visible header pops
+ *  NOTHING (meta included) — a float that repeats or annotates content
+ *  already on screen is noise, not detail. Returns '' when the row carries
+ *  no timing data. */
+function toolCardMetaTooltip(tool, isRunning, isError) {
+    const parts = [];
+    const startedAt = tool.startedAt;
+    if (isRunning) {
+        if (startedAt !== undefined)
+            parts.push(t('tool-tip-started', { time: formatClock(startedAt) }));
+    }
+    else {
+        const durationMs = tool.durationMs;
+        if (startedAt !== undefined && durationMs !== undefined) {
+            parts.push(t(isError ? 'tool-tip-failed' : 'tool-tip-finished', { time: formatClock(startedAt + durationMs) }));
+        }
+    }
+    const resultView = tool.resultView;
+    if (resultView !== undefined && resultView.card === 'terminal') {
+        if ('exitCode' in resultView && resultView.exitCode !== undefined && resultView.exitCode !== 0) {
+            parts.push(t('tool-tip-exit', { code: resultView.exitCode }));
+        }
+        if ('signal' in resultView && resultView.signal !== undefined) {
+            parts.push(t('tool-tip-signal', { name: String(resultView.signal) }));
+        }
+    }
+    return parts.join(' · ');
+}
+function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguage, nameColor, filePath, onOpenFile, metaTooltip, headerTextBudget }) {
+    // Hover tooltip rule: pop ONLY when the header genuinely hides content —
+    // a folded terminal script, args clipped past the 480-char budget, or a
+    // non-terminal one-line title cut by layout width (truncate-end). A header
+    // that fully fits its row stays silent: a float that repeats or annotates
+    // text already visible next to the pointer is noise, not detail. Empty
+    // content is a no-op inside the hook.
     const headerTooltip = useTooltip(() => {
-        if (title === undefined)
-            return displayArgs;
-        if (isTerminal)
-            return title;
-        return title.trim();
+        const meta = metaTooltip();
+        const withMeta = (full) => (meta === '' ? full : `${full}\n${meta}`);
+        if (folded !== undefined)
+            return withMeta(title ?? '');
+        if (title === undefined && clipHeaderArgs(displayArgs) !== displayArgs)
+            return withMeta(displayArgs);
+        // Width truncation: only the non-terminal title Text is truncate-end —
+        // a long one-line title is really cut by layout when it overflows the
+        // row. Terminal titles WRAP instead (default Text wrap, nothing hidden)
+        // and args within the 480 budget wrap too; they never reach this gate.
+        if (title !== undefined && !isTerminal && stringWidth(title.trim()) > headerTextBudget) {
+            return withMeta(title.trim());
+        }
+        // Header fully visible: nothing hidden, nothing to add — stay silent.
+        return '';
     });
     if (title === undefined) {
         return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", ...headerTooltip, children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
@@ -276,7 +324,10 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // MessageList owns the single production subscription and passes a version
     // prop only to active reveal rows. Standalone consumers keep the fallback
     // subscription so the component contract remains self-contained.
-    React.useSyncExternalStore(revealVersion === undefined ? subscribeReveal : NOOP_REVEAL_SUBSCRIBE, revealVersion === undefined ? getRevealVersion : getNoRevealVersion);
+    // DefaultLane on purpose (useRevealVersion): a useSyncExternalStore wakeup
+    // forces a SyncLane render per tick, and repeated sync commits ending with
+    // streaming work pending feed React's nested-update counter (error #185).
+    useRevealVersion(revealVersion === undefined);
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
     const displayArgs = verbose ? tool.argsFull ?? tool.argsText : tool.argsText;
@@ -317,6 +368,23 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // source line per terminal row (truncate) keeps the panes row-aligned,
     // which the flat add/del line model cannot express.
     const { columns } = useTerminalSize();
+    // Interactive rows grow a ▾/▴ disclose column while the pointer dwells
+    // (fixed, no layout shift elsewhere). The tooltip resolves at show time —
+    // i.e. exactly while that column is present — so the budget must reserve
+    // it for clickable cards only; non-interactive rows never render it.
+    const interactive = onClick !== undefined;
+    // Header-row budget for the title Text. useTerminalSize() already reports
+    // the margin-adjusted content width, so this is the fixed chrome of the
+    // line only: loader dot 2 + hover ▾ indicator 2 (interactive rows, present
+    // while the pointer dwells) + the settled elapsed chip. Calibrated against
+    // the renderer (probe-tooltip-truncation): a truncate-end title whose
+    // width exceeds columns − loader − ▾ − chip is really cut on screen at
+    // tooltip time; anything at or under the budget fits fully and must NOT
+    // pop a tooltip. No extra slack, and the tool name is NOT deducted — a
+    // non-terminal title carries its own first word, so double-counting name
+    // pushed the gate ~10 cols too tight and floated fully visible titles.
+    const headerTextBudget = Math.max(0, columns - 2 - (interactive ? 2 : 0)
+        - (!isRunning && elapsedText !== '' ? stringWidth(elapsedText) : 0));
     const useSplitDiff = !isError && view?.card === 'diff' &&
         (diffLayout === 'split' || (diffLayout !== 'unified' && columns >= SPLIT_DIFF_MIN_COLS));
     let body = [];
@@ -372,12 +440,11 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // No layout change: the indicator is a fixed column on the header line, the
     // body never moves.
     const [hovered, setHovered] = React.useState(false);
-    const interactive = onClick !== undefined;
     const hoverTint = interactive && hovered && !isSelected;
     return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: addMargin ? 1 : 0, width: "100%", onClick: onClick, 
         // Only selection paints a highlight; the configured treatment applies
         // to an ordinary card. Diff line tints stay - they are content, not chrome.
-        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
+        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
                                     ? 'diffAddedWord'
                                     : line.tone === 'del'
                                         ? 'diffRemovedWord'

@@ -20,7 +20,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP="$DIR/backup"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 MODE="${1:-auto}"
-TUI_PKG="$DSH_HOME/profiles/tui/node_modules/@deepseek-harness-tui/dsh-tui"
+TUI_PKG="$DSH_HOME/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui"
 
 declare -a TARGETS=(
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js|dsh-tool-fs.index.js"
@@ -29,9 +29,9 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/dsh-adapter/channel.d.ts|channel.d.ts"
   "$TUI_PKG/lib/types/components/sessions/SessionListRow.js|SessionListRow.js"
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
+  "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
   "$TUI_PKG/lib/types/screens/Chat.js|Chat.js"
   "$TUI_PKG/lib/types/screens/StatusLine.js|StatusLine.js"
-  "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
   "$TUI_PKG/lib/types/i18n.js|i18n.js"
 )
 
@@ -57,14 +57,21 @@ for entry in "${TARGETS[@]}"; do
   fi
 done
 
-# Version guard: the patch was built against a specific upstream snapshot.
+# Version guard: the patch was built against a specific upstream snapshot. An
+# auto re-apply on a mismatched version would blind-copy old-version backups
+# over the new install (the failure this guard exists to stop), so auto mode
+# only reports; `dsh-patch apply` is the explicit force.
+VERSION_MATCH=1
 if [[ -f "$TUI_PKG/package.json" ]]; then
   cur="$(node -p "require('$TUI_PKG/package.json').version" 2>/dev/null || echo '?')"
   base="$(cat "$DIR/patch-base-version" 2>/dev/null || echo '?')"
   echo "dsh-tui installed: $cur | patch built against: $base"
   if [[ "$cur" != "?" && "$base" != "?" && "$cur" != "$base" ]]; then
-    echo "⚠  version changed — files are still copied (syntax-checked), but if the"
-    echo "   upstream file changed structurally the patch may need re-porting."
+    VERSION_MATCH=0
+    echo "⚠  version changed — auto re-apply is disabled. If the upstream files"
+    echo "   still match these patches, force with:  dsh-patch apply"
+    echo "   (if they changed structurally, re-port the patch and bump"
+    echo "   patch-base-version before applying)."
   fi
 fi
 
@@ -83,6 +90,13 @@ if [[ "$MODE" == "diff" ]]; then
     fi
   done
   exit 0
+fi
+
+if [[ "$MODE" == "auto" && "$VERSION_MATCH" -eq 0 && "$needs_apply" -eq 1 ]]; then
+  echo "Skipping auto re-apply: installed dsh-tui differs from patch-base-version."
+  echo "Re-run 'dsh-patch apply' to force-copy the backups anyway, or re-port and"
+  echo "update patches/ (original/backup/diffs + patch-base-version) first."
+  exit 1
 fi
 
 if [[ "$MODE" == "apply" || "$needs_apply" -eq 1 ]]; then

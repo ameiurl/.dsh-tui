@@ -1,31 +1,31 @@
---- original/Chat.js	2026-08-31 21:48:50.622717817 +0800
-+++ backup/Chat.js	2026-08-31 22:00:05.468149343 +0800
-@@ -609,6 +609,10 @@
+--- original/Chat.js	2026-09-07 16:37:51.776379100 +0800
++++ backup/Chat.js	2026-09-07 16:37:51.779811164 +0800
+@@ -708,6 +708,10 @@
      // Live view into the prompt's text for the Ctrl+C rule (clears text when
      // non-empty; the double-press exit only arms on an empty input).
      const promptControllerRef = React.useRef(null);
 +    // Vim-mode indicator state: PromptInput reports every toggle/submode
 +    // switch through onVimChange; the status line renders `-- INSERT --` /
 +    // `-- NORMAL --` after the cwd (moved out of the input box).
-+    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: false });
-     const requestExit = () => {
-         if (exitPendingRef.current) {
-             onExit();
-@@ -1731,7 +1735,7 @@
-                 return true;
-             case 'vim': {
-                 // `/vim`（CC vim 编辑模式）：切换输入框的 vim 编辑开关。状态在
--                // PromptInput 内部（controllerRef.toggleVim），每次切换落回 insert
-+                // PromptInput 内部（controllerRef.toggleVim），每次切换落回 normal
-                 // 子模式；Esc 进 normal、i/a/o 回 insert。会话级、不持久化。
-                 setHelpOpen(false);
-                 const on = promptControllerRef.current?.toggleVim() ?? false;
-@@ -3129,7 +3133,7 @@
++    const [vimMode, setVimMode] = React.useState({ enabled: true, insert: true });
+     // Publish the external-injection controller (dsh.nvim etc.) every render so
+     // the adapter-owned socket can append to the prompt and submit. `submit`
+     // mirrors an Enter press: `channel.submit` routes through the DSH inbox
+@@ -3321,7 +3325,7 @@
                                  void setClipboard(btw.answer ?? '').then(raw => { if (raw)
                                      writeRaw?.(raw); });
                                  channel.notify(t('copied-chars', { n: (btw.answer ?? '').length }), { timeoutMs: 1500 });
--                            } }) })) : questionPanelNode !== null ? (questionPanelNode) : (_jsx(PromptInput, { channel: channel, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, controllerRef: promptControllerRef })), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
-+                            } }) })) : questionPanelNode !== null ? (questionPanelNode) : (_jsx(PromptInput, { channel: channel, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, controllerRef: promptControllerRef, onVimChange: (enabled, insert) => setVimMode({ enabled, insert }) })), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, vim: vimMode, wake: wakeBand === undefined
+-                            } }) })) : questionPanelNode !== null ? (questionPanelNode) : (_jsx(PromptInput, { channel: channel, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, backgroundAgentsNeedingInput: 
++                            } }) })) : questionPanelNode !== null ? (questionPanelNode) : (_jsx(PromptInput, { channel: channel, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, backgroundAgentsNeedingInput:
+                         // Only the real channel supplies the seam; pre-agent-view test
+                         // stubs must not grow the footer row (layout-dependent
+                         // regressions pin the visible row count). The footer only
+@@ -3332,7 +3336,7 @@
+                         // clock and shifting every row-count layout invariant.
+                         channel.agentViewRows !== undefined && backgroundAgentsNeedingInput > 0
+                             ? backgroundAgentsNeedingInput
+-                            : undefined, controllerRef: promptControllerRef })), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
++                            : undefined, controllerRef: promptControllerRef, onVimChange: (enabled, insert) => setVimMode({ enabled, insert }) })), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, vim: vimMode, wake: wakeBand === undefined
                              ? undefined
                              : {
                                  band: wakeBand,

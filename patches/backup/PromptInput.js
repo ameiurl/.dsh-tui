@@ -280,7 +280,7 @@ const DOUBLE_CLICK_MS = 500;
  * working) interrupts the turn and delivers them right away; Ctrl+Enter
  * aborts the turn and sends the current input immediately.
  */
-export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, controllerRef, onVimChange, }) {
+export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onVimChange, }) {
     const [themeName] = useTheme();
     // Raw stdout writer for OSC 52 clipboard writes (selection copy) — must
     // bypass the frame pipeline; null outside a mounted Ink App.
@@ -309,13 +309,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
      * i/a/o (…) return to INSERT. Enabled in insert mode so the transition
      * is seamless; the mode is session-scoped (not persisted).
      */
-    // vim mode is ON by default and starts in NORMAL submode (user
-    // preference); `/vim` still toggles it off/on.
+    // vim mode is ON by default and starts in INSERT submode (user
+    // preference — type straight away; Esc drops to NORMAL for vim keys).
+    // `/vim` still toggles it off/on.
     const [vimEnabled, setVimEnabled] = React.useState(true);
     /** Insert submode (false = vim NORMAL). */
-    const [vimInsert, setVimInsert] = React.useState(false);
+    const [vimInsert, setVimInsert] = React.useState(true);
     const vimEnabledRef = React.useRef(true);
-    const vimInsertRef = React.useRef(false);
+    const vimInsertRef = React.useRef(true);
     vimEnabledRef.current = vimEnabled;
     vimInsertRef.current = vimInsert;
     /** Report vim mode changes to the caller (status-line indicator): called
@@ -414,6 +415,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
                 setValue('');
                 setCursor(0);
             },
+            append: (text) => {
+                const next = valueRef.current + text;
+                valueRef.current = next;
+                cursorRef.current = next.length;
+                setValue(next);
+                setCursor(next.length);
+                return next;
+            },
             consumeSelectionCopy: () => {
                 const sel = selectionRef.current;
                 if (!sel)
@@ -430,14 +439,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
                 const next = !vimEnabledRef.current;
                 vimEnabledRef.current = next;
                 setVimEnabled(next);
-                // /vim lands in NORMAL mode when ENABLING (user preference —
-                // keys are vim keys from the start; i/a/o return to INSERT).
+                // Enabling lands in INSERT (user preference — vim is ready but
+                // typing continues; Esc drops to NORMAL for vim keys).
                 // Turning the mode off also clears the undo stack — a later
                 // re-enable must never `u` its way back past edits made while
                 // vim was off.
-                vimInsertRef.current = !next;
-                setVimInsert(!next);
-                notifyVimChange(next, !next);
+                vimInsertRef.current = true;
+                setVimInsert(true);
+                notifyVimChange(next, true);
                 vimPendingRef.current = '';
                 vimUndoRef.current = [];
                 return next;
@@ -696,7 +705,7 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
         historyIndex.current = -1;
         setInput('', 0);
         setSelectedCommand(0);
-        appendHistory(trimmed);
+        void appendHistory(trimmed);
         channel.submit(trimmed);
         if (notice) {
             channel.notify(notice, { timeoutMs: 2500 });
@@ -722,7 +731,7 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
         historyIndex.current = -1;
         setInput('', 0);
         setSelectedCommand(0);
-        appendHistory(trimmed);
+        void appendHistory(trimmed);
         channel.steer(trimmed);
         channel.notify(t('input-interrupted-next'), { timeoutMs: 2500 });
     };
@@ -740,7 +749,7 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
         historyIndex.current = -1;
         setInput('', 0);
         setSelectedCommand(0);
-        appendHistory(trimmed);
+        void appendHistory(trimmed);
         channel.submit(trimmed);
         channel.notify(t('input-queued-after-turn'), { timeoutMs: 2500 });
     };
@@ -786,7 +795,7 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
         setInput('', 0);
         setSelectedCommand(0);
         setFileSelected(0);
-        appendHistory(trimmed);
+        void appendHistory(trimmed);
         channel.notify(t('input-interrupt-immediate'), { timeoutMs: 2500 });
     };
     /**
@@ -815,7 +824,7 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
             historyIndex.current = -1;
             setInput('', 0);
             setSelectedCommand(0);
-            appendHistory(text.trim());
+            void appendHistory(text.trim());
         }
         return handled;
     };
@@ -1317,7 +1326,11 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
             return;
         }
         if (key.upArrow) {
-            if (fileOverlayOpen) {
+            // A history walk owns the arrows until it returns to the draft: a
+            // recalled entry can itself open the @ menu or the slash menu (e.g.
+            // `/model`), and letting the overlay navigate here strands the stashed
+            // draft — Down would cycle menu rows instead of walking back.
+            if (fileOverlayOpen && historyIndex.current < 0) {
                 setFileSelected(index => index <= 0 ? fileMatches.length - 1 : index - 1);
                 return;
             }
@@ -1370,7 +1383,8 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
             return;
         }
         if (key.downArrow) {
-            if (fileOverlayOpen) {
+            // Same history-walk ownership as ↑ above.
+            if (fileOverlayOpen && historyIndex.current < 0) {
                 setFileSelected(index => index >= fileMatches.length - 1 ? 0 : index + 1);
                 return;
             }
@@ -1449,6 +1463,14 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
             return;
         }
         if (key.leftArrow) {
+            // CC agent-view parity: ← on an EMPTY prompt backgrounds this session
+            // and opens the agent view; with text it moves the caret as usual.
+            // (The command/file overlays both imply non-empty text, so no extra
+            // gate beyond the help menu is needed.)
+            if (value.length === 0 && !helpOpen) {
+                onBackgroundRequest?.();
+                return;
+            }
             // Grapheme-step: skip the whole cluster (surrogate pair, ZWJ emoji,
             // combining mark) so the caret never sits inside one. With a
             // selection, collapse to its start edge instead.
@@ -2438,7 +2460,9 @@ export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, sel
                                 setExpandHovered(true);
                             }, onMouseLeave: () => {
                                 setExpandHovered(false);
-                            }, children: _jsx(Text, { dimColor: !expandHovered, bold: expandHovered, color: expandHovered ? promptAccent : undefined, children: "\u26F6" }) }))] }) })] }));
+                            }, children: _jsx(Text, { dimColor: !expandHovered, bold: expandHovered, color: expandHovered ? promptAccent : undefined, children: "\u26F6" }) }))] }) }), backgroundAgentsNeedingInput !== undefined && (_jsx(Box, { flexDirection: "row", justifyContent: "flex-end", paddingRight: 2, children: _jsx(Text, { dimColor: true, children: backgroundAgentsNeedingInput > 0
+                        ? t('input-background-hint-count', { n: backgroundAgentsNeedingInput })
+                        : t('input-background-hint-idle') }) }))] }));
 }
 /**
  * Grapheme word-wrap for one logical line: break at the last space when

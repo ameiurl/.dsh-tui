@@ -11,7 +11,7 @@ import { type PreviewEntry, type SessionSummary } from './sessions/index.js';
 import { type FileCandidate } from '../utils/fileSuggestions.js';
 import type { OAuthProviderStatus, ProviderSetupHost } from './providerWizard.js';
 import { type SessionModeSpec } from '../sessionModes.js';
-import { type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
+import { type PageMarginSetting, type ScrollGutterMode, type StatusBarConfig, type ToolBackground } from '../tuiDisplayPrefs.js';
 import { type SubagentState } from './subagents.js';
 export type { SubagentState } from './subagents.js';
 import { type BackgroundJobState, type BackgroundJobStatus } from './jobs.js';
@@ -180,7 +180,7 @@ export interface JobRow {
 /**
  * One rendered transcript row. The DSH session log is the source of truth:
  * rows are derived from `session/event` records (and the initial
- * `agent.session.events` replay), never from optimistic local state.
+ * `snapshotLiveSessionEvents(agent.session)` replay), never from optimistic local state.
  */
 export interface ChatRow {
     id: number;
@@ -290,6 +290,55 @@ export type ResumeResult = {
     readonly ok: false;
     readonly reason: 'failed';
     readonly error: string;
+};
+/**
+ * One session's state in the agent view (CC's `claude agents` screen).
+ * States mirror Claude Code's vocabulary:
+ * `working` — a turn is running; `needs-input` — an approval request is
+ * parked for this agent; `idle` — live and waiting for the next prompt;
+ * `completed` — a live agent whose last turn ended (task finished, waiting);
+ * `failed` — the last turn ended with an error; `stopped` — the session's
+ * process is gone (persisted only).
+ */
+export type AgentViewStatus = 'working' | 'needs-input' | 'idle' | 'completed' | 'failed' | 'stopped';
+/** One row in the agent view list. */
+export interface AgentViewRow {
+    /** Session id — the attach/dispatch target. */
+    readonly id: string;
+    /** Display title (session title, or a fallback from the prompt/cwd). */
+    readonly title: string;
+    /** Absolute working directory the session runs in. */
+    readonly cwd: string;
+    /** One-line activity summary derived from the session's recent output. */
+    readonly summary: string;
+    readonly status: AgentViewStatus;
+    /** True when an agent for this session is alive in THIS process (✻ vs ∙). */
+    readonly live: boolean;
+    /** True when this is the session the TUI terminal is attached to. */
+    readonly current: boolean;
+    /** Unix epoch milliseconds when the session was created. */
+    readonly createdAt: number;
+    /** Unix epoch milliseconds of the session's latest activity. */
+    readonly updatedAt: number;
+}
+/** The observable outcome of dispatching a new background session. */
+export type AgentViewDispatchResult = {
+    readonly ok: true;
+    readonly sessionId: string;
+} | {
+    readonly ok: false;
+    readonly reason: 'unavailable';
+} | {
+    readonly ok: false;
+    readonly reason: 'failed';
+    readonly error: string;
+};
+/** The observable outcome of backgrounding the attached session. */
+export type BackgroundResult = {
+    readonly ok: true;
+    readonly backgroundedSessionId: string;
+} | {
+    readonly ok: false;
 };
 /** Secret-free credential metadata for configuration and status surfaces. */
 export interface CredentialStatus {
@@ -457,6 +506,12 @@ export interface Channel {
      *  `dsh-tui.scrollGutter`: turn timeline / proportional scrollbar /
      *  nothing). */
     readonly scrollGutter: ScrollGutterMode;
+    /** Root page inset (settings `dsh-tui.pageMargin`): a preset name
+     *  (`none` / `slim` / `normal` (default) / `roomy`) or a custom `NxM`
+     *  spec (columns per side × rows top/bottom) inset the whole UI from the
+     *  terminal edges — terminals without their own viewport padding (bare
+     *  WSL, tmux, SSH) otherwise hug the screen border. */
+    readonly pageMargin: PageMarginSetting;
     /** Terminal-card header folding (settings `dsh-tui.foldTerminalCommand`):
      *  collapse a multi-line command title to its first line + count hint. */
     readonly foldTerminalCommand: boolean;
@@ -701,6 +756,11 @@ export interface Channel {
     listModels(): Promise<readonly LlmModelInfo[]>;
     /** Provider display identities for the same routes (picker group labels). */
     listProviders(): Promise<readonly LlmProviderInfo[]>;
+    /** Drop the `/model <provider/id>` completion cache so the next `/model `
+     *  refetch reflects a provider-catalog change (`/provider` add/edit/delete,
+     *  OAuth sign-in/out) — the same consistency the picker's per-open refetch
+     *  already provides. */
+    invalidateModelCompletion(): void;
     /** The live agent's full skill catalog for `/skills` (issue #204) — name,
      *  description, invocation flags and source bucket. Undefined on a failed
      *  or incomplete registry read (the picker shows an error); empty only
@@ -789,6 +849,48 @@ export interface Channel {
     /** Subagent rows for `/agents` (DSH subagent service; empty message when
      *  the service is absent). */
     listSubagents(): Promise<string[]>;
+    /**
+     * The agent view (CC's `claude agents`) row snapshot: every live agent in
+     * this process plus every persisted session that no live agent owns,
+     * ordered needs-input/working first, then most recently active. Reading it
+     * is cheap; subscribe for changes.
+     */
+    agentViewRows(): readonly AgentViewRow[];
+    /** Change feed for {@link agentViewRows}: fired on agent lifecycle/status
+     *  changes and — throttled — on session events of background agents. */
+    subscribeAgentView(listener: () => void): () => void;
+    /**
+     * Dispatch a new background session (`agent view` input): creates an agent
+     * in this process, delivers the prompt as a user message, and keeps the
+     * TUI attached to its current session. The new session keeps running until
+     * it finishes its turn or is stopped — it lives only while this process
+     * does.
+     */
+    dispatchBackgroundAgent(prompt: string): Promise<AgentViewDispatchResult>;
+    /** Stop a background session (Ctrl+X): abort its turn and dispose its
+     *  agent; the persisted log survives for resume. False for the attached
+     *  session or one this TUI does not own. */
+    stopBackgroundAgent(sessionId: string): Promise<boolean>;
+    /**
+     * Attach the TUI terminal to a session (`agent view` Enter/→): a live
+     * agent is adopted in place (its handle becomes the channel's), a
+     * persisted one resumes through the persistence seam. The previously
+     * attached agent is NOT disposed — it keeps running as a background
+     * session unless it was already idle with no history.
+     */
+    attachToAgent(sessionId: string): Promise<ResumeResult>;
+    /** Trailing exchanges of any session — the live agent's in-memory log when
+     *  it is alive in this process, the persisted artifact otherwise. */
+    peekAgentSession(sessionId: string): Promise<readonly PreviewEntry[]>;
+    /** `/bg` — background the attached session: swap the TUI to a fresh agent
+     *  while the current one keeps running. The agent view lists it as a
+     *  background session; `backgroundedSessionId` is the move's return target
+     *  (CC's "Esc returns to that conversation"). */
+    backgroundCurrent(): Promise<BackgroundResult>;
+    /** Send a follow-up user message to a session from the agent view's peek
+     *  panel. Live sessions receive it directly; a session no live agent owns
+     *  cannot take a reply (false + a notify to attach instead). */
+    replyToAgent(sessionId: string, text: string): Promise<boolean>;
     /**
      * Dispose the host-registry entries this channel registered (skill slash
      * commands).
@@ -925,6 +1027,8 @@ export interface ChannelState {
     toolBackground: ToolBackground;
     /** Transcript gutter mode (see the public Channel type). */
     scrollGutter: ScrollGutterMode;
+    /** Root page inset setting (see the public Channel type). */
+    pageMargin: PageMarginSetting;
     /** Terminal-card header folding (see the public Channel type). */
     foldTerminalCommand: boolean;
     /** Session-name chip on the prompt border (see the public Channel type). */
@@ -943,6 +1047,8 @@ export interface ChannelState {
     setToolBackground(background: ToolBackground): void;
     /** Apply a transcript gutter mode change. */
     setScrollGutter(mode: ScrollGutterMode): void;
+    /** Apply a root page-inset setting change (drives the PageMargin box). */
+    setPageMargin(setting: PageMarginSetting): void;
     /** Apply a terminal-card header folding change. */
     setFoldTerminalCommand(enabled: boolean): void;
     /** Apply a prompt session-name chip change. */
@@ -1084,6 +1190,8 @@ export interface ChannelState {
     listModels(): Promise<readonly LlmModelInfo[]>;
     /** Provider display identities (see the public Channel type). */
     listProviders(): Promise<readonly LlmProviderInfo[]>;
+    /** Drop the `/model` completion cache (see the public Channel type). */
+    invalidateModelCompletion(): void;
     /** The live agent's skill catalog for `/skills` (see the public Channel type). */
     listSkills(): Promise<readonly SkillInfo[] | undefined>;
     /** Safe credential metadata for `/login` (see the public Channel type). */
@@ -1131,6 +1239,36 @@ export interface ChannelState {
     pluginsInfo(args: string): string[];
     /** Subagent rows (CC's /agents). */
     listSubagents(): Promise<string[]>;
+    /** See {@link Channel.agentViewRows}. */
+    agentViewRows(): readonly AgentViewRow[];
+    /** See {@link Channel.subscribeAgentView}. */
+    subscribeAgentView(listener: () => void): () => void;
+    /** See {@link Channel.dispatchBackgroundAgent}. */
+    dispatchBackgroundAgent(prompt: string): Promise<AgentViewDispatchResult>;
+    /** See {@link Channel.stopBackgroundAgent}. */
+    stopBackgroundAgent(sessionId: string): Promise<boolean>;
+    /** See {@link Channel.attachToAgent}. */
+    attachToAgent(sessionId: string): Promise<ResumeResult>;
+    /** See {@link Channel.peekAgentSession}. */
+    peekAgentSession(sessionId: string): Promise<readonly PreviewEntry[]>;
+    /** See {@link Channel.backgroundCurrent}. */
+    backgroundCurrent(): Promise<BackgroundResult>;
+    /** See {@link Channel.replyToAgent}. */
+    replyToAgent(sessionId: string, text: string): Promise<boolean>;
+    /**
+     * Bind the plugin's approval store (post-construction): row derivation
+     * reads its parked ask ids for the "needs input" state, and its emits
+     * re-publish as agent-view changes.
+     */
+    bindApprovalStore(store: {
+        pendingAgentIds(): readonly string[];
+        pendingAgentDetail(agentId: string): {
+            toolName: string;
+            reason?: string;
+            command?: string;
+        } | undefined;
+        subscribe(listener: () => void): () => void;
+    }): void;
     /** See {@link Channel.releaseContributions}. */
     releaseContributions(): void;
     /** Live session event log (see the public Channel type, `/trace`). */
@@ -1171,6 +1309,8 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     toolBackground?: ToolBackground;
     /** Transcript gutter mode; default `timeline` (settings `dsh-tui.scrollGutter`). */
     scrollGutter?: ScrollGutterMode;
+    /** Root page inset setting; default `normal` (settings `dsh-tui.pageMargin`). */
+    pageMargin?: PageMarginSetting;
     /** Terminal-card header folding; default off (settings
      *  `dsh-tui.foldTerminalCommand`). */
     foldTerminalCommand?: boolean;
