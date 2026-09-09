@@ -1,5 +1,5 @@
---- original/StatusLine.js	2026-09-07 16:37:51.782892891 +0800
-+++ backup/StatusLine.js	2026-09-07 16:37:51.786795869 +0800
+--- original/StatusLine.js	2026-09-09 10:51:37.362822956 +0800
++++ backup/StatusLine.js	2026-09-09 10:51:37.365537943 +0800
 @@ -29,7 +29,7 @@
      const visible = parts.filter(part => part.node !== null && part.node !== undefined && part.node !== false);
      return (_jsx(_Fragment, { children: visible.map((part, index) => (_jsxs(React.Fragment, { children: [index > 0 ? _jsx(Text, { dimColor: true, children: " \u00B7 " }) : null, _jsx(Box, { flexShrink: 1, ...(part.id === undefined ? {} : hoverProps(part.id)), children: part.tooltip === undefined || part.tooltip === '' ? (_jsx(Text, { wrap: "truncate", children: part.node })) : (_jsx(TooltipTarget, { content: part.tooltip, children: _jsx(Text, { wrap: "truncate", children: part.node }) })) })] }, part.key))) }));

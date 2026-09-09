@@ -8,14 +8,14 @@ import { ToolUseLoader } from '../ToolUseLoader.js';
 import { SplitDiffView } from '../SplitDiffView.js';
 import { SyntaxText } from '../SyntaxText.js';
 import { useTooltip } from '../Tooltip.js';
-import { formatDuration } from '../../cc/format.js';
+import { formatDuration } from '../../terminal-utils/format.js';
 import { formatClock } from '../../trajectory/format.js';
 import { t } from '../../i18n.js';
 import { revealLinesOf, snapReveal } from '../smoothReveal.js';
 import { useRevealVersion } from '../../hooks/useRevealVersion.js';
-/** Tool display names: DSH emits lowercase tool ids (`bash`); Claude Code
- *  shows capitalized names (`Bash`). Map the common ones, fall back to the
- *  id with its first letter uppercased. */
+/** Tool display names: DSH emits lowercase tool ids (`bash`); display common
+ *  names with an initial capital and fall back to the id with its first letter
+ *  uppercased. */
 function displayName(name) {
     const KNOWN = {
         bash: 'Bash',
@@ -63,7 +63,7 @@ function languageFromPath(path) {
     const language = path === undefined ? undefined : extname(path).slice(1).toLowerCase();
     return language === '' ? undefined : language;
 }
-/** CC's collapsed text body keeps 3 lines (renderTruncatedContent). */
+/** The collapsed text body keeps three lines. */
 const TEXT_BODY_MAX_LINES = 3;
 /** Diff bodies cap at the upstream chat row's 8 (dsh-client-ui-tool's
  *  CHAT_DIFF_MAX_LINES) — denser information than log output. */
@@ -89,7 +89,7 @@ export function toolNameColor(raw) {
         return 'toolNameMutate';
     if (TOOL_NAME_EXEC.has(n))
         return 'toolNameExec';
-    return 'claude';
+    return 'accent';
 }
 /** One side's text → display lines (upstream contentLines rule: empty text
  *  is zero lines; a single trailing newline is a terminator, not a line;
@@ -317,10 +317,10 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
 /**
  * Tool-call card: `● Edit /path` header with a blinking status dot, then the
  * structured body under a `  ⎿  ` gutter — diff hunks in red/green, terminal
- * output, read content — instead of the raw result dump (mirroring Claude Code's `AssistantToolUseMessage.tsx` + the dsh-tools presentation views the
- * channel captures per call).
+ * output, read content — instead of the raw result dump. The channel captures
+ * the structured views per call.
  */
-export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, smoothReveal = false, fresh = false, revealVersion, }) {
+export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, smoothReveal = false, fresh = false, revealVersion, }) {
     // MessageList owns the single production subscription and passes a version
     // prop only to active reveal rows. Standalone consumers keep the fallback
     // subscription so the component contract remains self-contained.
@@ -335,7 +335,7 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     const name = displayName(tool.name);
     const minWidth = stringWidth(name) + 2;
     // The settled view carries the applied diff / actual output; while running,
-    // the call view already shows the pending change (CC's pending Edit diff).
+    // the call view already shows the pending change.
     const view = tool.resultView ?? tool.callView;
     const filePath = filePathFromTool(tool, view);
     const syntaxLanguage = view?.card === 'read' || view?.card === 'generic' || view === undefined
@@ -353,7 +353,7 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     const foldedHeader = React.useMemo(() => headerIsTerminal && foldTerminalCommand && !verbose && headerTitle !== undefined
         ? foldTerminalTitle(headerTitle)
         : undefined, [headerIsTerminal, foldTerminalCommand, verbose, headerTitle]);
-    // Live elapsed clock while the call runs (CC's bash elapsed timer): the
+    // Live elapsed clock while the call runs: the
     // 1s tick re-renders the card; elapsed derives from wall-clock refs.
     const [viewportRef] = useAnimationFrame(isRunning ? 1000 : null);
     const elapsedMs = isRunning
@@ -441,7 +441,7 @@ export function AssistantToolUseMessage({ tool, addMargin, verbose, isSelected =
     // body never moves.
     const [hovered, setHovered] = React.useState(false);
     const hoverTint = interactive && hovered && !isSelected;
-    return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: addMargin ? 1 : 0, width: "100%", onClick: onClick, 
+    return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: marginTopOnTurn ? 1 : 0, width: "100%", onClick: onClick, 
         // Only selection paints a highlight; the configured treatment applies
         // to an ordinary card. Diff line tints stay - they are content, not chrome.
         backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'

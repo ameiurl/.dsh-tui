@@ -22,6 +22,7 @@ import { type TuiSettingsSection } from './settings-sections.js';
 import type { SettingsHost } from './settingsEditor.js';
 import { type TuiSceneDescriptor } from './scenes.js';
 import type { TuiRewindMode } from './extension-events.js';
+import { type TranscriptImage } from './transcript-images.js';
 type ChannelImageBlock = Extract<ContentBlock, {
     type: 'image';
 }>;
@@ -30,8 +31,39 @@ export interface StagedImageInput {
     data: Uint8Array;
     mediaType: ChannelImageMediaType;
     name?: string;
+    /** Absolute local path the bytes were read from, for the preview card's
+     *  path row. Not handed to the attachment store and never persisted. */
+    path?: string;
 }
-/** Tool-call card state, mirroring the Claude Code tool-use presentation. */
+/** Opaque capability returned for one staged composer image. The visible
+ * `[Image #N]` label is deliberately absent: PromptInput owns presentation
+ * numbering while this id is the non-reusable attachment identity. */
+export interface StagedImageHandle {
+    readonly stageId: string;
+}
+/** One visible composer token bound to its opaque staged-image capability. */
+export interface ComposerImageRef {
+    readonly token: string;
+    readonly stageId: string;
+}
+/** Text plus the image capabilities that belong to that exact draft. */
+export interface ComposerSubmission {
+    readonly text: string;
+    readonly images?: readonly ComposerImageRef[];
+}
+/** UI-safe projection of one settled DSH registry command. Keeping the
+ * result kind across the adapter boundary lets the composer retain a
+ * rejected image draft instead of treating the error text as success. */
+export type ExternalCommandOutcome = {
+    readonly kind: 'success';
+    readonly text: string;
+    readonly consumeDraft: true;
+} | {
+    readonly kind: 'error';
+    readonly text: string;
+    readonly consumeDraft: boolean;
+};
+/** Tool-call card state used by the transcript renderer. */
 export interface ToolRow {
     readonly callId: string;
     readonly name: string;
@@ -190,6 +222,8 @@ export interface ChatRow {
     /** Actual execution location for `!command` rows. */
     executionTarget?: string;
     text: string;
+    /** Durable session image blocks, loaded lazily through the attachment store. */
+    images?: readonly TranscriptImage[];
     /** True while an assistant step is still streaming chunks. */
     streaming?: boolean;
     /** Present on `tool` rows; the card model. */
@@ -292,8 +326,8 @@ export type ResumeResult = {
     readonly error: string;
 };
 /**
- * One session's state in the agent view (CC's `claude agents` screen).
- * States mirror Claude Code's vocabulary:
+ * One session's state in the agent view.
+ * States describe the session's current lifecycle:
  * `working` — a turn is running; `needs-input` — an approval request is
  * parked for this agent; `idle` — live and waiting for the next prompt;
  * `completed` — a live agent whose last turn ended (task finished, waiting);
@@ -417,7 +451,7 @@ export interface Channel {
     readonly sessionTitle: string;
     /** Per-session accent color name (`/color`), '' when unset — persisted via
      *  a `session/color` log event so it survives resume/rewind. Renders as
-     *  the prompt-input border + session label chip accent (cc/sessionColors). */
+     *  the prompt-input border + session label chip accent. */
     readonly sessionColor: string;
     readonly agentId: string;
     /** TUI-owned generation that changes on every live Agent rebind. */
@@ -493,7 +527,7 @@ export interface Channel {
     }[];
     /** Latest in-process working-activity snapshot. */
     readonly workingActivity: ActivityStatus | undefined;
-    /** Working-activity indicator preset name (`claude`/`moon`/…/`random`). */
+    /** Working-activity indicator preset name (`moon8`/`moon`/…/`random`). */
     readonly activityFrames: string | undefined;
     /** Edit/Write diff presentation preference (`auto`/`split`/`unified`). */
     readonly diffLayout: 'auto' | 'split' | 'unified';
@@ -531,6 +565,12 @@ export interface Channel {
     readonly statusBar: Readonly<StatusBarConfig>;
     /** Whether the header's pixel whale art shows (settings `dsh-tui.whale`). */
     readonly whale: boolean;
+    /** Whether the settled header whale keeps behaving during the welcome
+     * phase — fin flutters, tail thumps, sleep after inactivity (settings
+     * `dsh-tui.whaleIdle`; on by default — an explicit false keeps the
+     * settled header timer-free). The first agent turn freezes the whale to
+     * the static standard frame regardless of this flag. */
+    readonly whaleIdle: boolean;
     /** Minimal mode (settings `dsh-tui.minimal`): no header splash, no emoji
      *  glyphs, no decorative colors; code highlight and tool colors stay. */
     readonly minimal: boolean;
@@ -579,11 +619,19 @@ export interface Channel {
     /**
      * Run a plugin-registered slash command against the live agent (DSH
      * `dsh-commands` registry): logs `command/run`/`command/done` and returns
-     * the handler's result text — `''` when the handler succeeded silently,
-     * `undefined` when the registry has no such command (the caller falls
-     * back to sending the line to the model).
+     * the handler's result text. Kept stable for public scene consumers.
      */
-    runExternalCommand(name: string, rawInput: string): Promise<string | undefined>;
+    runExternalCommand(name: string, rawInput: string, images?: readonly ComposerImageRef[]): Promise<string | undefined>;
+    /** Detailed companion used by draft-owning composers. `undefined` means
+     * the registry no longer has the command, so the draft stays untouched. */
+    runExternalCommandOutcome(name: string, rawInput: string, images?: readonly ComposerImageRef[]): Promise<ExternalCommandOutcome | undefined>;
+    /**
+     * TUI-side permission preset switch: the official `/permission` command
+     * when registered, otherwise the permission-presets service's own write
+     * path (the same handler the command drives). Resolves true when the
+     * durable identity confirms the target. Never falls through to the model.
+     */
+    runPermissionPreset(name: string): Promise<boolean>;
     /**
      * Plugin-registered full-screen scene currently replacing the conversation
      * (the `dsh-tui-scenes` runtime), if any. The chat screen renders its
@@ -600,7 +648,7 @@ export interface Channel {
     openPluginScene(id: string): boolean;
     /** Close the open plugin scene, if any (a no-op otherwise). */
     closePluginScene(): void;
-    /** 侧问（CC /btw）：无工具单轮 LLM 调用，复用当前会话上下文；结果不落 session log。 */
+    /** 侧问（/btw）：无工具单轮 LLM 调用，复用当前会话上下文；结果不落 session log。 */
     sideQuestion(question: string, options?: {
         signal?: AbortSignal;
         onText?: (delta: string) => void;
@@ -630,25 +678,49 @@ export interface Channel {
     /** Cancellation of a background job with the owning agent's authority. */
     readonly jobControl: JobControl;
     subscribe: (listener: () => void) => () => void;
-    /** Validate and persist a pasted image, returning its prompt placeholder. */
+    /** Current composer generation. Async paste continuations capture this
+     *  before I/O and must not mutate a different session's draft. */
+    stagedImageGeneration(): number;
+    /** Validate and persist an image, returning the historical scene-facing
+     * `[Image #N]` token accepted by submit/steer/registry commands. */
     stageImage(input: StagedImageInput): Promise<string>;
-    submit(text: string): void;
+    /** Draft-safe composer companion: bind persistence to one session epoch
+     * and return an opaque capability whose visible label belongs to Prompt. */
+    stageComposerImage(input: StagedImageInput, generation: number): Promise<StagedImageHandle>;
+    /** Whether a capability is still live in the current composer session. */
+    hasStagedImage(stageId: string): boolean;
+    /** Revoke a capability that was staged for a draft which no longer exists.
+     * Durable attachment storage remains content-addressed; this only releases
+     * the editable-composer lookup and its preview facade. */
+    discardStagedImage(stageId: string): void;
+    /** The staged image behind one opaque capability, as the same lazily-read
+     *  facade transcript rows use; undefined once evicted or cleared. */
+    stagedImage(stageId: string): TranscriptImage | undefined;
+    /** The profile's image-paste limits, for callers that must bound work
+     *  BEFORE reading bytes (a Finder path is untrusted input). Undefined
+     *  when the composition has no attachment service. */
+    stagedImageLimits(): {
+        readonly maxImageBytes: number;
+        readonly maxImagesPerMessage: number;
+    } | undefined;
+    submit(text: string, images?: readonly ComposerImageRef[]): void;
     /**
      * Steer a message into the running turn (Codex/pi semantics): injected at
      * the next step boundary, the agent continues without aborting.
      */
-    steer(text: string): void;
+    steer(text: string, images?: readonly ComposerImageRef[]): void;
     /** Pull a pending message back out of the inbox (Alt+Up) for re-editing. */
     removePending(id: string): boolean;
     /** Abort the in-flight turn (`Ctrl+C` while working). While `cancelPending`
      *  stays true the abort has not converged; Chat force-exits on the next
      *  Ctrl+C press in that window. */
     cancel(): void;
-    /** Abort the in-flight turn and process `texts` right away (Esc/Ctrl+Enter
-     *  with queued input): each text is re-queued as a followup once the abort
-     *  settles, so the new turn starts immediately. Returns the count queued. */
-    interruptAndDeliver(texts: readonly string[]): number;
-    /** Rewind the conversation to a past user message (CC's double-Esc rewind):
+    /** Abort the in-flight turn and process `inputs` right away (Esc/Ctrl+Enter
+     *  with queued input): each message is re-queued as a followup once the abort
+     *  settles, so the new turn starts immediately. Plain strings remain the
+     *  compatibility form for non-composer callers. Returns the count queued. */
+    interruptAndDeliver(inputs: readonly (string | ComposerSubmission)[]): number;
+    /** Rewind the conversation to a past user message (double-Esc rewind):
      *  forks the session through that message, swaps in a fresh agent, and
      *  returns the message text for re-editing — or `null` when unwritable.
      *  `mode` is the plugin-offered rewind mode the user picked (the
@@ -712,6 +784,14 @@ export interface Channel {
      *  false + a notify when the id is not offered. Persists like the old
      *  Shift+Tab cycle (~/.dsh-tui/effort.json). */
     setEffort(id: string): Promise<boolean>;
+    /** Re-seat the default reasoning effort new sessions start on (the
+     *  /settings 默认推理强度 field). Unlike {@link Channel.setEffort} it
+     *  does not write effort.json — the settings user layer outranks that
+     *  file — and `undefined` (the field's auto option) re-derives the boot
+     *  chain (cordis.yml `effort` → persisted /effort choice → adapter
+     *  default). The live agent is re-pinned too when its route offers the
+     *  level, so a change lands on its next request. */
+    setDefaultEffort(id: string | undefined): void;
     /** The session mode currently in force (matched from the session log, or
      *  the last one Shift+Tab applied). */
     readonly mode: SessionModeSpec;
@@ -806,7 +886,7 @@ export interface Channel {
     previewSession(sessionId: string): Promise<readonly PreviewEntry[]>;
     /** Mark a session for `dsh-tui --resume` on the next launch. */
     setResumeTarget(sessionId: string): void;
-    /** Rename the current session (CC's /rename): appends a `session/title`
+    /** Rename the current session (/rename): appends a `session/title`
      *  event, which the status line and the /resume picker both read. */
     renameSession(title: string): void;
     /** Set the current session's accent color (`/color <name>`): appends a
@@ -828,7 +908,7 @@ export interface Channel {
      *  `session/title` event to its log (live sessions go through the normal
      *  rename path). False when the log is absent or undecodable. */
     renameSessionTo(sessionId: string, title: string): Promise<boolean>;
-    /** Manually compact the session history (CC's /compact); no-op notify when the leaf lacks a compaction service. */
+    /** Manually compact the session history (/compact); no-op notify when the leaf lacks a compaction service. */
     compact(): void;
     /** Render a multi-line local report in the transcript (`/status`,
      *  `/doctor`, …): a `local` row plus one `local-output` row per line. */
@@ -850,7 +930,7 @@ export interface Channel {
      *  the service is absent). */
     listSubagents(): Promise<string[]>;
     /**
-     * The agent view (CC's `claude agents`) row snapshot: every live agent in
+     * The agent view row snapshot: every live agent in
      * this process plus every persisted session that no live agent owns,
      * ordered needs-input/working first, then most recently active. Reading it
      * is cheap; subscribe for changes.
@@ -885,7 +965,7 @@ export interface Channel {
     /** `/bg` — background the attached session: swap the TUI to a fresh agent
      *  while the current one keeps running. The agent view lists it as a
      *  background session; `backgroundedSessionId` is the move's return target
-     *  (CC's "Esc returns to that conversation"). */
+     *  (Esc returns to that conversation). */
     backgroundCurrent(): Promise<BackgroundResult>;
     /** Send a follow-up user message to a session from the agent view's peek
      *  panel. Live sessions receive it directly; a session no live agent owns
@@ -950,6 +1030,7 @@ export interface PermissionPresetSnapshot {
 export interface PendingMessage {
     id: string;
     text: string;
+    images: readonly ComposerImageRef[];
     placement: 'steer' | 'followup';
 }
 /**
@@ -1061,8 +1142,12 @@ export interface ChannelState {
     setStatusBar(config: Partial<StatusBarConfig>): void;
     /** Whale header art switch (see the public Channel type). */
     whale: boolean;
+    /** Idle whale behaviors switch (see the public Channel type). */
+    whaleIdle: boolean;
     /** Apply a whale-visibility change (see the public Channel type). */
     setWhale(visible: boolean): void;
+    /** Apply an idle-whale-behavior change (see the public Channel type). */
+    setWhaleIdle(enabled: boolean): void;
     minimal: boolean;
     /** Apply a minimal-mode change (see the public Channel type). */
     setMinimal(enabled: boolean): void;
@@ -1099,7 +1184,11 @@ export interface ChannelState {
     /** Context-aware slash completions (see the public Channel type). */
     commandCompletions(input: string): readonly CommandCompletion[];
     /** Run a plugin-registered command (see the public Channel type). */
-    runExternalCommand(name: string, rawInput: string): Promise<string | undefined>;
+    runExternalCommand(name: string, rawInput: string, images?: readonly ComposerImageRef[]): Promise<string | undefined>;
+    /** Run a command while retaining its draft-consumption outcome. */
+    runExternalCommandOutcome(name: string, rawInput: string, images?: readonly ComposerImageRef[]): Promise<ExternalCommandOutcome | undefined>;
+    /** TUI-side permission preset switch (see the public Channel type). */
+    runPermissionPreset(name: string): Promise<boolean>;
     /** Open plugin scene mirrored from the scenes runtime (see the public Channel type). */
     pluginScene: TuiSceneDescriptor | undefined;
     /** Open a plugin scene by id (see the public Channel type). */
@@ -1121,19 +1210,28 @@ export interface ChannelState {
     backgroundJobs: readonly BackgroundJobState[];
     jobControl: JobControl;
     subscribe: (listener: () => void) => () => void;
+    stagedImageGeneration(): number;
     stageImage(input: StagedImageInput): Promise<string>;
+    stageComposerImage(input: StagedImageInput, generation: number): Promise<StagedImageHandle>;
+    hasStagedImage(stageId: string): boolean;
+    discardStagedImage(stageId: string): void;
+    stagedImage(stageId: string): TranscriptImage | undefined;
+    stagedImageLimits(): {
+        readonly maxImageBytes: number;
+        readonly maxImagesPerMessage: number;
+    } | undefined;
     /** @internal event bump (the public `notify(text)` posts a notification). */
     emit(): void;
     /** @internal frame-aligned emit for high-frequency streaming deltas:
      *  version bumps synchronously but listeners fire at most once per 16ms
      *  window (trailing edge). */
     emitStream(): void;
-    submit(text: string): void;
-    steer(text: string): void;
+    submit(text: string, images?: readonly ComposerImageRef[]): void;
+    steer(text: string, images?: readonly ComposerImageRef[]): void;
     removePending(id: string): boolean;
     cancel(): void;
     /** @internal interrupt-and-deliver (see the public Channel type). */
-    interruptAndDeliver(texts: readonly string[]): number;
+    interruptAndDeliver(inputs: readonly (string | ComposerSubmission)[]): number;
     rewindTo(row: ChatRow, mode?: string | null): Promise<string | null>;
     /** @internal rewind decision prompt (see the public Channel.promptRewind). */
     promptRewind(row: ChatRow): Promise<{
@@ -1164,6 +1262,9 @@ export interface ChannelState {
     }>;
     /** Set one effort level by id (see the public Channel type). */
     setEffort(id: string): Promise<boolean>;
+    /** Re-seat the future-sessions default reasoning effort (see the public
+     *  Channel.setDefaultEffort). */
+    setDefaultEffort(id: string | undefined): void;
     /** The session mode currently in force (see the public Channel type). */
     mode: SessionModeSpec;
     /** Index of `mode` in the configured cycle (see the public Channel type). */
@@ -1223,21 +1324,21 @@ export interface ChannelState {
     deleteSession(sessionId: string): Promise<boolean>;
     /** Rename any persisted session (see the public Channel type). */
     renameSessionTo(sessionId: string, title: string): Promise<boolean>;
-    /** Manually compact the session history (CC's /compact). */
+    /** Manually compact the session history (/compact). */
     compact(): void;
     /** Multi-line local report (`/status`, `/doctor`, …). */
     pushLocal(title: string, lines: readonly string[]): void;
     /** MCP server/tool status for /mcp: one line per server, or setup guidance. */
     mcpStatus(): string[];
-    /** Export the transcript to a markdown file (CC's /export). */
+    /** Export the transcript to a markdown file (/export). */
     exportSession(): string | null;
-    /** Create `AGENTS.md` in the session cwd (CC's /init). */
+    /** Create `AGENTS.md` in the session cwd (/init). */
     initWorkspace(): string | null;
-    /** Environment diagnostics (CC's /doctor). */
+    /** Environment diagnostics (/doctor). */
     doctorInfo(): string[];
     /** Plugin diagnostics (/plugins); see the public Channel type. */
     pluginsInfo(args: string): string[];
-    /** Subagent rows (CC's /agents). */
+    /** Subagent rows (/agents). */
     listSubagents(): Promise<string[]>;
     /** See {@link Channel.agentViewRows}. */
     agentViewRows(): readonly AgentViewRow[];
@@ -1296,8 +1397,8 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     effort?: string;
     /** Derive the working line from base session events; default on. */
     activity?: boolean;
-    /** Indicator preset for the working-activity line (`claude`/`moon`/
-     *  `comet`/`dots`/… or `random`); default `claude`. */
+    /** Indicator preset for the working-activity line (`moon8`/`moon`/
+     *  `comet`/`dots`/… or `random`); default `moon8`. */
     activityFrames?: string;
     /** Edit/Write diff presentation; default `auto` (side-by-side ≥110
      *  columns, unified below). */
@@ -1327,6 +1428,9 @@ export declare function createChannel(ctx: Context, initialAgent: Agent, options
     statusBar?: Partial<StatusBarConfig>;
     /** Show the header's pixel whale art; default on. */
     whale?: boolean;
+    /** Idle whale behaviors (fin/tail/sleep) after the intro settles;
+     * default off (click-hearts are always available). */
+    whaleIdle?: boolean;
     /** Minimal mode; default off (settings `dsh-tui.minimal`). */
     minimal?: boolean;
     /** Show the segmented context bar row in the status footer; default on

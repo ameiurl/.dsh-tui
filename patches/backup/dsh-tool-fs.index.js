@@ -224,8 +224,7 @@ function readMetaFromMeta(meta) {
 /**
 * Derive the working directory a filesystem tool resolves relative paths against: the calling
 * agent's per-session workspace (`exec.agent.session.header.cwd`), so each session's
-* `read`/`write`/`edit` act on ITS workspace, not the server's launch dir — mirroring how
-* `dsh-tool-bash` defaults a bash `workdir` to the session cwd.
+* `read`/`write`/`edit` act on its workspace, not the server's launch directory.
 * Non-agent calls return `undefined`, leaving the fallback in the provider rather than reading
 * `process.cwd()` at the tool boundary.
 * @module @deepseek-ai/dsh-tool-fs/session-cwd
@@ -326,7 +325,7 @@ function parseReadArgs(args, maxLimit) {
 function applyReadTool(ctx, caps) {
 	ctx.systemPrompt.section({
 		name: "tool:read",
-		order: 100,
+		order: ctx.systemPrompt.getSectionOrder("TOOL_READ"),
 		text: "Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files."
 	});
 	ctx.tools.register(defineTool({
@@ -601,7 +600,7 @@ ${outcome.operation === "create" ? "Created" : "Updated"} file
 function applyWriteTool(ctx, sandbox) {
 	ctx.systemPrompt.section({
 		name: "tool:write",
-		order: 101,
+		order: ctx.systemPrompt.getSectionOrder("TOOL_WRITE"),
 		text: "Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes."
 	});
 	ctx.tools.register(defineTool({
@@ -748,7 +747,7 @@ function formatEditOutput(displayPath, replaceAll) {
 function applyEditTool(ctx, sandbox) {
 	ctx.systemPrompt.section({
 		name: "tool:edit",
-		order: 102,
+		order: ctx.systemPrompt.getSectionOrder("TOOL_EDIT"),
 		text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."
 	});
 	ctx.tools.register(defineTool({
@@ -859,7 +858,10 @@ function applyEditTool(ctx, sandbox) {
 //#endregion
 //#region lib/types/read-image.js
 /**
-* The model-facing `read_image` tool commits a PNG/JPEG/WebP/GIF file.
+* The model-facing `read_image` tool commits a PNG/JPEG/WebP/GIF file. A path
+* without a file extension is identified from its file signature, while the
+* attachment service's full decode stays authoritative. The mounted `ctx.fs`
+* backend owns path resolution and read access; names only declare media type.
 *
 * The route gate is deliberately stricter than the host upload preflight. An
 * image-reading tool is useful only when the exact calling route can inspect
@@ -875,6 +877,41 @@ const IMAGE_EXTENSIONS = {
 	".webp": "image/webp",
 	".gif": "image/gif"
 };
+const PNG_SIGNATURE = [
+	137,
+	80,
+	78,
+	71,
+	13,
+	10,
+	26,
+	10
+];
+const JPEG_SIGNATURE = [
+	255,
+	216,
+	255
+];
+function matchesBytes(data, offset, expected) {
+	if (data.byteLength < offset + expected.length) return false;
+	return expected.every((byte, index) => data[offset + index] === byte);
+}
+function matchesAscii(data, offset, value) {
+	if (data.byteLength < offset + value.length) return false;
+	for (let index = 0; index < value.length; index += 1) if (data[offset + index] !== value.charCodeAt(index)) return false;
+	return true;
+}
+/**
+* Identify the media type declared by a supported image file signature.
+* @param data - file bytes read through the current filesystem backend.
+* @returns the detected supported media type, or undefined for other bytes.
+*/
+function sniffImageMediaType(data) {
+	if (matchesBytes(data, 0, PNG_SIGNATURE)) return "image/png";
+	if (matchesBytes(data, 0, JPEG_SIGNATURE)) return "image/jpeg";
+	if (matchesAscii(data, 0, "GIF87a") || matchesAscii(data, 0, "GIF89a")) return "image/gif";
+	if (matchesAscii(data, 0, "RIFF") && matchesAscii(data, 8, "WEBP")) return "image/webp";
+}
 const IMAGE_VALUE_SCHEMA = {
 	type: "object",
 	additionalProperties: false,
@@ -948,6 +985,10 @@ async function assertImageCapableRoute(ctx, exec, requestedPath) {
 	const active = await llm.resolveModelInfo(provider, model, exec.signal);
 	if (active.inputModalities === void 0 || !active.inputModalities.includes("image")) throw new Error(`cannot read "${requestedPath}" as an image: model "${model}" does not declare image input; switch to an image-capable model to read images`);
 }
+/** Refuse a media type outside the deployment's accepted set, naming the offending path. */
+function assertDeploymentAccepts(attachments, mediaType, displayPath) {
+	if (!attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`cannot read "${displayPath}": ${mediaType} images are not accepted by this deployment`);
+}
 /**
 * Re-brand a structured image outcome into the durable attachment reference an
 * `ImageBlock` carries.
@@ -1013,7 +1054,7 @@ function imageReadContent(value) {
 function applyReadImageTool(ctx) {
 	ctx.tools.register(defineTool({
 		name: "read_image",
-		description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input.",
+		description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without a file extension is accepted; the format is detected from the file content, so normalized attachment paths can be passed directly without copying or renaming. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input.",
 		parameters: { file_path: {
 			type: "string",
 			required: true,
@@ -1036,15 +1077,19 @@ function applyReadImageTool(ctx) {
 		isConcurrencySafe: () => true,
 		async execute(args, exec) {
 			if (args.file_path.trim().length === 0) throw new Error("file_path must be a non-empty string");
-			const mediaType = imageMediaTypeForPath(args.file_path);
-			if (mediaType === void 0) throw new Error(`cannot read "${args.file_path}": read_image only accepts PNG/JPEG/WebP/GIF paths`);
+			const extension = extname(args.file_path).toLowerCase();
+			const declared = imageMediaTypeForPath(args.file_path);
+			if (declared === void 0 && extension !== "") throw new Error(`cannot read "${args.file_path}": the ${extension} extension does not declare a supported image format; read_image accepts PNG/JPEG/WebP/GIF files, including extension-less files in those formats`);
 			const attachments = ctx.get("attachments");
 			if (attachments === void 0) throw new Error(`cannot read "${args.file_path}" as an image: no attachment service is mounted`);
-			if (!attachments.imageLimits.mediaTypes.includes(mediaType)) throw new Error(`cannot read "${args.file_path}": ${mediaType} images are not accepted by this deployment`);
+			if (declared !== void 0) assertDeploymentAccepts(attachments, declared, args.file_path);
 			await assertImageCapableRoute(ctx, exec, args.file_path);
 			const { target, info } = await resolveRegularReadTarget(ctx, exec, args.file_path);
 			const byteCap = Math.min(attachments.imageLimits.maxImageBytes, attachments.imageLimits.maxMessageImageBytes);
 			const data = await ctx.fs.readBytes(target, exec.signal, byteCap);
+			const mediaType = declared ?? sniffImageMediaType(data);
+			if (mediaType === void 0) throw new Error(`cannot read "${target.displayPath}": the file content is not a supported image format; read_image accepts PNG/JPEG/WebP/GIF`);
+			if (declared === void 0) assertDeploymentAccepts(attachments, mediaType, target.displayPath);
 			let ref;
 			try {
 				ref = await attachments.saveImage({
@@ -1058,8 +1103,9 @@ function applyReadImageTool(ctx) {
 				if (error.code === "IMAGE_TOO_MANY_PIXELS") throw new Error(`cannot read "${target.displayPath}": the image exceeds the ${attachments.imageLimits.maxImagePixels}-pixel decoded-size limit; downscale the image and read the smaller copy`, { cause: error });
 				if (error.code === "IMAGE_TOO_LARGE") throw new Error(`cannot read "${target.displayPath}": the image cannot be stored within the deployment's byte limits; downscale the image and read the smaller copy`, { cause: error });
 				if (error.code === "ATTACHMENT_WRITE_FAILED" && /16-bit PNG/iu.test(error.message)) throw new Error(`cannot read "${target.displayPath}": the 16-bit PNG could not be converted to the normalized 8-bit sRGB form; convert it to an 8-bit PNG/JPEG/WebP and retry`, { cause: error });
+				if (error.code === "INVALID_IMAGE" && declared === void 0) throw new Error(`cannot read "${target.displayPath}": the bytes do not decode as a supported PNG/JPEG/WebP/GIF image; the file may be truncated or corrupt`, { cause: error });
 				if (error.code !== "IMAGE_TYPE_MISMATCH") throw error;
-				const extension = extname(target.displayPath).toLowerCase();
+				if (declared === void 0) throw new Error(`cannot read "${target.displayPath}": the file signature claims ${mediaType}, but the bytes decode as a different image format; the file may be corrupt`, { cause: error });
 				throw new Error(`cannot read "${target.displayPath}": the ${extension} extension declares ${mediaType}, but the bytes use a different image format; rename the file to match its actual format if it is PNG/JPEG/WebP/GIF, or convert it to one of those formats`, { cause: error });
 			}
 			ctx.emit("fs/observed", target, {

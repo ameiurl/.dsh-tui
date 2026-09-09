@@ -1,6 +1,6 @@
---- original/PromptInput.js	2026-09-02 15:22:42.233762785 +0800
-+++ backup/PromptInput.js	2026-09-02 15:38:08.253576635 +0800
-@@ -22,7 +22,7 @@
+--- original/PromptInput.js	2026-09-09 10:51:37.341301967 +0800
++++ backup/PromptInput.js	2026-09-09 10:51:37.344630424 +0800
+@@ -24,7 +24,7 @@
  import { editInExternalEditor } from '../utils/externalEditor.js';
  import { setPromptEditorNode, EditorButton } from './PromptEditor.js';
  import { isHiddenCommandName, parseCommandName } from '../commands.js';
@@ -9,16 +9,16 @@
  import { mentionAtCaret } from '../utils/mentions.js';
  import { preserveSelection } from '../utils/fileSuggestions.js';
  import { isMod } from '../utils/modifiers.js';
-@@ -280,7 +280,7 @@
+@@ -352,7 +352,7 @@
   * working) interrupts the turn and delivers them right away; Ctrl+Enter
   * aborts the turn and sends the current input immediately.
   */
--export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, }) {
-+export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onVimChange, }) {
+-export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, }) {
++export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, onVimChange, }) {
      const [themeName] = useTheme();
      // Raw stdout writer for OSC 52 clipboard writes (selection copy) — must
      // bypass the frame pipeline; null outside a mounted Ink App.
-@@ -309,13 +309,22 @@
+@@ -381,13 +381,22 @@
       * i/a/o (…) return to INSERT. Enabled in insert mode so the transition
       * is seamless; the mode is session-scoped (not persisted).
       */
@@ -40,40 +40,21 @@
 +        if (onVimChange !== undefined)
 +            onVimChange(enabled, insert);
 +    };
-     /** Undo stack: vim editing ops push {value, cursor}; `u` pops. */
+     /** Undo owns the draft's image bindings as well as its text and caret. */
      const vimUndoRef = React.useRef([]);
      /** Pending vim operator: `d` pressed, awaiting its second key. */
-@@ -430,12 +439,14 @@
-                 const next = !vimEnabledRef.current;
-                 vimEnabledRef.current = next;
-                 setVimEnabled(next);
--                // Every toggle lands in INSERT: a fresh vim user keeps typing
--                // normally until they press Esc for the first time. Turning the
--                // mode off also clears the undo stack — a later re-enable must
--                // never `u` its way back past edits made while vim was off.
-+                // Enabling lands in INSERT (user preference — vim is ready but
-+                // typing continues; Esc drops to NORMAL for vim keys).
-+                // Turning the mode off also clears the undo stack — a later
-+                // re-enable must never `u` its way back past edits made while
-+                // vim was off.
-                 vimInsertRef.current = true;
-                 setVimInsert(true);
-+                notifyVimChange(next, true);
-                 vimPendingRef.current = '';
-                 vimUndoRef.current = [];
-                 return next;
-@@ -447,7 +458,21 @@
-         };
-     });
-     const [selectedCommand, setSelectedCommand] = React.useState(0);
+@@ -452,6 +461,21 @@
+     const valueRef = React.useRef(value);
+     const cursorRef = React.useRef(cursor);
+     const history = React.useRef([]);
 +    // ↑/↓ history walk: seeded from the persisted history file (oldest first,
 +    // newest last — `loadHistory()` returns newest-first), so the arrows
 +    // recall inputs from earlier sessions, not just this mount. Bash-style:
-+    // in-session submissions append on top of the seed.
-     const history = React.useRef([]);
++    // in-session submissions append on top of the seed. Persisted entries
++    // carry no image bindings, so the seed adapts them to the in-memory shape.
 +    {
 +        try {
-+            const persisted = loadHistory().map(entry => entry.text).reverse();
++            const persisted = loadHistory().map(entry => ({ text: entry.text, images: [] })).reverse();
 +            if (persisted.length > 0)
 +                history.current = persisted;
 +        }
@@ -82,19 +63,25 @@
 +        }
 +    }
      const historyIndex = React.useRef(-1);
-     const historyDraft = React.useRef('');
-     // ctrl+r history fill: replace the input when a new fill arrives, then
-@@ -1334,9 +1359,14 @@
-                 setInput(value, prevLineStart + Math.min(cursorColumn(value, cursor), prevLine.length));
+     const historyDraft = React.useRef({ text: '', images: [] });
+     /** Visible `[Image #N]` labels are presentation only; this sidecar carries
+@@ -621,6 +645,7 @@
+                 // never `u` its way back past edits made while vim was off.
+                 vimInsertRef.current = true;
+                 setVimInsert(true);
++                notifyVimChange(next, true);
+                 vimPendingRef.current = '';
+                 clearVimUndo();
+                 return next;
+@@ -1913,8 +1938,13 @@
                  return;
              }
--            if (overlayOpen && historyIndex.current < 0) {
+             if (overlayOpen && historyIndex.current < 0) {
 -                setSelectedCommand(index => index <= 0 ? suggestions.length - 1 : index - 1);
 -                return;
-+            // Command-suggestion menu open: ↑/↓ select its items — but at the
-+            // FIRST item another ↑ falls through into history, so both
-+            // behaviors stay reachable on the same keys (user preference).
-+            if (overlayOpen) {
++                // Command-suggestion menu open: ↑/↓ select its items — but at
++                // the FIRST item another ↑ falls through into history, so both
++                // behaviors stay reachable on the same keys (user preference).
 +                if (selectedCommand > 0) {
 +                    setSelectedCommand(index => index - 1);
 +                    return;
@@ -102,16 +89,14 @@
              }
              if (history.current.length === 0)
                  return;
-@@ -1397,9 +1427,13 @@
-                 setInput(value, nextLineStart + Math.min(cursorColumn(value, cursor), nextLine.length));
+@@ -1982,8 +2012,12 @@
                  return;
              }
--            if (overlayOpen && historyIndex.current < 0) {
+             if (overlayOpen && historyIndex.current < 0) {
 -                setSelectedCommand(index => index >= suggestions.length - 1 ? 0 : index + 1);
 -                return;
-+            // Same hybrid as ↑: the menu owns ↓ until its LAST item, then the
-+            // key falls through to newer-history.
-+            if (overlayOpen) {
++                // Same hybrid as ↑: the menu owns ↓ until its LAST item, then
++                // the key falls through to newer-history.
 +                if (selectedCommand < suggestions.length - 1) {
 +                    setSelectedCommand(index => index + 1);
 +                    return;
@@ -119,7 +104,7 @@
              }
              if (historyIndex.current < 0)
                  return;
-@@ -1663,23 +1697,27 @@
+@@ -2258,23 +2292,27 @@
                  case 'i': // insert at the caret
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -147,7 +132,7 @@
                      return;
                  }
                  case 'o': { // new line below, then insert
-@@ -1688,6 +1726,7 @@
+@@ -2283,6 +2321,7 @@
                      vimNormalEdit(value.slice(0, end) + '\n' + value.slice(end), end + 1);
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -155,7 +140,7 @@
                      return;
                  }
                  case 'O': { // new line above, then insert
-@@ -1696,6 +1735,7 @@
+@@ -2291,6 +2330,7 @@
                      vimNormalEdit(value.slice(0, start) + '\n' + value.slice(start), start);
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -163,7 +148,7 @@
                      return;
                  }
                  default:
-@@ -1709,6 +1749,7 @@
+@@ -2304,6 +2344,7 @@
                      event.stopImmediatePropagation();
                      vimInsertRef.current = false;
                      setVimInsert(false);
@@ -171,7 +156,7 @@
                      return;
                  }
              }
-@@ -1738,6 +1779,7 @@
+@@ -2333,6 +2374,7 @@
                          setFileSelected(0);
                          vimInsertRef.current = true;
                          setVimInsert(true);
@@ -179,7 +164,7 @@
                          return;
                      }
                      event.stopImmediatePropagation();
-@@ -2364,7 +2406,7 @@
+@@ -3010,7 +3052,7 @@
                      const max = Math.max(0, viewport.total - viewport.maxRows);
                      expandedScrollRef.current = Math.max(0, Math.min(expandedScrollRef.current + Math.round(event.deltaY), max));
                      setExpandedTick(tick => tick + 1);
@@ -188,7 +173,7 @@
                              line: cursorLine(value, cursor) + 1,
                              col: cursorColumn(value, cursor) + 1,
                          }) }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: `${t('input-expand-editor-hint-send')} · ${t('input-expand-editor-hint-collapse')}` })] }), _jsxs(Box, { flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, columnGap: 1, children: [_jsx(EditorButton, { label: `⏎ ${t('input-expand-editor-send')}`, hint: "Ctrl+Enter", primary: true, accent: promptAccent, onClick: submitFromEditor }), _jsx(EditorButton, { label: t('input-expand-editor-collapse'), hint: "Esc", onClick: collapseEditor }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: t('input-expand-editor-scroll') })] })] })) : null;
-@@ -2411,7 +2453,7 @@
+@@ -3063,7 +3105,7 @@
                                  : undefined, rows: peekVisualLines.map((row, index) => (_jsx(Text, { wrap: "truncate-end", children: row }, index))), onRowPick: () => {
                                  updateFoldBlock(null);
                                  setHovered(false);

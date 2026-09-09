@@ -8,13 +8,13 @@ import { readActivityFrames } from '../activityPrefs.js';
 import { envThemeOverride } from '../components/design-system/ThemeProvider.js';
 import { hasPath } from '../dsh-adapter/settingsEditor.js';
 import { planReload } from '../reload.js';
-import { AlternateScreen, Box, Text, useInput, ScrollBox, useTheme, useTerminalSize } from '../ui.js';
+import { AlternateScreen, Box, Image, Text, useInput, ScrollBox, useTheme, useTerminalSize } from '../ui.js';
 import * as tuiKit from '../ui.js';
 import { usePageInset } from '../components/PageMargin.js';
-import { POINTER } from '../cc/figures.js';
+import { POINTER } from '../terminal-utils/figures.js';
 import { isPlainReturnInput, modLabel } from '../utils/modifiers.js';
 import { actionMatches } from '../utils/keymap.js';
-import { formatTokens } from '../cc/format.js';
+import { formatTokens } from '../terminal-utils/format.js';
 import { homeDir } from '../utils/paths.js';
 import { cleanRenderText, cleanScalarText } from '../dsh-adapter/sanitize.js';
 import { deriveModelGroups, modelPickerLanding, recentCatalogModels, RECENTS_GROUP_PROVIDER, } from '../modelGroups.js';
@@ -40,7 +40,7 @@ import { normalizeScrollGutter } from '../tuiDisplayPrefs.js';
 import { OverlayAbove } from '../components/OverlayAbove.js';
 import { TooltipLayer } from '../components/Tooltip.js';
 import { PromptInput } from '../components/PromptInput.js';
-import { PromptEditorLayer } from '../components/PromptEditor.js';
+import { PromptEditorLayer, usePromptEditorOpen } from '../components/PromptEditor.js';
 import { GoalTodoPanel } from '../components/GoalTodoPanel.js';
 import { AutoRecapRow } from '../components/AutoRecapRow.js';
 import { BalanceReportRow } from '../components/BalanceReportRow.js';
@@ -50,6 +50,8 @@ import { WorkingSpinner, useThinkingStatus } from '../components/WorkingSpinner.
 import { ActivityLine, contextPressurePct } from '../components/ActivityLine.js';
 import { ModelPicker } from '../components/ModelPicker.js';
 import { PluginSceneBoundary } from '../components/PluginSceneBoundary.js';
+import { PluginStatusViewBoundary } from '../components/PluginStatusViewBoundary.js';
+import { ImagePreviewOverlay } from '../components/ImagePreviewOverlay.js';
 import { SkillsPicker, SkillsPickerLoading } from '../components/SkillsPicker.js';
 import { SessionBrowser } from './SessionBrowser.js';
 import { SessionTree } from './SessionTree.js';
@@ -72,7 +74,7 @@ import { HistorySearchDialog } from '../components/HistorySearchDialog.js';
 import { RewindPicker } from '../components/RewindPicker.js';
 import { BtwPanel } from '../components/BtwPanel.js';
 import { RecapPanel } from '../components/RecapPanel.js';
-import { isValidSessionColor, SESSION_COLOR_NAMES } from '../cc/sessionColors.js';
+import { isValidSessionColor, SESSION_COLOR_NAMES } from '../terminal-utils/sessionColors.js';
 import { TipsPanel } from '../components/TipsPanel.js';
 import { SubagentDashboard } from '../components/SubagentDashboard.js';
 import { JobsPanel } from '../components/JobsPanel.js';
@@ -97,17 +99,34 @@ import { Pane } from '../components/design-system/Pane.js';
 import { loadHistory } from '../history.js';
 import { formatLoadedContextReport } from '../utils/loaded-context.js';
 import { NO_OVERLAY, chatOverlayReducer, dialogOverlayVisible, wrapIndex, } from './chatOverlay.js';
+/** Strip the focus/global-input surface even from untyped plugins. Local
+ * click, hover, and captured drag stay inside the view and are kept. */
+function StatusViewBox({ ref: _ref, tabIndex: _tabIndex, autoFocus: _autoFocus, onContextMenu: _onContextMenu, onFocus: _onFocus, onFocusCapture: _onFocusCapture, onBlur: _onBlur, onBlurCapture: _onBlurCapture, onKeyDown: _onKeyDown, onKeyDownCapture: _onKeyDownCapture, onWheel: _onWheel, ...props }) {
+    return _jsx(Box, { ...props });
+}
+/** Text refs would expose the host DOM node; status text is presentation. */
+function StatusViewText({ ref: _ref, ...props }) {
+    return _jsx(Text, { ...props });
+}
+/** Rich status views receive pointer-only layout/text primitives, never the
+ * input, channel, raw-ANSI, or terminal-write parts of the full UI kit. */
+const STATUS_VIEW_UI = Object.freeze({
+    Box: StatusViewBox,
+    Image,
+    Text: StatusViewText,
+    useTerminalSize,
+});
 /** Shared empty snapshot for hosts whose channel has no event log. */
 const NO_EVENTS = [];
-const PERMISSION_RESULT_CELLS = 200;
-function cleanPermissionError(error) {
+const COMMAND_RESULT_CELLS = 200;
+function cleanCommandError(error) {
     try {
         if (error instanceof Error) {
             return typeof error.message === 'string'
-                ? cleanRenderText(error.message, PERMISSION_RESULT_CELLS)
+                ? cleanRenderText(error.message, COMMAND_RESULT_CELLS)
                 : '';
         }
-        return cleanScalarText(error, PERMISSION_RESULT_CELLS);
+        return cleanScalarText(error, COMMAND_RESULT_CELLS);
     }
     catch {
         return '';
@@ -138,9 +157,9 @@ const NO_ROWS = [];
 function capitalize(text) {
     return text.length === 0 ? text : text[0].toUpperCase() + text.slice(1);
 }
-/** Terminal-title spinner frames (CC's TITLE_ANIMATION_FRAMES). */
-const TITLE_ANIMATION_FRAMES = ['⠂', '⠐'];
-/** Searchable transcript text for one row (`/` incsearch, CC semantics:
+/** Terminal-title spinner frames. */
+const TITLE_SPINNER_FRAMES = ['⠂', '⠐'];
+/** Searchable transcript text for one row (`/` incsearch):
  *  user text, assistant text, thinking, tool args/results, local output). */
 function searchableText(row) {
     switch (row.kind) {
@@ -153,7 +172,7 @@ function searchableText(row) {
     }
 }
 /**
- * Main chat screen in the Claude Code layout: a scrollable transcript
+ * Main chat screen: a scrollable transcript
  * (with the user message the viewport is showing pinned above the transcript
  * while scrolled up, and a 1-column minimap scrollbar with one node per
  * user message — the current message's node is highlighted, clicking a node
@@ -176,11 +195,16 @@ let fallbackApprovalStore;
 /**
  * Shared inert extension stores for hosts that render Chat without the
  * dsh-tui-extensions row (headless verify scripts, bare embeds). Never
- * written, so the dialog panel and the plugin status line never mount and
+ * written, so plugin dialogs/status contributions never mount and
  * no shortcut ever matches.
  */
 let fallbackDialogStore;
 let fallbackStatusStore;
+/** Identity of one caret-preview dismissal: the token (its title) on the
+ *  image, so the same image staged twice is dismissed per token. */
+function peekKey(image, title) {
+    return `${title ?? ''} ${image.id}`;
+}
 export function Chat({ channel, questionStore, approvalStore, extensionDialogs, extensionStatus, extensionShortcuts, themeHost, onExit, onUpdate, onRestart, fullscreen = false, trajectorySeen: trajectorySeenProp, injectControllerRef, }) {
     const writeRaw = React.useContext(TerminalWriteContext);
     // Re-render whenever the channel mutates; rows/status are read fresh below.
@@ -194,6 +218,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     useExternalVersion(channel.subscribe, () => channel.version);
     // Re-render on language switches so the whole UI hot-swaps its strings.
     React.useSyncExternalStore(subscribeLang, getLang);
+    const promptEditorOpen = usePromptEditorOpen();
     // The pending ask-user-question (DSH user-interaction seam): the model's
     // `ask_user_question` tool parks here until the panel is answered.
     const questionSnapshot = React.useSyncExternalStore(listener => questionStore.subscribe(listener), () => questionStore.getSnapshot());
@@ -210,10 +235,12 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // extensions row share one inert store that never holds a dialog.
     const dialogs = extensionDialogs ?? (fallbackDialogStore ??= new TuiDialogStore());
     const dialogSnapshot = React.useSyncExternalStore(listener => dialogs.subscribe(listener), () => dialogs.getSnapshot());
-    // Plugin status-line contributions (tuiStatus seam): keyed texts joined
-    // into one line above the prompt.
+    // Plugin status contributions: text keys join into one line; bounded rich
+    // views keep their own rows immediately above the prompt.
     const statusContributions = extensionStatus ?? (fallbackStatusStore ??= new TuiStatusStore());
-    const statusEntries = React.useSyncExternalStore(listener => statusContributions.subscribe(listener), () => statusContributions.getSnapshot());
+    const subscribeStatus = React.useCallback((listener) => statusContributions.subscribe(listener), [statusContributions]);
+    const statusEntries = React.useSyncExternalStore(subscribeStatus, () => statusContributions.getSnapshot());
+    const statusViews = React.useSyncExternalStore(subscribeStatus, () => statusContributions.getViewSnapshot());
     // Shortcut handler failures surface as toasts (the registry also logs
     // them); the hook is re-pointed on every mount so a stale closure never
     // outlives its channel.
@@ -342,7 +369,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     /** `/agentview` and `/bg` open the agent view — a screen like the browser:
      *  it owns selection, the dispatch input and every key while up. */
     const [agentViewOpen, setAgentViewOpen] = React.useState(false);
-    /** The session backgrounded when the view opened via ←/`/bg` (CC's "Esc
+    /** The session backgrounded when the view opened via ←/`/bg` (the "Esc
      *  returns to that conversation" return target), cleared on close. */
     const [agentViewReturnId, setAgentViewReturnId] = React.useState(undefined);
     /** Live agent-view rows: the prompt footer's "← N agents" hint reads the
@@ -352,7 +379,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const EMPTY_AGENT_VIEW_ROWS = [];
     const agentViewRows = React.useSyncExternalStore(listener => channel.subscribeAgentView?.(listener) ?? (() => { }), () => channel.agentViewRows?.() ?? EMPTY_AGENT_VIEW_ROWS);
     const backgroundAgentsNeedingInput = agentViewRows.filter(row => row.status === 'needs-input' && !row.current).length;
-    /** CC parity: background the attached session and open the agent view
+    /** Background the attached session and open the agent view
      *  (`/bg`, `/background`, and ← on an empty prompt all land here). The
      *  backgrounded session becomes the view's return target (final Esc
      *  attaches back to it). */
@@ -389,7 +416,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
      *  plugin answering after the user moved on must not open a confirm for
      *  a row they are no longer looking at). */
     const rewindRequestRef = React.useRef(0);
-    /** /btw side-question overlay (CC): pure UI state — the answer never
+    /** /btw side-question overlay: pure UI state — the answer never
      *  enters the transcript or the session log. */
     const [btw, setBtw] = React.useState(null);
     const btwAbortRef = React.useRef(null);
@@ -624,6 +651,84 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         else
             void setClipboard(path);
     }, []);
+    /** Shared open path for the modal image preview: composer `[Image #N]`
+     *  tokens and transcript thumbnails both land here. */
+    const openImagePreview = React.useCallback((image, title) => {
+        // Snapshot only metadata/facades on an explicit open, not on every streamed
+        // token. Unvisited attachments stay lazy and duplicate image occurrences stay distinct.
+        const gallery = channel.rows.flatMap(row => (row.images ?? []).map(image => ({ image })));
+        let index = gallery.findIndex(entry => entry.image === image);
+        if (index < 0) {
+            index = gallery.length;
+            gallery.push({ image, title });
+        }
+        dispatchOverlay({
+            type: 'open',
+            overlay: { kind: 'image-preview', image, gallery, index, ...(title === undefined ? {} : { title }) },
+        });
+    }, [channel]);
+    // Agent-binding generation is monotonic across every agent replacement
+    // and bumps before the replacement emit, closing the ABA hole where a
+    // resumed session reuses the same id. Partial test/embed channels fall
+    // back to staged-image generation.
+    const previewBindingGeneration = channel.agentBindingGeneration
+        ?? channel.stagedImageGeneration?.()
+        ?? 0;
+    const previewGenerationRef = React.useRef(previewBindingGeneration);
+    const imagePreviewOwned = previewGenerationRef.current === previewBindingGeneration;
+    React.useEffect(() => {
+        if (previewGenerationRef.current === previewBindingGeneration)
+            return;
+        previewGenerationRef.current = previewBindingGeneration;
+        dispatchOverlay({ type: 'close-if', kind: 'image-preview' });
+    }, [previewBindingGeneration]);
+    // A questionnaire/approval/plugin dialog owns the keyboard while pending
+    // (their guard runs BEFORE the overlay key chain), so a preview left open
+    // underneath would be visually on top yet key-dead. Close it instead.
+    const previewBlocked = questionSnapshot !== null || approvalSnapshot !== null || dialogSnapshot !== null;
+    React.useEffect(() => {
+        if (overlay.kind === 'image-preview' &&
+            previewBlocked) {
+            dispatchOverlay({ type: 'close-if', kind: 'image-preview' });
+        }
+    }, [overlay.kind, previewBlocked]);
+    // Caret-driven preview (Grok Build's chip peek): while the composer caret
+    // sits on a staged `[Image #N]` — at its start, the token inverted — the
+    // same card shows over the transcript, and it goes away when the caret
+    // leaves (the cell just after the token is not "on" it). It is
+    // derived state, not an overlay: the prompt keeps the keyboard, so ←/→
+    // walk from image to image with the card following. Esc (or a click
+    // outside the card) dismisses it for THIS token until the caret leaves and
+    // comes back; a click on the token always shows it again.
+    const [caretPreview, setCaretPreview] = React.useState(null);
+    const [peekSuppressed, setPeekSuppressed] = React.useState(null);
+    const handleCaretImage = React.useCallback((image, title, reason) => {
+        if (image === undefined) {
+            setCaretPreview(null);
+            setPeekSuppressed(null);
+            return;
+        }
+        setCaretPreview({ image, ...(title === undefined ? {} : { title }) });
+        const key = peekKey(image, title);
+        setPeekSuppressed(current => reason === 'click' || current !== key ? null : current);
+    }, []);
+    const peekPreview = !previewBlocked && overlay.kind === 'none' && caretPreview !== null
+        && peekSuppressed !== peekKey(caretPreview.image, caretPreview.title)
+        ? caretPreview
+        : null;
+    /** Esc / click-outside on the peek: dismissed for this token until the
+     *  caret leaves it. PromptInput's Esc arm calls this first — its listener
+     *  runs before Chat's and the prompt stays live under a peek. */
+    const dismissPeek = () => {
+        if (peekPreview !== null)
+            setPeekSuppressed(peekKey(peekPreview.image, peekPreview.title));
+    };
+    /** The card on screen, if any: the modal overlay first, else the peek. */
+    const activePreview = !previewBlocked && overlay.kind === 'image-preview'
+        ? { image: overlay.image, ...(overlay.title === undefined ? {} : { title: overlay.title }), peek: false }
+        : peekPreview !== null
+            ? { ...peekPreview, peek: true }
+            : null;
     const handleOpenTarget = React.useCallback((url) => {
         const classification = classifyOpenTarget(url);
         if (classification.kind === 'file-actions') {
@@ -651,7 +756,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 current.onHyperlinkClick = undefined;
         };
     }, [handleOpenTarget]);
-    /** `/` transcript search (less-style incsearch, ported from CC's REPL).
+    /** `/` transcript search (less-style incsearch).
      *  Only the bar's open/closed mode lives in `overlay`; the query and match
      *  counters persist past the bar closing so n/N keep walking the matches. */
     const searchActive = overlay.kind === 'search';
@@ -674,6 +779,26 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // #185 sources are all Default-lane now, and the overflow guard
     // backstops the residue.
     const isSticky = React.useSyncExternalStore(cb => (handle ? handle.subscribe(cb) : () => { }), () => (handle ? handle.isSticky() : true));
+    // Whale idle gate: the settled header scrolls away with the transcript,
+    // and the idle planner is worth nothing the moment its art leaves the
+    // viewport — pause it there (timers cleared, the resting pose's cached
+    // rows stay painted so scroll geometry never shifts) and re-arm a fresh
+    // cycle when the user scrolls back to the top. Same uSES rationale as
+    // isSticky above: the renderer's sticky re-pin doesn't fire scroll
+    // subscribers, only the every-render snapshot check picks it up.
+    const WHALE_ART_CUTOFF_ROWS = 16; // marginTop + the 13-row whale art
+    const whaleArtVisible = React.useSyncExternalStore(cb => (handle ? handle.subscribe(cb) : () => { }), () => {
+        if (!handle)
+            return true;
+        // A transcript that fits the viewport always shows the header.
+        if (handle.getScrollHeight() <= handle.getViewportHeight())
+            return true;
+        // Visible while the art block intersects the viewport. A sticky bottom
+        // pin with an overflow smaller than the art's height still leaves the
+        // art on screen — visibility, not pin state, decides whether the idle
+        // planner earns its keep.
+        return handle.getScrollTop() < WHALE_ART_CUTOFF_ROWS;
+    });
     const subscribeTooltipInvalidation = React.useCallback((listener) => (handle ? handle.subscribe(listener) : () => { }), [handle]);
     // "N new messages" pill: new rows whose top edge is still BELOW the
     // viewport bottom. The count decrements as the user scrolls down through
@@ -699,8 +824,8 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // home): with unseen rows it counts them, otherwise it is the plain
     // "return to bottom" affordance (Enter/End/click all land it).
     const showPill = !isSticky;
-    // Idle Ctrl+C: first press arms an exit, second press exits (CC's
-    // double-press semantics, simplified). Under Windows ConPTY the key
+    // Idle Ctrl+C: first press arms an exit, second press exits. Under
+    // Windows ConPTY the key
     // arrives as stdin data (key.ctrl && input === 'c') — the useInput
     // branch below is the only path; SIGINT is not emitted.
     const exitPendingRef = React.useRef(false);
@@ -708,6 +833,26 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // Live view into the prompt's text for the Ctrl+C rule (clears text when
     // non-empty; the double-press exit only arms on an empty input).
     const promptControllerRef = React.useRef(null);
+    const previewGallery = activePreview === null ? [] : activePreview.peek
+        ? promptControllerRef.current?.previewImages?.() ?? [activePreview]
+        : overlay.kind === 'image-preview' ? overlay.gallery ?? [activePreview] : [];
+    const previewIndex = activePreview?.peek
+        ? previewGallery.findIndex(entry => entry.image === activePreview.image && entry.title === activePreview.title)
+        : overlay.kind === 'image-preview' ? overlay.index ?? 0 : -1;
+    const stepPreview = (delta) => {
+        if (!activePreview?.peek) {
+            dispatchOverlay({ type: 'image-step', delta });
+            return;
+        }
+        const index = previewIndex + delta;
+        const entry = previewGallery[index];
+        if (!entry)
+            return;
+        // A gallery click promotes the caret peek to a modal without moving or
+        // editing the draft. Suppress the original peek so Esc really closes it.
+        setPeekSuppressed(peekKey(activePreview.image, activePreview.title));
+        dispatchOverlay({ type: 'open', overlay: { kind: 'image-preview', ...entry, gallery: previewGallery, index } });
+    };
     // Publish the external-injection controller (dsh.nvim etc.) every render so
     // the adapter-owned socket can append to the prompt and submit. `submit`
     // mirrors an Enter press: `channel.submit` routes through the DSH inbox
@@ -769,13 +914,13 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     uploadTokensRef.current = lastUploadTokens;
     loadingStartTimeRef.current = channel.turnStart;
     const thinkingStatus = useThinkingStatus(channel.spinnerMode === 'thinking');
-    // Terminal tab title (ported from CC's AnimatedTerminalTitle): the session
+    // Terminal tab title: the session
     // title when set, else "dsh-TUI"; a `⠂/⠐` spinner prefix while a turn is
     // working (960ms cadence, only while the terminal is focused), a static
     // `✦` otherwise. dsh-TUI brands the idle prefix with the DeepSeek whale.
     const [titleFrame, setTitleFrame] = React.useState(0);
     const terminalFocused = useTerminalFocus();
-    // Mouse text selection auto-copy (CC's copy-on-select): active only in
+    // Mouse text selection auto-copy: active only in
     // fullscreen (<AlternateScreen> supplies mouse tracking); a no-op
     // subscription in inline mode, where selection belongs to the terminal.
     // The copy clears the highlight and posts a transient notification.
@@ -785,12 +930,12 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         if (!channel.working || !terminalFocused)
             return;
         const interval = setInterval(() => {
-            setTitleFrame(f => (f + 1) % TITLE_ANIMATION_FRAMES.length);
+            setTitleFrame(f => (f + 1) % TITLE_SPINNER_FRAMES.length);
         }, 960);
         return () => { clearInterval(interval); };
     }, [channel.working, terminalFocused]);
     const titlePrefix = channel.working
-        ? (TITLE_ANIMATION_FRAMES[titleFrame] ?? '✦')
+        ? (TITLE_SPINNER_FRAMES[titleFrame] ?? '✦')
         : '✦';
     useTerminalTitle(`${titlePrefix} 🐋 ${channel.sessionTitle}`);
     const handleWorkspaceResult = (result) => {
@@ -912,25 +1057,60 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
      * result text lands as a notification. `rawInput` carries the text after
      * the command name (`/plan off` → ` off`).
      */
-    /** Route every permission switch through the official command path. */
-    const runPermissionCommand = (rawInput) => {
+    const runExternalCommand = (name, rawInput, images = []) => {
         const originAgentBinding = channel.agentBindingGeneration;
-        void channel.runExternalCommand('permission', rawInput).then((text) => {
+        return channel.runExternalCommandOutcome(name, rawInput, images).then((outcome) => {
             if (channel.agentBindingGeneration !== originAgentBinding)
-                return;
-            if (text === undefined) {
-                channel.notify(t('command-not-found', { name: 'permission' }), { color: 'error' });
-                return;
+                return false;
+            if (outcome === undefined) {
+                channel.notify(t('command-not-found', { name }), { color: 'error' });
+                return false;
             }
-            const cleaned = typeof text === 'string' ? cleanRenderText(text, PERMISSION_RESULT_CELLS) : '';
-            if (cleaned !== '')
-                channel.notify(cleaned);
+            const cleaned = cleanRenderText(outcome.text, COMMAND_RESULT_CELLS);
+            if (cleaned !== '') {
+                channel.notify(cleaned, outcome.kind === 'error' ? { color: 'error' } : undefined);
+            }
+            return outcome.consumeDraft;
         }).catch((error) => {
             if (channel.agentBindingGeneration !== originAgentBinding)
-                return;
-            const detail = cleanPermissionError(error);
+                return false;
+            const detail = cleanCommandError(error);
             if (detail !== '')
                 channel.notify(detail, { color: 'error' });
+            return false;
+        });
+    };
+    /** Route every permission switch through the official command path when it
+     *  is registered; otherwise fall back to the permission-presets service's
+     *  own write path (the same handler the command drives) so the picker and
+     *  typed `/permission <preset>` keep working on compositions where the
+     *  command row never reaches this agent's registry. The fallback carries no
+     *  images: it is not a registry command and has no image grammar. */
+    const runPermissionCommand = (rawInput, images = []) => {
+        const originAgentBinding = channel.agentBindingGeneration;
+        const mounted = channel.commandList.some(command => command.external && command.name === 'permission');
+        const run = mounted
+            ? channel.runExternalCommandOutcome('permission', rawInput, images)
+            : channel.runPermissionPreset(rawInput.trim()).then(ok => ok ? { kind: 'success', text: '', consumeDraft: true } : undefined);
+        return run.then((outcome) => {
+            if (channel.agentBindingGeneration !== originAgentBinding)
+                return false;
+            if (outcome === undefined) {
+                channel.notify(t('command-not-found', { name: 'permission' }), { color: 'error' });
+                return false;
+            }
+            const cleaned = cleanRenderText(outcome.text, COMMAND_RESULT_CELLS);
+            if (cleaned !== '') {
+                channel.notify(cleaned, outcome.kind === 'error' ? { color: 'error' } : undefined);
+            }
+            return outcome.consumeDraft;
+        }).catch((error) => {
+            if (channel.agentBindingGeneration !== originAgentBinding)
+                return false;
+            const detail = cleanCommandError(error);
+            if (detail !== '')
+                channel.notify(detail, { color: 'error' });
+            return false;
         });
     };
     /** Hot-swap the UI language (`/lang <id>` and the LangPicker both land
@@ -958,7 +1138,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             case 'activity': return t('reload-kind-activity');
         }
     };
-    const runCommand = (name, rawInput = '') => {
+    const runCommand = (name, rawInput = '', images = []) => {
         switch (name) {
             case 'activity': {
                 // Ported from the pi working-activity extension: bare `/activity`
@@ -970,7 +1150,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 if (parts[0] === 'status') {
                     setHelpOpen(false);
                     channel.pushLocal('/activity', [
-                        t('activity-current-preset', { name: channel.activityFrames ?? 'claude' }),
+                        t('activity-current-preset', { name: channel.activityFrames ?? 'moon8' }),
                         t('activity-switch-hint'),
                         t('activity-persist-hint'),
                     ]);
@@ -984,7 +1164,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                     }
                     const current = channel.activityFrames;
                     channel.pushLocal('/activity', [
-                        t('activity-current-direct', { name: current ?? 'claude' }),
+                        t('activity-current-direct', { name: current ?? 'moon8' }),
                         ...PRESET_NAMES.map(name => `${name.padEnd(10)} ${name === 'random' ? t('activity-random-each') : FRAME_PRESETS[name].frames.slice(0, 5).join(' ')}${name === current ? t('activity-current-marker') : ''}`),
                     ]);
                     return true;
@@ -1162,7 +1342,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 return true;
             }
             case 'color': {
-                // `/color`（CC accent，按会话持久化）：无参打开调色板选择器，
+                // `/color`（按会话持久化的 accent）：无参打开调色板选择器，
                 // `/color <name>` 直接设置，`/color status` 显示当前，`/color
                 // reset` 清除回主题默认。颜色经 `session/color` 事件按会话保存
                 // ——resume/rewind 后仍是这个会话自己的颜色（见 channel.ts）。
@@ -1204,7 +1384,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             case 'new': {
                 // One-shot `/new` (issue #25): the old session stays persisted and
                 // is recoverable via /resume, so discarding the live view is
-                // non-destructive — no CC-style "press /new again" confirmation.
+                // non-destructive — no second confirmation is required.
                 setHelpOpen(false);
                 void channel.newSession().then((ok) => {
                     if (!ok)
@@ -1421,7 +1601,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 return true;
             }
             case 'agentview': {
-                // CC's `claude agents`: one screen for every session. Opens
+                // The agent view shows one screen for every session. It opens
                 // immediately; the view reads its own rows (live + persisted).
                 setHelpOpen(false);
                 agentViewOpenSessionRef.current = channel.agentId;
@@ -1430,7 +1610,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             }
             case 'bg':
             case 'background': {
-                // CC's `/background`: the attached session moves to the background
+                // `/background`: the attached session moves to the background
                 // (it keeps running in this process), the terminal lands on a fresh
                 // session, and the agent view opens on top.
                 setHelpOpen(false);
@@ -1492,8 +1672,8 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 return true;
             }
             case 'rewind':
-                // Same picker as PromptInput's double-Esc on an empty input (CC
-                // rewind); `openRewind` notifies when there is nothing to rewind.
+                // Same picker as PromptInput's double-Esc on an empty input;
+                // `openRewind` notifies when there is nothing to rewind.
                 setHelpOpen(false);
                 openRewind();
                 return true;
@@ -1671,23 +1851,29 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 channel.notify(t('login-logout-hint'));
                 return true;
             case 'permission': {
-                // The command itself is registered by dsh-sandbox-policy (dsh-base
-                // permission-presets row): bare `/permission` opens the preset
-                // picker and
-                // Enter dispatches `/permission <preset>` through the same
-                // external-command path a hand-typed argument takes. `/permission
-                // status` prints the policy explainer; other arguments pass through
-                // verbatim.
-                // When the row is not mounted the default external path (or the
-                // model, when nothing is registered) wins.
+                // The command itself is registered by the permission-presets row
+                // (dsh-base): bare `/permission` opens the preset picker and Enter
+                // dispatches `/permission <preset>`; `/permission status` prints the
+                // policy explainer; other arguments pass through verbatim.
+                // The row may be mounted as a service without its command ever
+                // reaching this agent's registry (composition-dependent) — when the
+                // service snapshot is usable the TUI still owns the entry and
+                // switches through the service write path (never the model).
                 const mounted = channel.commandList.some(command => command.external && command.name === 'permission');
+                let serviceUsable = false;
+                try {
+                    serviceUsable = channel.permissionPresets().availability === 'runtime';
+                }
+                catch {
+                    serviceUsable = false;
+                }
+                const reachable = mounted || serviceUsable;
                 const parts = rawInput.trim().split(/\s+/).filter(Boolean);
-                if (mounted && parts[0] === 'status') {
+                if (reachable && parts[0] === 'status') {
                     setHelpOpen(false);
                     const snapshot = channel.permissionPresets();
                     if (snapshot.options.some(option => option.value === 'status')) {
-                        runPermissionCommand(rawInput);
-                        return true;
+                        return runPermissionCommand(rawInput, images);
                     }
                     const currentName = snapshot.availability === 'unavailable'
                         ? t('permission-roster-unavailable')
@@ -1701,12 +1887,11 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                     ]);
                     return true;
                 }
-                if (mounted && parts.length === 0) {
+                if (reachable && parts.length === 0) {
                     setHelpOpen(false);
                     const snapshot = channel.permissionPresets();
                     if (snapshot.availability === 'unavailable' || snapshot.options.length === 0) {
-                        runPermissionCommand(rawInput);
-                        return true;
+                        return runPermissionCommand(rawInput, images);
                     }
                     const currentValue = snapshot.current?.kind === 'preset' ? snapshot.current.value : undefined;
                     const currentIndex = currentValue === undefined
@@ -1725,10 +1910,9 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                     });
                     return true;
                 }
-                if (mounted) {
+                if (reachable) {
                     setHelpOpen(false);
-                    runPermissionCommand(rawInput);
-                    return true;
+                    return runPermissionCommand(rawInput, images);
                 }
                 return false;
             }
@@ -1750,15 +1934,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 }
                 if (mounted) {
                     setHelpOpen(false);
-                    void channel.runExternalCommand('plan', rawInput).then((text) => {
-                        if (text !== undefined && text !== '') {
-                            channel.notify(text);
-                        }
-                        else if (text === undefined) {
-                            channel.notify(t('command-not-found', { name: 'plan' }), { color: 'error' });
-                        }
-                    });
-                    return true;
+                    return runExternalCommand('plan', rawInput, images);
                 }
                 return false;
             }
@@ -1888,7 +2064,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 }
                 return true;
             case 'vim': {
-                // `/vim`（CC vim 编辑模式）：切换输入框的 vim 编辑开关。状态在
+                // `/vim`：切换输入框的 vim 编辑开关。状态在
                 // PromptInput 内部（controllerRef.toggleVim），每次切换落回 insert
                 // 子模式；Esc 进 normal、i/a/o 回 insert。会话级、不持久化。
                 setHelpOpen(false);
@@ -1931,7 +2107,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 return true;
             }
             case 'btw': {
-                // CC /btw：单轮无工具侧问，overlay 态纯 UI，不打断主回合、不写
+                // `/btw`：单轮无工具侧问，overlay 态纯 UI，不打断主回合、不写
                 // 会话历史。空参数只提示用法。
                 setHelpOpen(false);
                 const question = rawInput.trim();
@@ -1982,21 +2158,13 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 const external = channel.commandList.find(command => command.external && command.name === name);
                 if (external) {
                     setHelpOpen(false);
-                    void channel.runExternalCommand(name, rawInput).then((text) => {
-                        if (text !== undefined && text !== '') {
-                            channel.notify(text);
-                        }
-                        else if (text === undefined) {
-                            channel.notify(t('command-not-found', { name }), { color: 'error' });
-                        }
-                    });
-                    return true;
+                    return runExternalCommand(name, rawInput, images);
                 }
                 return false;
             }
         }
     };
-    // === Message-selection mode (CC's Shift+↑ message actions) ===
+    // === Message-selection mode (Shift+↑ message actions) ===
     // NOTE: rows is a live in-place array on the channel (no new reference per
     // update), so derived lists must be computed per render — a useMemo keyed
     // on `channel.rows` would freeze at the first empty snapshot forever.
@@ -2014,7 +2182,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         const q = historyQuery.trim().toLowerCase();
         return q ? historyEntries.filter(e => e.text.toLowerCase().includes(q)) : historyEntries;
     }, [historyEntries, historyQuery]);
-    // Double-Esc rewind: the user's own messages, newest first (CC lists the
+    // Double-Esc rewind: the user's own messages, newest first (the list shows
     // selectable user turns; steering side-questions are excluded). Computed
     // per render while the picker is open — `channel.rows` is a live in-place
     // array (see selectableRows).
@@ -2061,7 +2229,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const performRewind = async (row, mode = null) => {
         const text = await channel.rewindTo(row, mode);
         if (text !== null) {
-            // CC puts the restored message back in the prompt for re-editing.
+            // Put the restored message back in the prompt for re-editing.
             setHistoryFill(text);
             channel.notify(t('rewind-done'));
         }
@@ -2183,7 +2351,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             .filter(m => m.text.includes(q));
     })();
     // Incsearch: highlight all matches (screen-space overlay) and keep the
-    // current match row in view as the query changes (CC semantics).
+    // current match row in view as the query changes.
     React.useEffect(() => {
         if (!searchActive)
             return;
@@ -2256,11 +2424,14 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     /** Deduplicate terminals that report one Enter as parsed Return then raw CR/LF. */
     const lastModalEnterAtRef = React.useRef(0);
     useInput((input, key, event) => {
-        // The /btw panel owns the keyboard while open (its own useInput handles
-        // Esc/Enter/Space close, ↑/↓ scroll, c copy; everything else is
-        // swallowed there). Chat registered first, so an early return here does
-        // not block the event from reaching the panel.
-        if (btw !== null)
+        // Prompt-slot panels own the keyboard while visible. Their own useInput
+        // handles the relevant keys; Chat registered first, so yielding here
+        // still lets the panel receive them. PromptInput now stays mounted but
+        // suspended to preserve async command drafts, making this guard also
+        // essential for Ctrl+C: it must never clear the hidden composer.
+        if (btw !== null
+            || overlay.kind === 'tips'
+            || (recap !== null && (!recap.auto || recap.expanded)))
             return;
         // Same for the session browser: it renders instead of the conversation,
         // so every key belongs to it — including the plain letters that drive its
@@ -2271,7 +2442,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         // Enter drive its action menu.
         if (treeOpen)
             return;
-        // The agent view (CC `claude agents`) is another whole-screen surface:
+        // The agent view is another whole-screen surface:
         // its dispatch input owns every printable key.
         if (agentViewOpen)
             return;
@@ -2327,7 +2498,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             return;
         // The questionnaire / approval panel / managed plugin dialog owns the
         // keyboard while one is pending (the panel's own useInput handles
-        // ↑/↓/Space/Tab/Enter/Esc; the prompt input is unmounted, so nothing
+        // ↑/↓/Space/Tab/Enter/Esc; the prompt input is suspended, so nothing
         // else should see these keys).
         if (questionSnapshot !== null || approvalSnapshot !== null || dialogSnapshot !== null)
             return;
@@ -2336,8 +2507,31 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         const plainReturn = returnCandidate && returnNow - lastModalEnterAtRef.current >= 80;
         if (plainReturn)
             lastModalEnterAtRef.current = returnNow;
-        // Esc clears a settled mouse selection first (CC precedence), ahead of
-        // every other Esc meaning below (close pickers, interrupt the turn).
+        if (overlay.kind === 'image-preview') {
+            // Modal gallery owns plain left/right. Caret peeks below still leave
+            // navigation with PromptInput. Esc/Ctrl+C/Enter keep their close semantics.
+            if (key.escape || (key.ctrl && input === 'c') || plainReturn) {
+                dispatchOverlay({ type: 'close' });
+            }
+            else if (!key.ctrl && !key.meta && !key.shift && (key.leftArrow || key.rightArrow)) {
+                dispatchOverlay({ type: 'image-step', delta: key.leftArrow ? -1 : 1 });
+            }
+            event.stopImmediatePropagation();
+            return;
+        }
+        if (peekPreview !== null && key.escape) {
+            // Caret-driven preview: Esc dismisses it until the caret leaves the
+            // token (PromptInput's own Esc arm normally gets there first; this is
+            // the fallback when the prompt is not listening). Every other key
+            // stays with the prompt, so the caret keeps moving (and the card
+            // follows it) while the preview is up.
+            dismissPeek();
+            event.stopImmediatePropagation();
+            return;
+        }
+        // Esc clears a settled mouse selection before the ordinary chat meanings
+        // below, but never before a top-level modal. Otherwise a preview opened
+        // over selected transcript text needed two Esc presses to close.
         // hasSelection() is an imperative read — no subscription needed.
         if (key.escape && hasMouseSelection()) {
             clearMouseSelection();
@@ -2353,7 +2547,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 handle?.scrollTo(searchAnchorRef.current);
             }
             else if (plainReturn) {
-                // Enter commits; 0-match junk queries don't persist (CC behavior).
+                // Enter commits; 0-match junk queries don't persist.
                 if (searchCount === 0)
                     setSearchQuery('');
                 dispatchOverlay({ type: 'close' });
@@ -2390,7 +2584,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             return;
         }
         // After Enter closed the search bar, n/N keep walking the matches
-        // (CC: "Query persists across bar open/close so n/N keep working").
+        // The query persists across bar open/close so n/N keep working.
         // Transcript mode only — in prompt mode n/N are ordinary input chars.
         if (expanded && input === 'n' && searchQuery && searchCount > 0 && !key.ctrl && !key.meta && !key.super) {
             setSearchCurrent(i => (i >= searchCount - 1 ? 0 : i + 1));
@@ -2688,7 +2882,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 permissionOverlayFocusRef.current = null;
                 dispatchOverlay({ type: 'close' });
                 if (option !== undefined)
-                    runPermissionCommand(` ${option.value}`);
+                    void runPermissionCommand(` ${option.value}`);
             }
             else if (key.escape) {
                 permissionOverlayFocusRef.current = null;
@@ -2703,10 +2897,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             else if (plainReturn) {
                 const on = overlay.index === 0;
                 dispatchOverlay({ type: 'close' });
-                void channel.runExternalCommand('plan', on ? '' : ' off').then((text) => {
-                    if (text !== undefined && text !== '')
-                        channel.notify(text);
-                });
+                void runExternalCommand('plan', on ? '' : ' off');
             }
             else if (key.escape) {
                 dispatchOverlay({ type: 'close' });
@@ -2752,7 +2943,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 dispatchOverlay({ type: 'close' });
             }
             else if (key.ctrl && (input === 'c' || input === 'd')) {
-                // CC's history search cancels on ctrl+c/ctrl+d too.
+                // History search cancels on ctrl+c/ctrl+d too.
                 dispatchOverlay({ type: 'close' });
             }
             else if (plainReturn) {
@@ -2769,7 +2960,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 }
             }
             else if (key.downArrow || actionMatches('history', input, key)) {
-                // CC's historySearch:next — ↓ and the history key (default Ctrl+R)
+                // History search next — ↓ and the history key (default Ctrl+R)
                 // walk to the next match.
                 if (historyMatches.length > 0) {
                     dispatchOverlay({ type: 'move', delta: 1, count: historyMatches.length });
@@ -2941,7 +3132,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             }
         }
         else if (key.escape && channel.working && !helpOpen && !promptControllerRef.current?.vimActive()) {
-            // CC's chat:cancel — esc interrupts a running turn (the prompt input
+            // Esc interrupts a running turn (the prompt input
             // only sees esc when idle, where it has the double-tap-clear meaning).
             // With messages queued for delivery, interrupt-and-deliver them right
             // away (Codex behavior); otherwise a plain interrupt parks the queue.
@@ -2949,7 +3140,10 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             // NORMAL, NORMAL = no-op/cancel pending d) and the prompt owns it;
             // interrupting still works via Ctrl+C / Ctrl+Enter.
             if (channel.pending.length > 0) {
-                const count = channel.interruptAndDeliver(channel.pending.map(item => item.text));
+                const count = channel.interruptAndDeliver(channel.pending.map(item => ({
+                    text: item.text,
+                    images: item.images ?? [],
+                })));
                 if (count > 0) {
                     channel.notify(t('interrupt-delivered', { n: count }), { timeoutMs: 2500 });
                 }
@@ -2978,7 +3172,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             ink?.reanchorViewport();
         }
         else if (input === '/' && !key.ctrl && !key.meta && !key.super && !helpOpen) {
-            // `/` in transcript mode (Ctrl+O expanded, CC's REPL semantics:
+            // `/` in transcript mode (Ctrl+O expanded):
             // search is active on the transcript screen where `/` isn't a command).
             if (expanded) {
                 searchAnchorRef.current = handle?.getScrollTop() ?? 0;
@@ -2991,7 +3185,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             }
         }
         else if (key.ctrl && (input === 'c' || input === 'd')) {
-            // CC's app:exit — ctrl+c interrupts a running turn; idle ctrl+c
+            // Ctrl+C interrupts a running turn; idle Ctrl+C
             // CLEARS a non-empty prompt (single press) and only arms the
             // double-press exit when the input is empty; ctrl+d keeps the
             // time-based double-press exit regardless.
@@ -3034,7 +3228,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             }
         }
         else if (actionMatches('redraw', input, key)) {
-            // CC's app:redraw (default Ctrl+L) — clear the physical terminal and
+            // Redraw (default Ctrl+L) — clear the physical terminal and
             // repaint.
             instances.get(process.stdout)?.forceRedraw();
             // Consume: same readline-shadowing rule as dashboard/showAll below.
@@ -3055,7 +3249,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             event.stopImmediatePropagation();
         }
         else if (plainReturn && !isSticky) {
-            // Enter while scrolled up returns to the bottom (CC's pill: the
+            // Enter while scrolled up returns to the bottom: the
             // affordance now exists whenever the view is off the bottom, not
             // only with unseen rows).
             handle?.scrollToBottom();
@@ -3220,6 +3414,15 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
      *  overlay union covers every picker/dialog and /tips in one check;
      *  message-selection mode and the /btw panel live outside it. */
     const promptSelectionActive = selectionActive || overlay.kind !== 'none' || btw !== null;
+    // These panels replace the visible composer, but PromptInput remains
+    // mounted (suspended) so an async registry command cannot lose its exact
+    // text/image draft while it waits for a user decision.
+    const promptReplacementOpen = approvalPanelNode !== null
+        || dialogSnapshot !== null
+        || overlay.kind === 'tips'
+        || (recap !== null && (!recap.auto || recap.expanded))
+        || btw !== null
+        || questionPanelNode !== null;
     // The trajectory scene replaces the conversation for as long as it is open.
     // Rendering it INSTEAD of (not above) the transcript is what makes it a
     // screen rather than an overlay: it owns the full viewport, and the
@@ -3252,9 +3455,29 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const anchorUserText = anchorUserRowId === null
         ? null
         : channel.rows.find(row => row.id === anchorUserRowId)?.text ?? null;
-    return (_jsxs(Box, { ref: wakeTickRef, flexDirection: "column", flexGrow: 1, width: "100%", children: [!isSticky && anchorUserText && (_jsx(StickyPromptHeader, { text: anchorUserText, onClick: () => {
-                    // Click snaps the pinned prompt to the viewport top (CC's
-                    // StickyPromptHeader). Jump by the SAME content coordinate the
+    // Modal image preview, shared by the composer's [Image #N] tokens and the
+    // transcript thumbnails. It normally lives INSIDE the transcript row, so
+    // the card centers over the conversation and the sticky header, prompt
+    // and status rows stay visible. While the fullscreen draft editor is open
+    // it moves to the root, after PromptEditorLayer, so it still paints above
+    // the editor (the editor state stays put; closing the preview restores it).
+    // The layer needs its region before its first paint (see the component):
+    // the transcript viewport height from the ScrollBox handle and the content
+    // column width. The full-screen (editor-open) placement uses the terminal.
+    const imagePreviewRegion = promptEditorOpen
+        ? { columns: terminalColumns, rows: terminalRows }
+        : { columns: terminalColumns, rows: handle?.getViewportHeight() ?? terminalRows };
+    const imagePreviewNode = activePreview !== null && (activePreview.peek || imagePreviewOwned)
+        ? (_jsx(ImagePreviewOverlay, { image: activePreview.image, title: activePreview.title, navigation: previewGallery.length > 1 && previewIndex >= 0 ? {
+                index: previewIndex, total: previewGallery.length,
+                onPrevious: () => stepPreview(-1), onNext: () => stepPreview(1),
+            } : undefined, onClose: activePreview.peek
+                ? () => setPeekSuppressed(peekKey(activePreview.image, activePreview.title))
+                : () => dispatchOverlay({ type: 'close-if', kind: 'image-preview' }), region: imagePreviewRegion }))
+        : null;
+    return (_jsxs(Box, { ref: wakeTickRef, flexDirection: "column", flexGrow: 1, width: "100%", children: [!isSticky && anchorUserText && (_jsx(PinnedTurnHeader, { text: anchorUserText, onClick: () => {
+                    // Click snaps the pinned prompt to the viewport top. Jump by the
+                    // SAME content coordinate the
                     // rail's tick uses (timeline turn top = the prompt TEXT top):
                     // the element-based seek lands the row wrapper's margin at the
                     // top instead — one row shy of the text top the anchor rule
@@ -3267,7 +3490,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                         seekRow(anchorUserRowId);
                     else
                         handle?.scrollToBottom();
-                } })), _jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, marginRight: -pageInsetX, children: [_jsxs(ScrollBox, { ref: setHandle, flexDirection: "column", flexGrow: 1, flexShrink: 1, stickyScroll: true, children: [_jsx(LogoHeader, { model: channel.model, effort: channel.reasoningEffort, cwd: channel.displayCwd, whale: channel.whale, 
+                } })), _jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, marginRight: -pageInsetX, children: [_jsxs(ScrollBox, { ref: setHandle, flexDirection: "column", flexGrow: 1, flexShrink: 1, stickyScroll: true, children: [_jsx(LogoHeader, { model: channel.model, effort: channel.reasoningEffort, cwd: channel.displayCwd, whale: channel.whale, whaleIdle: channel.whaleIdle && whaleArtVisible, working: channel.working, 
                                 // Resuming a long session skips the ~3.4s opening animation: it
                                 // keeps firing low-frequency React commits that compete with the
                                 // transcript mount batches (and the first wheel events) for the
@@ -3275,7 +3498,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 // sessions keep the full intro; restored ones settle instantly.
                                 // A remount after a whole screen closed also settles instantly
                                 // (see suppressLogoIntroRef).
-                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: (agentId) => setSubagentDetailId(agentId), onOpenJobs: () => setJobsPanelOpen(true), onOpenFile: openFileActions })] }), (() => {
+                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: (agentId) => setSubagentDetailId(agentId), onOpenJobs: () => setJobsPanelOpen(true), onOpenFile: openFileActions, onPreviewImage: openImagePreview, suppressImageGraphics: activePreview !== null })] }), (() => {
                         // Gutter mode (settings `dsh-tui.scrollGutter`): the timeline
                         // rail (default), the proportional scrollbar, or nothing. The
                         // slot keeps its 2 columns in both rendered modes (Qwen's
@@ -3288,7 +3511,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                             return _jsx(ScrollbarGutter, { handle: handle, terminalWidth: terminalColumns });
                         }
                         return (_jsx(TimelineRail, { handle: handle, turns: timeline.turns, activeId: timeline.activeId, upId: timeline.upId, downId: timeline.downId, terminalWidth: terminalColumns, hoverEnabled: !promptSelectionActive, onRevealTurn: revealAndSeekRow }));
-                    })()] }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, children: [showPill && (_jsx(NewMessagesPill, { count: unseenCount, onClick: () => handle?.scrollToBottom() })), channel.working &&
+                    })(), !promptEditorOpen && imagePreviewNode] }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, children: [showPill && (_jsx(NewMessagesPill, { count: unseenCount, onClick: () => handle?.scrollToBottom() })), channel.working &&
                         (channel.activityEnabled &&
                             !channel.minimal &&
                             channel.workingActivity !== undefined &&
@@ -3298,192 +3521,191 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 // the animated chars/4 estimate, matching the classic
                                 // spinner's counter (the suffix used raw chars before,
                                 // inflating the reading next to a real upload number).
-                                suffix: `${lastUploadTokens > 0 ? ` · ↑ ${formatTokens(lastUploadTokens)}` : ''} · ↓ ${formatTokens(Math.round(channel.responseChars / 4))} tokens` }) })) : (_jsx(WorkingSpinner, { mode: channel.spinnerMode, hasActiveTools: channel.activeToolCount > 0, responseLengthRef: responseLengthRef, uploadTokensRef: uploadTokensRef, loadingStartTimeRef: loadingStartTimeRef, totalPausedMsRef: totalPausedMsRef, pauseStartTimeRef: pauseStartTimeRef, thinkingStatus: thinkingStatus }))), _jsx(GoalTodoPanel, { channel: channel, collapsed: todoCollapsed, onToggle: () => setTodoCollapsed(previous => !previous) }), recap !== null && recap.auto && !recap.expanded && (_jsx(AutoRecapRow, { summary: recap.summary, streaming: !recap.done, onExpand: () => setRecap(prev => (prev ? { ...prev, expanded: true } : prev)), onDismiss: () => closeRecap() })), balance !== null && (_jsx(BalanceReportRow, { result: balance.result, refreshing: balance.refreshing, tokens: channel.tokens, model: channel.model, onRefresh: runBalance, onDismiss: () => setBalance(null) })), statusEntries.length > 0 && (_jsx(Text, { dimColor: true, wrap: "truncate", children: statusEntries.map(entry => entry.text).join(' · ') })), approvalPanelNode !== null ? (approvalPanelNode) : dialogSnapshot !== null ? (_jsx(ExtensionDialog, { dialog: dialogSnapshot, onDecide: value => dialogs.decide(dialogSnapshot.key, value), onCancel: () => dialogs.cancel(dialogSnapshot.key) }, dialogSnapshot.key)) : overlay.kind === 'tips' ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(TipsPanel, { onClose: () => dispatchOverlay({ type: 'close-if', kind: 'tips' }) }) })) : recap !== null && (!recap.auto || recap.expanded) ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(RecapPanel, { summary: recap.summary, title: recap.title, error: recap.error, streaming: !recap.done, titleApplied: recap.titleApplied, onClose: () => {
-                                // An expanded auto recap collapses back to its dim row;
-                                // a manual /recap closes outright.
-                                if (recap.auto) {
-                                    setRecap(prev => (prev ? { ...prev, expanded: false } : prev));
-                                }
-                                else {
-                                    closeRecap();
-                                }
-                            }, onCopy: () => {
-                                void setClipboard(recap.summary ?? '').then(raw => { if (raw)
-                                    writeRaw?.(raw); });
-                                channel.notify(t('copied-chars', { n: (recap.summary ?? '').length }), { timeoutMs: 1500 });
-                            }, onApplyTitle: () => {
-                                if (recap.title === undefined || recap.titleApplied)
-                                    return;
-                                channel.renameSession(recap.title);
-                                setRecap(prev => (prev ? { ...prev, titleApplied: true } : prev));
-                                channel.notify(t('recap-title-applied-notify', { title: recap.title }), { color: 'success' });
-                            } }) })) : btw !== null ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(BtwPanel, { question: btw.question, answer: btw.answer, error: btw.error, streaming: !btw.done, onClose: closeBtw, onCopy: () => {
-                                void setClipboard(btw.answer ?? '').then(raw => { if (raw)
-                                    writeRaw?.(raw); });
-                                channel.notify(t('copied-chars', { n: (btw.answer ?? '').length }), { timeoutMs: 1500 });
-                            } }) })) : questionPanelNode !== null ? (questionPanelNode) : (_jsx(PromptInput, { channel: channel, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, backgroundAgentsNeedingInput: 
-                        // Only the real channel supplies the seam; pre-agent-view test
-                        // stubs must not grow the footer row (layout-dependent
-                        // regressions pin the visible row count). The footer only
-                        // renders while some session actually waits (N > 0): a
-                        // permanent idle row would steal a transcript row on every
-                        // real channel — one row is enough to scroll the startup
-                        // header fully off a short terminal, pausing its viewport
-                        // clock and shifting every row-count layout invariant.
-                        channel.agentViewRows !== undefined && backgroundAgentsNeedingInput > 0
-                            ? backgroundAgentsNeedingInput
-                            : undefined, controllerRef: promptControllerRef })), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
-                            ? undefined
-                            : {
-                                band: wakeBand,
-                                hint: trajectorySeen ? undefined : `${modLabel}t`,
-                                tick: Math.floor(wakeTime / 120),
-                            } }), dialogOverlayOpen && (_jsxs(OverlayAbove, { maxHeight: Math.max(terminalRows - 8, 1), children: [overlay.kind === 'thinking' && (_jsx(ThinkingToggle, { currentValue: thinkingVisible, focusIndex: overlay.focus, onPick: (index) => {
-                                    // 点击行 = 设焦点 + 应用（与 Enter 同一条路径）
-                                    const visible = index === 0;
-                                    setThinkingVisible(visible);
-                                    dispatchOverlay({ type: 'close' });
-                                    channel.notify(t('thinking-toggled', { state: visible ? t('thinking-on') : t('thinking-off') }));
-                                } })), overlay.kind === 'workspace-picker' && workspaceTargets.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspacePicker, { targets: workspaceTargets, focusIndex: overlay.index, currentCwd: channel.cwd, onPick: (index) => {
-                                        // 点击行 = 切换该行目标（与 Enter 同一条路径）
-                                        const target = workspaceTargets[index];
-                                        dispatchOverlay({ type: 'close' });
-                                        if (target !== undefined)
-                                            void channel.switchWorkspace(target);
-                                    } }) })), overlay.kind === 'workspace-menu' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspaceMenuPicker, { options: workspaceMenuOptions, focusIndex: overlay.index, onPick: (index) => {
-                                        // 点击行 = 执行该行（与 Enter 同一条路径）
-                                        runWorkspaceMenuOption(workspaceMenuOptions[index]);
-                                    } }) })), overlay.kind === 'workspace-flow' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspaceFlowPicker, { title: overlay.flow.title, choices: overlay.flow.choices, focusIndex: overlay.index, busy: overlay.busy, input: overlay.input, onPick: (index) => {
-                                        // 点击行 = 设焦点 + 执行分支（与 Enter 同一条路径）；
-                                        // busy/输入态在组件侧禁点
-                                        const choice = overlay.flow.choices[index];
-                                        if (choice === undefined)
-                                            return;
-                                        dispatchOverlay({ type: 'set-index', kind: 'workspace-flow', index });
-                                        runWorkspaceFlowAction(signal => choice.choose(signal));
-                                    } }) })), overlay.kind === 'model' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: models.length === 0 ? (_jsx(ModelPickerLoading, {})) : activeModelGroup === undefined ? (_jsx(ModelPicker, { groups: modelGroups, focusIndex: overlay.index, currentProvider: channel.provider, onPick: (index) => {
-                                        // 点击分组行 = 进入该组（与 Enter 同一条路径）
-                                        const group = modelGroups[index];
-                                        if (!group)
-                                            return;
-                                        setModelGroup(group.provider);
-                                        if (group.provider === RECENTS_GROUP_PROVIDER) {
-                                            dispatchOverlay({ type: 'set-index', kind: 'model', index: 0 });
-                                            return;
+                                suffix: `${lastUploadTokens > 0 ? ` · ↑ ${formatTokens(lastUploadTokens)}` : ''} · ↓ ${formatTokens(Math.round(channel.responseChars / 4))} tokens` }) })) : (_jsx(WorkingSpinner, { mode: channel.spinnerMode, hasActiveTools: channel.activeToolCount > 0, responseLengthRef: responseLengthRef, uploadTokensRef: uploadTokensRef, loadingStartTimeRef: loadingStartTimeRef, totalPausedMsRef: totalPausedMsRef, pauseStartTimeRef: pauseStartTimeRef, thinkingStatus: thinkingStatus }))), _jsx(GoalTodoPanel, { channel: channel, collapsed: todoCollapsed, onToggle: () => setTodoCollapsed(previous => !previous) }), recap !== null && recap.auto && !recap.expanded && (_jsx(AutoRecapRow, { summary: recap.summary, streaming: !recap.done, onExpand: () => setRecap(prev => (prev ? { ...prev, expanded: true } : prev)), onDismiss: () => closeRecap() })), balance !== null && (_jsx(BalanceReportRow, { result: balance.result, refreshing: balance.refreshing, tokens: channel.tokens, model: channel.model, onRefresh: runBalance, onDismiss: () => setBalance(null) })), statusEntries.length > 0 && (_jsx(Text, { dimColor: true, wrap: "truncate", children: statusEntries.map(entry => entry.text).join(' · ') })), activePreview === null && statusViews.map(view => (_jsx(PluginStatusViewBoundary, { viewKey: view.key, onError: (key, error) => statusContributions.reportViewError(key, error), children: _jsx(Box, { flexDirection: "column", flexShrink: 0, maxHeight: view.maxRows, overflow: "hidden", children: _jsx(Box, { flexDirection: "column", flexShrink: 0, children: React.createElement(view.component, {
+                                    React,
+                                    ui: STATUS_VIEW_UI,
+                                }) }) }) }, `${view.key}:${view.registrationId}`))), _jsxs(Box, { flexDirection: "column", flexShrink: 0, children: [approvalPanelNode !== null ? (approvalPanelNode) : dialogSnapshot !== null ? (_jsx(ExtensionDialog, { dialog: dialogSnapshot, onDecide: value => dialogs.decide(dialogSnapshot.key, value), onCancel: () => dialogs.cancel(dialogSnapshot.key) }, dialogSnapshot.key)) : overlay.kind === 'tips' ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(TipsPanel, { onClose: () => dispatchOverlay({ type: 'close-if', kind: 'tips' }) }) })) : recap !== null && (!recap.auto || recap.expanded) ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(RecapPanel, { summary: recap.summary, title: recap.title, error: recap.error, streaming: !recap.done, titleApplied: recap.titleApplied, onClose: () => {
+                                        // An expanded auto recap collapses back to its dim row;
+                                        // a manual /recap closes outright.
+                                        if (recap.auto) {
+                                            setRecap(prev => (prev ? { ...prev, expanded: false } : prev));
                                         }
-                                        const landing = modelPickerLanding(models.filter(model => model.provider === group.provider), channel.provider, channel.model);
-                                        dispatchOverlay({ type: 'set-index', kind: 'model', index: landing.index });
-                                    } })) : (_jsx(ModelPicker, { models: groupModels, groupLabel: activeModelGroup === RECENTS_GROUP_PROVIDER
-                                        ? t('picker-group-recent')
-                                        : modelGroups.find(group => group.provider === activeModelGroup)?.label, showBack: modelGroups.length > 1 && !modelPickerDirect, showProviderPrefix: activeModelGroup === RECENTS_GROUP_PROVIDER, focusIndex: overlay.index, currentModel: `${channel.provider}/${channel.model}`, onPick: (index) => {
-                                        // 点击行 = 应用该行模型（与 Enter 同一条路径）
-                                        const model = groupModels[index];
-                                        if (!model)
-                                            return;
-                                        dispatchOverlay({ type: 'close' });
-                                        void switchModelRecorded(model.provider, model.id, model.name);
-                                    } })) })), overlay.kind === 'skills' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: skillsList === null ? (_jsx(SkillsPickerLoading, {})) : (_jsx(SkillsPicker, { skills: skillsList, focusIndex: overlay.index, onPick: (index) => {
-                                        const skill = skillsList[index];
-                                        if (!skill)
-                                            return;
-                                        dispatchOverlay({ type: 'close' });
-                                        if (skill.userInvocable)
-                                            setHistoryFill(`/${skill.name} `);
-                                    } })) })), overlay.kind === 'activity' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ActivityPicker, { focusIndex: overlay.index, currentPreset: channel.activityFrames, onPick: (index) => {
-                                        dispatchOverlay({ type: 'close' });
-                                        const name = PRESET_NAMES[index];
-                                        if (name)
-                                            channel.setActivityFrames(name);
-                                    } }) })), overlay.kind === 'color' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ColorPicker, { focusIndex: overlay.index, currentColor: channel.sessionColor, onPick: (index) => {
-                                        dispatchOverlay({ type: 'close' });
-                                        const name = SESSION_COLOR_NAMES[index];
-                                        if (name) {
-                                            channel.setSessionColor(name);
-                                            channel.notify(t('color-set', { name }), { color: 'success' });
+                                        else {
+                                            closeRecap();
                                         }
-                                    } }) })), overlay.kind === 'effort' && effortOptions.length > 1 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(EffortSlider, { options: effortOptions, focusIndex: overlay.index, currentId: channel.reasoningEffort, 
-                                    // 点击档位 = 移到该档并即时应用（与 ←/→ 同语义）
-                                    onPick: (index) => {
-                                        dispatchOverlay({ type: 'set-index', kind: 'effort', index });
-                                        const option = effortOptions[index];
-                                        if (option)
-                                            void channel.setEffort(option.id);
-                                    } }) })), overlay.kind === 'preset' && presetOptions.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PresetPicker, { presets: presetOptions, focusIndex: overlay.index, currentPreset: channel.agentPreset, onPick: (index) => {
-                                        dispatchOverlay({ type: 'close' });
-                                        const option = presetOptions[index];
-                                        if (option)
-                                            void channel.switchPreset(option.id);
-                                    } }) })), overlay.kind === 'permission' && overlay.snapshot.options.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PermissionsPicker, { options: overlay.snapshot.options, focusIndex: overlay.index, currentValue: overlay.snapshot.current?.value, cwd: channel.cwd, onPick: (index) => {
-                                        if (approvalSnapshot !== null || questionSnapshot !== null || dialogSnapshot !== null)
+                                    }, onCopy: () => {
+                                        void setClipboard(recap.summary ?? '').then(raw => { if (raw)
+                                            writeRaw?.(raw); });
+                                        channel.notify(t('copied-chars', { n: (recap.summary ?? '').length }), { timeoutMs: 1500 });
+                                    }, onApplyTitle: () => {
+                                        if (recap.title === undefined || recap.titleApplied)
                                             return;
-                                        const option = overlay.snapshot.options[index];
-                                        dispatchOverlay({ type: 'close' });
-                                        if (option !== undefined)
-                                            runPermissionCommand(` ${option.value}`);
-                                    } }) })), overlay.kind === 'plan' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PlanPicker, { focusIndex: overlay.index, currentOn: channel.mode.plan === true, onPick: (index) => {
-                                        dispatchOverlay({ type: 'close' });
-                                        const on = index === 0;
-                                        void channel.runExternalCommand('plan', on ? '' : ' off').then((text) => {
-                                            if (text !== undefined && text !== '')
-                                                channel.notify(text);
-                                        });
-                                    } }) })), overlay.kind === 'lang' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(LangPicker, { focusIndex: overlay.index, currentLang: getLang(), onPick: (index) => {
-                                        const lang = LANGS[index];
-                                        if (lang === undefined)
-                                            return;
-                                        dispatchOverlay({ type: 'close' });
-                                        applyLang(lang);
-                                    } }) })), overlay.kind === 'theme' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ThemePicker, { focusIndex: overlay.index, currentTheme: themeName, themeHost: themeHost, onPick: (index) => {
-                                        dispatchOverlay({ type: 'close' });
-                                        const name = getThemeOptions(themeHost)[index]?.value;
-                                        if (name !== undefined) {
-                                            const ok = setTheme(name);
-                                            channel.notify(ok ? t('theme-switched-saved', { name }) : t('theme-switch-failed', { name }), { color: ok ? 'success' : 'error' });
-                                        }
-                                    } }) })), overlay.kind === 'history' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(HistorySearchDialog, { query: overlay.query, cursorOffset: overlay.cursor, matches: historyMatches, focusIndex: overlay.focus, onPick: (index) => {
-                                        // 点击行 = 填入该历史命令（与 Enter 同路径）
-                                        const entry = historyMatches[index];
-                                        if (entry) {
-                                            setHistoryFill(entry.text);
+                                        channel.renameSession(recap.title);
+                                        setRecap(prev => (prev ? { ...prev, titleApplied: true } : prev));
+                                        channel.notify(t('recap-title-applied-notify', { title: recap.title }), { color: 'success' });
+                                    } }) })) : btw !== null ? (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(BtwPanel, { question: btw.question, answer: btw.answer, error: btw.error, streaming: !btw.done, onClose: closeBtw, onCopy: () => {
+                                        void setClipboard(btw.answer ?? '').then(raw => { if (raw)
+                                            writeRaw?.(raw); });
+                                        channel.notify(t('copied-chars', { n: (btw.answer ?? '').length }), { timeoutMs: 1500 });
+                                    } }) })) : questionPanelNode !== null ? (questionPanelNode) : null, _jsx(PromptInput, { channel: channel, suspended: promptReplacementOpen, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, backgroundAgentsNeedingInput: 
+                                // Only the real channel supplies the seam; pre-agent-view test
+                                // stubs must not grow the footer row (layout-dependent
+                                // regressions pin the visible row count). The footer only
+                                // renders while some session actually waits (N > 0): a
+                                // permanent idle row would steal a transcript row on every
+                                // real channel — one row is enough to scroll the startup
+                                // header fully off a short terminal, pausing its viewport
+                                // clock and shifting every row-count layout invariant.
+                                channel.agentViewRows !== undefined && backgroundAgentsNeedingInput > 0
+                                    ? backgroundAgentsNeedingInput
+                                    : undefined, controllerRef: promptControllerRef, onCaretImage: handleCaretImage, caretPreviewOpen: peekPreview !== null, onDismissCaretPreview: dismissPeek }, "prompt-input"), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
+                                    ? undefined
+                                    : {
+                                        band: wakeBand,
+                                        hint: trajectorySeen ? undefined : `${modLabel}t`,
+                                        tick: Math.floor(wakeTime / 120),
+                                    } }), dialogOverlayOpen && (_jsxs(OverlayAbove, { maxHeight: Math.max(terminalRows - 8, 1), children: [overlay.kind === 'thinking' && (_jsx(ThinkingToggle, { currentValue: thinkingVisible, focusIndex: overlay.focus, onPick: (index) => {
+                                            // 点击行 = 设焦点 + 应用（与 Enter 同一条路径）
+                                            const visible = index === 0;
+                                            setThinkingVisible(visible);
                                             dispatchOverlay({ type: 'close' });
-                                        }
-                                    } }) })), overlay.kind === 'rewind' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(RewindPicker, { rows: rewindRows, focusIndex: overlay.index, confirmRow: overlay.confirm, modes: overlay.modes, modeIndex: overlay.modeIndex, busy: overlay.busy, onPickRow: (index) => {
-                                        // 列表页点击只选中：进入确认态保留键盘 Enter 显式触发
-                                        dispatchOverlay({ type: 'set-index', kind: 'rewind', index });
-                                    }, onConfirm: () => {
-                                        // 确认页即显式确认层，点击直接执行（与 Enter 同路径）
-                                        const row = overlay.confirm;
-                                        if (row === null)
-                                            return;
-                                        dispatchOverlay({ type: 'close' });
-                                        void performRewind(row);
-                                    }, onPickMode: (index) => {
-                                        // 模式列表点击直接执行该模式（与 Enter 同路径）
-                                        const row = overlay.confirm;
-                                        if (row === null)
-                                            return;
-                                        // 模式页仅当 modes 非空才渲染，这里空安全取值
-                                        const mode = index === 0 ? null : (overlay.modes?.[index - 1]?.id ?? null);
-                                        dispatchOverlay({ type: 'close' });
-                                        void performRewind(row, mode);
-                                    } }) })), overlay.kind === 'file-actions' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(FileActionsPanel, { path: overlay.path, isDir: overlay.isDir, focusIndex: overlay.index, onPick: (index) => {
-                                        // 点击行直接执行该动作（与 Enter 同路径）
-                                        const path = overlay.path;
-                                        dispatchOverlay({ type: 'close' });
-                                        runFileAction(index, path);
-                                    } }) })), overlay.kind === 'search' && _jsx(TranscriptSearchBar, { query: searchQuery, cursorOffset: searchCursor, count: searchCount, current: searchCurrent })] }))] }), _jsx(TooltipLayer, { invalidationKey: `${overlay.kind}:${dialogOverlayOpen}:${btw !== null}`, subscribeInvalidation: subscribeTooltipInvalidation }), _jsx(PromptEditorLayer, {})] }));
+                                            channel.notify(t('thinking-toggled', { state: visible ? t('thinking-on') : t('thinking-off') }));
+                                        } })), overlay.kind === 'workspace-picker' && workspaceTargets.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspacePicker, { targets: workspaceTargets, focusIndex: overlay.index, currentCwd: channel.cwd, onPick: (index) => {
+                                                // 点击行 = 切换该行目标（与 Enter 同一条路径）
+                                                const target = workspaceTargets[index];
+                                                dispatchOverlay({ type: 'close' });
+                                                if (target !== undefined)
+                                                    void channel.switchWorkspace(target);
+                                            } }) })), overlay.kind === 'workspace-menu' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspaceMenuPicker, { options: workspaceMenuOptions, focusIndex: overlay.index, onPick: (index) => {
+                                                // 点击行 = 执行该行（与 Enter 同一条路径）
+                                                runWorkspaceMenuOption(workspaceMenuOptions[index]);
+                                            } }) })), overlay.kind === 'workspace-flow' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(WorkspaceFlowPicker, { title: overlay.flow.title, choices: overlay.flow.choices, focusIndex: overlay.index, busy: overlay.busy, input: overlay.input, onPick: (index) => {
+                                                // 点击行 = 设焦点 + 执行分支（与 Enter 同一条路径）；
+                                                // busy/输入态在组件侧禁点
+                                                const choice = overlay.flow.choices[index];
+                                                if (choice === undefined)
+                                                    return;
+                                                dispatchOverlay({ type: 'set-index', kind: 'workspace-flow', index });
+                                                runWorkspaceFlowAction(signal => choice.choose(signal));
+                                            } }) })), overlay.kind === 'model' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: models.length === 0 ? (_jsx(ModelPickerLoading, {})) : activeModelGroup === undefined ? (_jsx(ModelPicker, { groups: modelGroups, focusIndex: overlay.index, currentProvider: channel.provider, onPick: (index) => {
+                                                // 点击分组行 = 进入该组（与 Enter 同一条路径）
+                                                const group = modelGroups[index];
+                                                if (!group)
+                                                    return;
+                                                setModelGroup(group.provider);
+                                                if (group.provider === RECENTS_GROUP_PROVIDER) {
+                                                    dispatchOverlay({ type: 'set-index', kind: 'model', index: 0 });
+                                                    return;
+                                                }
+                                                const landing = modelPickerLanding(models.filter(model => model.provider === group.provider), channel.provider, channel.model);
+                                                dispatchOverlay({ type: 'set-index', kind: 'model', index: landing.index });
+                                            } })) : (_jsx(ModelPicker, { models: groupModels, groupLabel: activeModelGroup === RECENTS_GROUP_PROVIDER
+                                                ? t('picker-group-recent')
+                                                : modelGroups.find(group => group.provider === activeModelGroup)?.label, showBack: modelGroups.length > 1 && !modelPickerDirect, showProviderPrefix: activeModelGroup === RECENTS_GROUP_PROVIDER, focusIndex: overlay.index, currentModel: `${channel.provider}/${channel.model}`, onPick: (index) => {
+                                                // 点击行 = 应用该行模型（与 Enter 同一条路径）
+                                                const model = groupModels[index];
+                                                if (!model)
+                                                    return;
+                                                dispatchOverlay({ type: 'close' });
+                                                void switchModelRecorded(model.provider, model.id, model.name);
+                                            } })) })), overlay.kind === 'skills' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: skillsList === null ? (_jsx(SkillsPickerLoading, {})) : (_jsx(SkillsPicker, { skills: skillsList, focusIndex: overlay.index, onPick: (index) => {
+                                                const skill = skillsList[index];
+                                                if (!skill)
+                                                    return;
+                                                dispatchOverlay({ type: 'close' });
+                                                if (skill.userInvocable)
+                                                    setHistoryFill(`/${skill.name} `);
+                                            } })) })), overlay.kind === 'activity' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ActivityPicker, { focusIndex: overlay.index, currentPreset: channel.activityFrames, onPick: (index) => {
+                                                dispatchOverlay({ type: 'close' });
+                                                const name = PRESET_NAMES[index];
+                                                if (name)
+                                                    channel.setActivityFrames(name);
+                                            } }) })), overlay.kind === 'color' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ColorPicker, { focusIndex: overlay.index, currentColor: channel.sessionColor, onPick: (index) => {
+                                                dispatchOverlay({ type: 'close' });
+                                                const name = SESSION_COLOR_NAMES[index];
+                                                if (name) {
+                                                    channel.setSessionColor(name);
+                                                    channel.notify(t('color-set', { name }), { color: 'success' });
+                                                }
+                                            } }) })), overlay.kind === 'effort' && effortOptions.length > 1 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(EffortSlider, { options: effortOptions, focusIndex: overlay.index, currentId: channel.reasoningEffort, 
+                                            // 点击档位 = 移到该档并即时应用（与 ←/→ 同语义）
+                                            onPick: (index) => {
+                                                dispatchOverlay({ type: 'set-index', kind: 'effort', index });
+                                                const option = effortOptions[index];
+                                                if (option)
+                                                    void channel.setEffort(option.id);
+                                            } }) })), overlay.kind === 'preset' && presetOptions.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PresetPicker, { presets: presetOptions, focusIndex: overlay.index, currentPreset: channel.agentPreset, onPick: (index) => {
+                                                dispatchOverlay({ type: 'close' });
+                                                const option = presetOptions[index];
+                                                if (option)
+                                                    void channel.switchPreset(option.id);
+                                            } }) })), overlay.kind === 'permission' && overlay.snapshot.options.length > 0 && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PermissionsPicker, { options: overlay.snapshot.options, focusIndex: overlay.index, currentValue: overlay.snapshot.current?.value, cwd: channel.cwd, onPick: (index) => {
+                                                if (approvalSnapshot !== null || questionSnapshot !== null || dialogSnapshot !== null)
+                                                    return;
+                                                const option = overlay.snapshot.options[index];
+                                                dispatchOverlay({ type: 'close' });
+                                                if (option !== undefined)
+                                                    void runPermissionCommand(` ${option.value}`);
+                                            } }) })), overlay.kind === 'plan' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(PlanPicker, { focusIndex: overlay.index, currentOn: channel.mode.plan === true, onPick: (index) => {
+                                                dispatchOverlay({ type: 'close' });
+                                                const on = index === 0;
+                                                void runExternalCommand('plan', on ? '' : ' off');
+                                            } }) })), overlay.kind === 'lang' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(LangPicker, { focusIndex: overlay.index, currentLang: getLang(), onPick: (index) => {
+                                                const lang = LANGS[index];
+                                                if (lang === undefined)
+                                                    return;
+                                                dispatchOverlay({ type: 'close' });
+                                                applyLang(lang);
+                                            } }) })), overlay.kind === 'theme' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(ThemePicker, { focusIndex: overlay.index, currentTheme: themeName, themeHost: themeHost, onPick: (index) => {
+                                                dispatchOverlay({ type: 'close' });
+                                                const name = getThemeOptions(themeHost)[index]?.value;
+                                                if (name !== undefined) {
+                                                    const ok = setTheme(name);
+                                                    channel.notify(ok ? t('theme-switched-saved', { name }) : t('theme-switch-failed', { name }), { color: ok ? 'success' : 'error' });
+                                                }
+                                            } }) })), overlay.kind === 'history' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(HistorySearchDialog, { query: overlay.query, cursorOffset: overlay.cursor, matches: historyMatches, focusIndex: overlay.focus, onPick: (index) => {
+                                                // 点击行 = 填入该历史命令（与 Enter 同路径）
+                                                const entry = historyMatches[index];
+                                                if (entry) {
+                                                    setHistoryFill(entry.text);
+                                                    dispatchOverlay({ type: 'close' });
+                                                }
+                                            } }) })), overlay.kind === 'rewind' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(RewindPicker, { rows: rewindRows, focusIndex: overlay.index, confirmRow: overlay.confirm, modes: overlay.modes, modeIndex: overlay.modeIndex, busy: overlay.busy, onPickRow: (index) => {
+                                                // 列表页点击只选中：进入确认态保留键盘 Enter 显式触发
+                                                dispatchOverlay({ type: 'set-index', kind: 'rewind', index });
+                                            }, onConfirm: () => {
+                                                // 确认页即显式确认层，点击直接执行（与 Enter 同路径）
+                                                const row = overlay.confirm;
+                                                if (row === null)
+                                                    return;
+                                                dispatchOverlay({ type: 'close' });
+                                                void performRewind(row);
+                                            }, onPickMode: (index) => {
+                                                // 模式列表点击直接执行该模式（与 Enter 同路径）
+                                                const row = overlay.confirm;
+                                                if (row === null)
+                                                    return;
+                                                // 模式页仅当 modes 非空才渲染，这里空安全取值
+                                                const mode = index === 0 ? null : (overlay.modes?.[index - 1]?.id ?? null);
+                                                dispatchOverlay({ type: 'close' });
+                                                void performRewind(row, mode);
+                                            } }) })), overlay.kind === 'file-actions' && (_jsx(Box, { flexDirection: "column", marginTop: 1, children: _jsx(FileActionsPanel, { path: overlay.path, isDir: overlay.isDir, focusIndex: overlay.index, onPick: (index) => {
+                                                // 点击行直接执行该动作（与 Enter 同路径）
+                                                const path = overlay.path;
+                                                dispatchOverlay({ type: 'close' });
+                                                runFileAction(index, path);
+                                            } }) })), overlay.kind === 'search' && _jsx(TranscriptSearch, { query: searchQuery, cursorOffset: searchCursor, count: searchCount, current: searchCurrent })] }))] })] }), _jsx(TooltipLayer, { invalidationKey: `${overlay.kind}:${dialogOverlayOpen}:${btw !== null}`, subscribeInvalidation: subscribeTooltipInvalidation }), _jsx(PromptEditorLayer, {}), promptEditorOpen && imagePreviewNode] }));
 }
 /**
  * The pinned prompt header shown above the ScrollBox while the user has
- * scrolled up (mirroring Claude Code's FullscreenLayout.StickyPromptHeader).
- * Pins the user message the transcript viewport is currently showing — the
- * topmost visible user message, or the nearest one above when only assistant
+ * scrolled up. It pins the user message the transcript viewport is currently
+ * showing — the topmost visible user message, or the nearest one above when only assistant
  * content fills the view — so it tracks which turn the user is reading
  * instead of always carrying the latest prompt. Fixed at 1 row so the
  * ScrollBox never shifts when the text changes.
  */
-function StickyPromptHeader({ text, onClick, }) {
-    return (_jsx(Box, { flexShrink: 0, width: "100%", height: 1, paddingRight: 1, onClick: onClick, children: _jsxs(Text, { color: "briefLabelYou", bold: true, wrap: "truncate-end", children: [POINTER, " ", text] }) }));
+function PinnedTurnHeader({ text, onClick, }) {
+    return (_jsx(Box, { flexShrink: 0, width: "100%", height: 1, paddingRight: 1, onClick: onClick, children: _jsxs(Text, { color: "userPromptLabel", bold: true, wrap: "truncate-end", children: [POINTER, " ", text] }) }));
 }
 /** The `↓ N new messages` pill shown while scrolled up with new content. */
 function NewMessagesPill({ count, onClick, }) {
@@ -3492,15 +3714,15 @@ function NewMessagesPill({ count, onClick, }) {
                         ? t(count === 1 ? 'new-message' : 'new-messages', { n: count })
                         : t('back-to-bottom'), ' '] }) }) }));
 }
-/** /model while the provider catalog is still loading (CC's LoadingState). */
+/** /model while the provider catalog is still loading. */
 function ModelPickerLoading() {
     return (_jsx(Pane, { color: "permission", children: _jsxs(Box, { flexDirection: "column", gap: 1, children: [_jsx(Text, { bold: true, color: "permission", children: t('picker-title-model') }), _jsx(LoadingState, { message: t('model-loading'), bold: true, subtitle: t('model-loading-subtitle') })] }) }));
 }
 /**
- * The `/` incsearch bar (ported from CC's REPL TranscriptSearchBar): a
+ * The `/` incsearch bar: a
  * single row above the prompt input with the query, a block cursor, and the
  * match counter (`current/count`) or a red `no matches` when nothing hits.
- */ function TranscriptSearchBar({ query, cursorOffset, count, current, }) {
+ */ function TranscriptSearch({ query, cursorOffset, count, current, }) {
     const cursorChar = cursorOffset < query.length ? query[cursorOffset] : ' ';
     return (_jsxs(NoSelect, { borderTopDimColor: true, borderBottom: false, borderLeft: false, borderRight: false, borderStyle: "single", marginTop: 1, paddingLeft: 2, width: "100%", children: [_jsx(Text, { children: "/" }), _jsx(Text, { children: query.slice(0, cursorOffset) }), _jsx(Text, { inverse: true, children: cursorChar }), cursorOffset < query.length && _jsx(Text, { children: query.slice(cursorOffset + 1) }), _jsx(Box, { flexGrow: 1 }), query && count === 0 ? (_jsxs(Text, { color: "error", children: [t('search-no-matches'), " "] })) : count > 0 ? (_jsxs(Text, { dimColor: true, children: [Math.min(current + 1, count), "/", count, '  '] })) : null] }));
 }

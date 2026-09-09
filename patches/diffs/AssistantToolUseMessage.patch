@@ -1,5 +1,5 @@
---- original/AssistantToolUseMessage.js	2026-09-07 16:37:51.739607308 +0800
-+++ backup/AssistantToolUseMessage.js	2026-09-07 16:37:51.743005057 +0800
+--- original/AssistantToolUseMessage.js	2026-09-09 10:51:37.328655209 +0800
++++ backup/AssistantToolUseMessage.js	2026-09-09 10:51:37.332197069 +0800
 @@ -1,5 +1,6 @@
  import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
  import React from 'react';
@@ -9,7 +9,7 @@
  import { stringWidth } from '../../ink/stringWidth.js';
 @@ -65,9 +66,14 @@
  }
- /** CC's collapsed text body keeps 3 lines (renderTruncatedContent). */
+ /** The collapsed text body keeps three lines. */
  const TEXT_BODY_MAX_LINES = 3;
 -/** Diff bodies cap at the upstream chat row's 8 (dsh-client-ui-tool's
 - *  CHAT_DIFF_MAX_LINES) — denser information than log output. */
@@ -218,7 +218,7 @@
      const bodySource = body.map(line => line.text).join('\n');
      const argsLanguage = jsonArgsLanguage(displayArgs);
      // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
-@@ -432,38 +588,28 @@
+@@ -432,38 +588,27 @@
          : ordinaryToolBackground === 'strong'
              ? 'toolCardBackground'
              : undefined;
@@ -237,8 +237,9 @@
      // body never moves.
      const [hovered, setHovered] = React.useState(false);
 -    const hoverTint = interactive && hovered && !isSelected;
-     return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: addMargin ? 1 : 0, width: "100%", onClick: onClick, 
-         // Only selection paints a highlight; the configured treatment applies
+-    return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: marginTopOnTurn ? 1 : 0, width: "100%", onClick: onClick, 
+-        // Only selection paints a highlight; the configured treatment applies
++    return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: marginTopOnTurn ? 1 : 0, width: "100%", onClick: onClick,         // Only selection paints a highlight; the configured treatment applies
          // to an ordinary card. Diff line tints stay - they are content, not chrome.
 -        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
 +        backgroundColor: isSelected ? 'messageActionsBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'

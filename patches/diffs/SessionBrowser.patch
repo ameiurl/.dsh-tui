@@ -1,5 +1,5 @@
---- original/SessionBrowser.js	2026-09-07 16:37:51.769925862 +0800
-+++ backup/SessionBrowser.js	2026-09-07 16:37:51.772480259 +0800
+--- original/SessionBrowser.js	2026-09-09 10:51:37.348435071 +0800
++++ backup/SessionBrowser.js	2026-09-09 10:51:37.353346894 +0800
 @@ -4,24 +4,21 @@
  import { Divider } from '../components/design-system/Divider.js';
  import { HintLine } from '../components/design-system/HintLine.js';
@@ -13,7 +13,7 @@
 -import { formatProject, projectName, spreadRow, tailWidth, truncateWidth } from '../sessions/format.js';
 +import { formatProject, spreadRow, tailWidth, truncateWidth } from '../sessions/format.js';
  import { stringWidth } from '../ink/stringWidth.js';
- import { TICK, MULTIPLICATION_X } from '../cc/figures.js';
+ import { TICK, MULTIPLICATION_X } from '../terminal-utils/figures.js';
 -import { anchorTop, buildView, buildWorkspaceGroups, DEFAULT_FILTERS, moveSelection, normalizeWorkspaceCwd, seekSelectable, sessionAt, windowEnd, } from '../sessions/view.js';
 +import { anchorTop, buildView, DEFAULT_FILTERS, moveSelection, seekSelectable, sessionAt, windowEnd, } from '../sessions/view.js';
  import { t } from '../i18n.js';

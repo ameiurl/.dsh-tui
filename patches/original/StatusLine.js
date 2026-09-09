@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React from 'react';
 import { Box, Text, useTerminalSize, useTheme } from '../ui.js';
-import { formatTokens } from '../cc/format.js';
+import { formatTokens } from '../terminal-utils/format.js';
 import { t } from '../i18n.js';
 import { formatContextUsage, DEFAULT_STATUS_BAR, normalizeStatusBar } from '../tuiDisplayPrefs.js';
 import { estimateSessionCostCny, estimateSessionCostSplitCny, isDeepSeekOfficialProvider, isPeakHour } from '../deepseekPricing.js';
