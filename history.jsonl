@@ -1,27 +1,3 @@
-{"text":"/quit","ts":1787529643187}
-{"text":"/resume","ts":1787529658555}
-{"text":"词级背景色是 #008000，字体不加粗","ts":1787529693096}
-{"text":"/quit","ts":1787529777331}
-{"text":"/resume","ts":1787529785635}
-{"text":"词级diff字体不变色","ts":1787529849751}
-{"text":"/quit","ts":1787529882118}
-{"text":"/resume","ts":1787529887108}
-{"text":"/clear","ts":1787530870503}
-{"text":"@modules/admin/models/TransactionImportForm.php 把\\Yii::info 改成debug_log","ts":1787530888147}
-{"text":"/quit","ts":1787531196487}
-{"text":"/resume","ts":1787531203836}
-{"text":"列出这个主题修改的文件","ts":1787531472188}
-{"text":"/quit","ts":1787533468358}
-{"text":"帮我默认模型改deepseek-v4-flash","ts":1787533759998}
-{"text":"@settings.yaml 这边改没有生效？","ts":1787533842789}
-{"text":"/quit","ts":1787534914446}
-{"text":"在admin_frontend中， @src/views/statistic/userWenpiaoList/index.vue 搜索框增加 搜索团队会员，框里输入手机号，搜索用户伞下的用户，包括用户自己，参考@modules/admin/models/UserForm.php getTeamMemberIds函数","ts":1787535689842}
-{"text":"1. 增加一个导出功能，导出的字段有：“用户姓名”、“用户编号（交易所ID）”、“待配票数”","ts":1787536068692}
-{"text":"导出增加手机号","ts":1787538284036}
-{"text":"/clear","ts":1787539919481}
-{"text":"在store_uniapp中，@user/wenpiao-exchange/index.vue 后端接口判断一下，用户未激活不能兑换。用户激活判断 cyy_user_extend表","ts":1787539973051}
-{"text":"/resume","ts":1787540235117}
-{"text":"导出的时候有两个文件 一个是用户文票列表，一个是undefined？","ts":1787540260357}
 {"text":"/quit","ts":1787544872176}
 {"text":"/resume","ts":1787556754004}
 {"text":"/quit","ts":1787558471217}
@@ -198,3 +174,27 @@
 {"text":"/命令 有让选择的，现在不能上下切换了","ts":1788186943771}
 {"text":"/quit","ts":1788187193081}
 {"text":"/resume","ts":1788187218039}
+{"text":"/quit","ts":1788187316227}
+{"text":"/resume","ts":1788187332870}
+{"text":"/quit","ts":1788187376545}
+{"text":"在admin_frontend中，@src/views/tools/auction/import/index.vue is_160_split 上面加个is_180_split，其他类似添加修改，接口也需要修改","ts":1788225093991}
+{"text":"/clear","ts":1788231288275}
+{"text":"/quit","ts":1788232134964}
+{"text":"在admin_frontend中，@src/views/user/manage/userDetail.vue 增加积分充值，请参考@modules/admin/controllers/UserController.php operateReward函数或直接共用","ts":1788235400667}
+{"text":"在 设置积分/余额 弹框里 增值积分 直接改，不用新增加按钮","ts":1788235603172}
+{"text":"备注修改一下，现在不是批量","ts":1788235812954}
+{"text":"/resume","ts":1788235843066}
+{"text":"继续","ts":1788235884565}
+{"text":"管理员：amei 后台批量操作账号：131******88 增值积分充值：3 元  备注还是有批量","ts":1788235985795}
+{"text":"/quit","ts":1788237092889}
+{"text":"/resume","ts":1788239222745}
+{"text":"/quit","ts":1788610359924}
+{"text":"在admin_frontend中，@src/views/order/batchOrderRecharge.vue 充值记录，导入新记录时候的清空原先记录","ts":1788610610217}
+{"text":"@modules/admin/controllers/TransactionController.php 1129行，判断寄售金额是不是大于0","ts":1788614294094}
+{"text":"/quit","ts":1788664998087}
+{"text":"@modules/admin/controllers/TransactionController.php buildCustomerTeamRegionMap 函数，没有找到团队地区的向上找上一级运营中心","ts":1788666059670}
+{"text":"/quit","ts":1788953015506}
+{"text":"/update","ts":1788953031647}
+{"text":"/quit","ts":1788953176580}
+{"text":"/resume","ts":1788954339825}
+{"text":"/quit","ts":1788954358368}

@@ -40,7 +40,14 @@ was built against (`patch-base-version`).
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.1.0-rc.8`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.1.0-rc.8`,
-`@deepseek-harness-tui/dsh-tui@0.10.0-beta.3`.
+`@deepseek-harness-tui/dsh-tui@0.10.0`.
+
+> Rebasing note (2026-09-09): the dsh-tui patches were re-ported from
+> `0.10.0-beta.3` to the `0.10.0` release, which renamed `types/cc/` to
+> `types/terminal-utils/` and grew `Chat.js`/`PromptInput.js` substantially.
+> The `SessionBrowser` patch keeps the previous simplified list (no directory
+> rail / pin star / right-click menu); it does not yet consume 0.10.0's
+> `PageInsetContext`.
 
 | file | change |
 | --- | --- |

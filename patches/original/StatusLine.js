@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import React from 'react';
 import { Box, Text, useTerminalSize, useTheme } from '../ui.js';
-import { formatTokens } from '../cc/format.js';
+import { formatTokens } from '../terminal-utils/format.js';
 import { t } from '../i18n.js';
 import { formatContextUsage, DEFAULT_STATUS_BAR, normalizeStatusBar } from '../tuiDisplayPrefs.js';
 import { estimateSessionCostCny, estimateSessionCostSplitCny, isDeepSeekOfficialProvider, isPeakHour } from '../deepseekPricing.js';
@@ -60,7 +60,10 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
             node: _jsx(Text, { color: "inactiveShimmer", children: channel.reasoningEffort }),
         });
     }
-    if (statusBar.mode && channel.modeIndex > 0) {
+    const modeNeedsExplicitMarker = channel.mode.plan === true
+        || channel.mode.sandbox === 'danger-full-access'
+        || channel.mode.approval === 'never';
+    if (statusBar.mode && (channel.modeIndex > 0 || modeNeedsExplicitMarker)) {
         contextParts.push({
             key: 'mode',
             node: (_jsx(Text, { color: channel.mode.plan === true ? 'planMode' : 'warning', children: modeDisplayName(channel.mode) })),
@@ -156,7 +159,7 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
         };
     const leftFields = [
         ...(statusBar.model
-            ? [{ key: 'model', node: _jsx(Text, { color: "inactiveShimmer", children: channel.model }) }]
+            ? [{ key: 'model', id: 'model', node: _jsx(Text, { color: "inactiveShimmer", children: channel.model }) }]
             : []),
         ...(tpsPart !== undefined ? [tpsPart] : []),
         ...(jobsPart !== undefined ? [jobsPart] : []),
@@ -198,6 +201,7 @@ export function StatusLine({ channel, selectionActive = false, helpOpen = false,
             ? [
                 {
                     key: 'git',
+                    id: 'git',
                     node: _jsx(Text, { color: "professionalBlue", children: channel.gitBranch }),
                 },
             ]
@@ -355,6 +359,16 @@ function buildHoverDetail(hover, channel, usage, contextUsed) {
             const shown = live.slice(0, 3);
             const rest = live.length - shown.length;
             return (_jsxs(Text, { wrap: "truncate", children: [dim('jobs '), shown.map(job => `${job.id} ${job.label} (${formatJobDuration(job)})`).join(' · '), rest > 0 ? ` · +${rest}` : ''] }));
+        }
+        case 'model': {
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('model '), channel.model, " \u00B7 ", dim('provider '), channel.provider, channel.contextWindow !== undefined
+                        ? _jsxs(_Fragment, { children: [" \u00B7 ", dim('ctx '), formatTokens(channel.contextWindow)] })
+                        : null] }));
+        }
+        case 'git': {
+            if (channel.gitBranch === undefined)
+                return null;
+            return (_jsxs(Text, { wrap: "truncate", children: [dim('git '), channel.gitBranch] }));
         }
         case 'sessionId':
             return (_jsxs(Text, { wrap: "truncate", children: [dim('# '), channel.agentId, " \u00B7 ", t('status-detail-session-id')] }));

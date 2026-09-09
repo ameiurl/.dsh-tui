@@ -1,6 +1,6 @@
---- original/PromptInput.js	2026-08-31 21:48:50.621981540 +0800
-+++ backup/PromptInput.js	2026-08-31 22:37:23.410109077 +0800
-@@ -22,7 +22,7 @@
+--- original/PromptInput.js	2026-09-09 19:42:37.170858689 +0800
++++ backup/PromptInput.js	2026-09-09 19:42:37.171819240 +0800
+@@ -24,7 +24,7 @@
  import { editInExternalEditor } from '../utils/externalEditor.js';
  import { setPromptEditorNode, EditorButton } from './PromptEditor.js';
  import { isHiddenCommandName, parseCommandName } from '../commands.js';
@@ -9,22 +9,22 @@
  import { mentionAtCaret } from '../utils/mentions.js';
  import { preserveSelection } from '../utils/fileSuggestions.js';
  import { isMod } from '../utils/modifiers.js';
-@@ -280,7 +280,7 @@
+@@ -352,7 +352,7 @@
   * working) interrupts the turn and delivers them right away; Ctrl+Enter
   * aborts the turn and sends the current input immediately.
   */
--export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, controllerRef, }) {
-+export function PromptInput({ channel, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, controllerRef, onVimChange, }) {
+-export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, }) {
++export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onVimChange, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, }) {
      const [themeName] = useTheme();
      // Raw stdout writer for OSC 52 clipboard writes (selection copy) — must
      // bypass the frame pipeline; null outside a mounted Ink App.
-@@ -309,13 +309,21 @@
+@@ -381,13 +381,21 @@
       * i/a/o (…) return to INSERT. Enabled in insert mode so the transition
       * is seamless; the mode is session-scoped (not persisted).
       */
 -    const [vimEnabled, setVimEnabled] = React.useState(false);
 +    // vim mode is ON by default and starts in NORMAL submode (user
-+    // preference); `/vim` still toggles it off/on.
++    // preference); /vim still toggles it off/on.
 +    const [vimEnabled, setVimEnabled] = React.useState(true);
      /** Insert submode (false = vim NORMAL). */
 -    const [vimInsert, setVimInsert] = React.useState(true);
@@ -41,36 +41,15 @@
 +        if (onVimChange !== undefined)
 +            onVimChange(enabled, insert);
 +    };
-     /** Undo stack: vim editing ops push {value, cursor}; `u` pops. */
+     /** Undo owns the draft's image bindings as well as its text and caret. */
      const vimUndoRef = React.useRef([]);
      /** Pending vim operator: `d` pressed, awaiting its second key. */
-@@ -422,12 +430,14 @@
-                 const next = !vimEnabledRef.current;
-                 vimEnabledRef.current = next;
-                 setVimEnabled(next);
--                // Every toggle lands in INSERT: a fresh vim user keeps typing
--                // normally until they press Esc for the first time. Turning the
--                // mode off also clears the undo stack — a later re-enable must
--                // never `u` its way back past edits made while vim was off.
--                vimInsertRef.current = true;
--                setVimInsert(true);
-+                // /vim lands in NORMAL mode when ENABLING (user preference —
-+                // keys are vim keys from the start; i/a/o return to INSERT).
-+                // Turning the mode off also clears the undo stack — a later
-+                // re-enable must never `u` its way back past edits made while
-+                // vim was off.
-+                vimInsertRef.current = !next;
-+                setVimInsert(!next);
-+                notifyVimChange(next, !next);
-                 vimPendingRef.current = '';
-                 vimUndoRef.current = [];
-                 return next;
-@@ -439,7 +449,21 @@
-         };
-     });
-     const [selectedCommand, setSelectedCommand] = React.useState(0);
+@@ -451,7 +459,21 @@
+     }, []);
+     const valueRef = React.useRef(value);
+     const cursorRef = React.useRef(cursor);
 +    // ↑/↓ history walk: seeded from the persisted history file (oldest first,
-+    // newest last — `loadHistory()` returns newest-first), so the arrows
++    // newest last — loadHistory() returns newest-first), so the arrows
 +    // recall inputs from earlier sessions, not just this mount. Bash-style:
 +    // in-session submissions append on top of the seed.
      const history = React.useRef([]);
@@ -85,42 +64,57 @@
 +        }
 +    }
      const historyIndex = React.useRef(-1);
-     const historyDraft = React.useRef('');
-     // ctrl+r history fill: replace the input when a new fill arrives, then
-@@ -1322,9 +1346,14 @@
+     const historyDraft = React.useRef({ text: '', images: [] });
+     /** Visible `[Image #N]` labels are presentation only; this sidecar carries
+@@ -615,12 +637,14 @@
+                 const next = !vimEnabledRef.current;
+                 vimEnabledRef.current = next;
+                 setVimEnabled(next);
+-                // Every toggle lands in INSERT: a fresh vim user keeps typing
+-                // normally until they press Esc for the first time. Turning the
+-                // mode off also clears the undo stack — a later re-enable must
+-                // never `u` its way back past edits made while vim was off.
+-                vimInsertRef.current = true;
+-                setVimInsert(true);
++                // /vim lands in NORMAL mode when ENABLING (user preference —
++                // keys are vim keys from the start; i/a/o return to INSERT).
++                // Turning the mode off also clears the undo stack — a later
++                // re-enable must never u its way back past edits made while
++                // vim was off.
++                vimInsertRef.current = !next;
++                setVimInsert(!next);
++                notifyVimChange(next, !next);
+                 vimPendingRef.current = '';
+                 clearVimUndo();
+                 return next;
+@@ -1912,8 +1936,11 @@
                  setInput(value, prevLineStart + Math.min(cursorColumn(value, cursor), prevLine.length));
                  return;
              }
+-            if (overlayOpen && historyIndex.current < 0) {
+-                setSelectedCommand(index => index <= 0 ? suggestions.length - 1 : index - 1);
 +            // Command-suggestion menu open: ↑/↓ select its items — but at the
 +            // FIRST item another ↑ falls through into history, so both
 +            // behaviors stay reachable on the same keys (user preference).
-             if (overlayOpen) {
--                setSelectedCommand(index => index <= 0 ? suggestions.length - 1 : index - 1);
--                return;
-+                if (selectedCommand > 0) {
-+                    setSelectedCommand(index => index - 1);
-+                    return;
-+                }
++            if (overlayOpen && historyIndex.current < 0 && selectedCommand > 0) {
++                setSelectedCommand(index => index - 1);
+                 return;
              }
              if (history.current.length === 0)
-                 return;
-@@ -1384,9 +1413,13 @@
+@@ -1981,8 +2008,10 @@
                  setInput(value, nextLineStart + Math.min(cursorColumn(value, cursor), nextLine.length));
                  return;
              }
+-            if (overlayOpen && historyIndex.current < 0) {
+-                setSelectedCommand(index => index >= suggestions.length - 1 ? 0 : index + 1);
 +            // Same hybrid as ↑: the menu owns ↓ until its LAST item, then the
 +            // key falls through to newer-history.
-             if (overlayOpen) {
--                setSelectedCommand(index => index >= suggestions.length - 1 ? 0 : index + 1);
--                return;
-+                if (selectedCommand < suggestions.length - 1) {
-+                    setSelectedCommand(index => index + 1);
-+                    return;
-+                }
++            if (overlayOpen && historyIndex.current < 0 && selectedCommand < suggestions.length - 1) {
++                setSelectedCommand(index => index + 1);
+                 return;
              }
              if (historyIndex.current < 0)
-                 return;
-@@ -1642,23 +1675,27 @@
+@@ -2258,23 +2287,27 @@
                  case 'i': // insert at the caret
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -148,7 +142,7 @@
                      return;
                  }
                  case 'o': { // new line below, then insert
-@@ -1667,6 +1704,7 @@
+@@ -2283,6 +2316,7 @@
                      vimNormalEdit(value.slice(0, end) + '\n' + value.slice(end), end + 1);
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -156,7 +150,7 @@
                      return;
                  }
                  case 'O': { // new line above, then insert
-@@ -1675,6 +1713,7 @@
+@@ -2291,6 +2325,7 @@
                      vimNormalEdit(value.slice(0, start) + '\n' + value.slice(start), start);
                      vimInsertRef.current = true;
                      setVimInsert(true);
@@ -164,7 +158,7 @@
                      return;
                  }
                  default:
-@@ -1688,6 +1727,7 @@
+@@ -2304,6 +2339,7 @@
                      event.stopImmediatePropagation();
                      vimInsertRef.current = false;
                      setVimInsert(false);
@@ -172,7 +166,7 @@
                      return;
                  }
              }
-@@ -1717,6 +1757,7 @@
+@@ -2333,6 +2369,7 @@
                          setFileSelected(0);
                          vimInsertRef.current = true;
                          setVimInsert(true);
@@ -180,7 +174,7 @@
                          return;
                      }
                      event.stopImmediatePropagation();
-@@ -2343,7 +2384,7 @@
+@@ -3010,7 +3047,7 @@
                      const max = Math.max(0, viewport.total - viewport.maxRows);
                      expandedScrollRef.current = Math.max(0, Math.min(expandedScrollRef.current + Math.round(event.deltaY), max));
                      setExpandedTick(tick => tick + 1);
@@ -189,7 +183,7 @@
                              line: cursorLine(value, cursor) + 1,
                              col: cursorColumn(value, cursor) + 1,
                          }) }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: `${t('input-expand-editor-hint-send')} · ${t('input-expand-editor-hint-collapse')}` })] }), _jsxs(Box, { flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, columnGap: 1, children: [_jsx(EditorButton, { label: `⏎ ${t('input-expand-editor-send')}`, hint: "Ctrl+Enter", primary: true, accent: promptAccent, onClick: submitFromEditor }), _jsx(EditorButton, { label: t('input-expand-editor-collapse'), hint: "Esc", onClick: collapseEditor }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: t('input-expand-editor-scroll') })] })] })) : null;
-@@ -2390,7 +2431,7 @@
+@@ -3063,7 +3100,7 @@
                                  : undefined, rows: peekVisualLines.map((row, index) => (_jsx(Text, { wrap: "truncate-end", children: row }, index))), onRowPick: () => {
                                  updateFoldBlock(null);
                                  setHovered(false);
