@@ -2,6 +2,10 @@
   "models": [
     {
       "provider": "deepseek-official",
+      "id": "deepseek-flash"
+    },
+    {
+      "provider": "deepseek-official",
       "id": "deepseek-v4-flash"
     },
     {
