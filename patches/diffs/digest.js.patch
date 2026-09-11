@@ -1,0 +1,234 @@
+--- original/digest.js	2026-09-02 11:00:17.279576168 +0800
++++ backup/digest.js	2026-09-11 15:25:05.334015240 +0800
+@@ -19,6 +19,14 @@
+  * is the evidence behind {@link SessionTitle.source}, which is why the picker
+  * can dim a fallback and explain a name instead of merely displaying one.
+  *
++ * A filesystem address is never allowed to BECOME a title (see
++ * {@link isFileAddress}): a path pasted as the opening message is stepped over,
++ * the scan keeps looking for the first real words, and the directory basename
++ * stays the last resort. The order mirrors Claude Code's title chain — its
++ * custom/AI title, then a recent prompt, then the first prompt, then a last
++ * resort of its own — minus the model call, because a provider-written title
++ * already arrives here as a `session/title` event.
++ *
+  * @module @deepseek-harness-tui/dsh-tui/sessions/digest
+  */
+ import { createHash } from 'node:crypto';
+@@ -40,6 +48,9 @@
+ const TITLE_ANCHOR_BYTES = 256;
+ /** Longest preview excerpt kept per message, in characters. */
+ const PREVIEW_CHARS = 400;
++/** Longest recent-prompt title kept, in characters — the width Claude Code's
++ *  own last-prompt fallback normalizes to before its ellipsis. */
++const LAST_PROMPT_TITLE_CHARS = 200;
+ /** The first text block of a message `content` payload. */
+ function textOfContent(content) {
+     if (typeof content === 'string')
+@@ -99,6 +110,71 @@
+     }
+     return undefined;
+ }
++/**
++ * Whether a title candidate is nothing but a filesystem address.
++ *
++ * A picker title answers "is this the conversation I mean". A path that was
++ * pasted, dropped, or `@`-mentioned as the opening message answers nothing:
++ * the same file shows up in every session that ever touched it, so the address
++ * uses the row without naming anything. So an address is not a title
++ * candidate — the scans below step over it and keep looking for the first
++ * opening words that are words.
++ *
++ * Only a candidate that is an address END TO END is refused. A real sentence
++ * that merely mentions a path (`@src/views/Setting.vue 互转方向更改`) is the
++ * session speaking, which is exactly what a prompt-sourced title is for.
++ *
++ * An address is still EVIDENCE of a conversation when it is the only human
++ * input, so callers track "a prompt was seen" separately from the title
++ * candidate: emptiness stays a fact about the log, never about the wording.
++ */
++function isFileAddress(text) {
++    const value = text.trim();
++    if (value.length === 0)
++        return false;
++    // Anchored forms are addresses even when they contain spaces.
++    if (/^(?:~[\\/]|\.{1,2}[\\/]|[\\/])/.test(value))
++        return true;
++    if (/^[A-Za-z]:[\\/]/.test(value))
++        return true;
++    if (/^@\S+$/.test(value))
++        return true;
++    // An unanchored relative path is an address only when it cannot be prose:
++    // one token, carrying a letter (so `2024/09/11` stays a title) and either a
++    // file extension or two levels of separators (`src/views/Setting`).
++    if (/\s/.test(value) || !/\p{L}/u.test(value) || !/[\\/]/.test(value))
++        return false;
++    return /[\\/][^\\/]*\.\w{1,8}$/.test(value) || (value.match(/[\\/]/g) ?? []).length >= 2;
++}
++/**
++ * A recent prompt rendered on one line, the way Claude Code normalizes its own
++ * last-prompt fallback: newlines folded to spaces, trimmed, and clipped to
++ * {@link LAST_PROMPT_TITLE_CHARS} with an ellipsis. A multi-line prompt would
++ * otherwise wrap the picker row it is standing in for.
++ */
++function normalizeLastPrompt(text) {
++    const folded = text.replaceAll('\n', ' ').trim();
++    return folded.length > LAST_PROMPT_TITLE_CHARS
++        ? `${folded.slice(0, LAST_PROMPT_TITLE_CHARS).trim()}…`
++        : folded;
++}
++/**
++ * The most recent human prompt that could stand in as a title, or undefined.
++ *
++ * This is the picker's last level before the working directory's basename, and
++ * it exists for the same reason Claude Code keeps a `lastPrompt` in its title
++ * chain: the words a person typed later in the session describe it better than
++ * the name of the folder it happened to run in. Scanned backwards so the
++ * newest eligible prompt wins; addresses are still refused (isFileAddress).
++ */
++function lastEligiblePrompt(lines) {
++    for (let at = lines.length - 1; at >= 0; at -= 1) {
++        const found = humanPrompt(lines[at]);
++        if (found !== undefined && !isFileAddress(found))
++            return normalizeLastPrompt(found);
++    }
++    return undefined;
++}
+ /** A `session/title` payload, with the provenance that classifies it. */
+ function titleOf(line) {
+     if (line['type'] !== 'session/title')
+@@ -144,6 +220,13 @@
+ /**
+  * Read both windows of one session log.
+  *
++ * The title resolves through Claude Code's chain, deterministic levels only:
++ * the last `session/title` event wins; else the first opening prompt that is
++ * neither an address nor nothing; else the most recent such prompt; else the
++ * working directory's basename. (Claude's first level is a model-written
++ * title, which reaches dsh-tui as a provider `session/title` event, so the two
++ * chains agree from the top.)
++ *
+  * @param path - Absolute artifact path.
+  * @param cwd - Working directory, for the last-resort title.
+  * @returns The digest. An unreadable log still yields a usable record: the
+@@ -156,18 +239,27 @@
+     }
+     const headLines = decodeFrames(head.buffer, walkFrames(head.buffer, 0, HEAD_MAX_FRAMES));
+     let prompt;
++    let sawPrompt = false;
+     let headTitle;
+     let label;
+     for (const line of headLines) {
+-        prompt ??= humanPrompt(line);
++        const found = humanPrompt(line);
++        if (found !== undefined) {
++            sawPrompt = true;
++            // An address is not a title candidate: keep scanning the window
++            // for the first opening words that are (see isFileAddress).
++            if (prompt === undefined && !isFileAddress(found))
++                prompt = found;
++        }
+         headTitle ??= titleOf(line);
+         label ??= labelOf(line);
+     }
+     // Absence of a prompt only means "empty" when the window actually saw the
+     // whole log. A log too large for the window has a conversation in it by
+     // construction, and erring toward listing it is the safe direction: hiding
+-    // a real session is a defect, showing a boot artifact is a nuisance.
+-    const hasPrompt = prompt !== undefined || !head.whole;
++    // a real session is a defect, showing a boot artifact is a nuisance. An
++    // address-only opening counts here too — it is input, just not a title.
++    const hasPrompt = sawPrompt || !head.whole;
+     // A head window that already covered the whole log IS the tail.
+     const tail = head.whole ? undefined : readWindow(path, TAIL_WINDOW_BYTES, true);
+     const tailLines = tail === undefined ? headLines : decodeTail(tail);
+@@ -184,8 +276,17 @@
+     const resolved = tailTitle ??
+         headTitle ??
+         (prompt === undefined ? undefined : { text: prompt, source: 'prompt' });
++    // The last level before the directory basename, borrowed from Claude
++    // Code's chain: when the opening never yielded a title — an address-only
++    // opening, or a head window that missed the prompt — the newest real words
++    // in the log beat the folder's name. Paid for only when the levels above
++    // came up empty, so an ordinary session reads no more of its log than
++    // before.
++    const recent = resolved === undefined ? lastEligiblePrompt(tailLines) : undefined;
+     return {
+-        title: resolved ?? { text: basename(cwd), source: 'fallback' },
++        title: resolved ?? (recent === undefined
++            ? { text: basename(cwd), source: 'fallback' }
++            : { text: recent, source: 'prompt' }),
+         hasPrompt,
+         model,
+         label,
+@@ -328,7 +429,14 @@
+         await handle.close().catch(() => { });
+     }
+ }
+-/** Find the first human prompt after a complete reverse scan proved no title. */
++/**
++ * Find the first human prompt after a complete reverse scan proved no title.
++ *
++ * The prompt returned is the first one that is not a filesystem address (see
++ * isFileAddress) — an address-only opening is skipped, and the scan keeps
++ * going. `hasPrompt` reports whether the log held ANY human prompt, so a
++ * conversation that opened with nothing but a path is still a conversation.
++ */
+ async function recoverFirstPrompt(path, bytes, signal) {
+     signal?.throwIfAborted();
+     let handle;
+@@ -337,32 +445,37 @@
+     }
+     catch {
+         signal?.throwIfAborted();
+-        return { prompt: undefined, complete: false };
++        return { prompt: undefined, hasPrompt: undefined, complete: false };
+     }
+     try {
+         let position = 0;
++        let sawPrompt = false;
+         while (position < bytes) {
+             signal?.throwIfAborted();
+             const page = await forwardPage(handle, position, bytes, signal);
+             if (page === undefined)
+-                return { prompt: undefined, complete: false };
++                return { prompt: undefined, hasPrompt: undefined, complete: false };
+             for (const frame of page.frames) {
+                 const lines = decodeFrame(page.buffer, frame);
+                 if (lines === undefined)
+-                    return { prompt: undefined, complete: false };
++                    return { prompt: undefined, hasPrompt: undefined, complete: false };
+                 for (const line of lines) {
+-                    const prompt = humanPrompt(line);
+-                    if (prompt !== undefined)
+-                        return { prompt, complete: true };
++                    const found = humanPrompt(line);
++                    if (found === undefined)
++                        continue;
++                    sawPrompt = true;
++                    if (isFileAddress(found))
++                        continue;
++                    return { prompt: found, hasPrompt: true, complete: true };
+                 }
+             }
+             const consumed = page.frames[page.frames.length - 1].end;
+             if (consumed <= 0)
+-                return { prompt: undefined, complete: false };
++                return { prompt: undefined, hasPrompt: undefined, complete: false };
+             position += consumed;
+             await scheduler.yield();
+         }
+-        return { prompt: undefined, complete: true };
++        return { prompt: undefined, hasPrompt: sawPrompt, complete: true };
+     }
+     finally {
+         await handle.close().catch(() => { });
+@@ -381,7 +494,7 @@
+     return {
+         title: opening.prompt === undefined ? undefined : { text: opening.prompt, source: 'prompt' },
+         complete: opening.complete,
+-        ...(opening.complete ? { hasPrompt: opening.prompt !== undefined } : {}),
++        ...(opening.complete ? { hasPrompt: opening.hasPrompt === true } : {}),
+     };
+ }
+ /** Hash the previous EOF neighborhood before carrying title evidence forward. */

@@ -2,7 +2,7 @@
 
 > 📖 **升级后把全部定制补回来，请看 [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md)**（功能清单 + 重打手册）。
 
-Two customizations live here:
+Three customizations live here:
 
 1. **Diff rendering** — `dsh --profile dsh-tui` renders edit/write diffs exactly
    like Claude Code: **unified layout with real line numbers, context lines and
@@ -14,6 +14,12 @@ Two customizations live here:
    `history.jsonl` **scoped to the current working directory**: each entry is
    tagged with the directory it was submitted in, and untagged entries written
    before the tagging stay as a fallback until a directory has entries of its own.
+3. **A filesystem address never becomes a `/resume` title** — the picker's
+   title chain follows Claude Code's (a provider/AI title, then the first real
+   prompt, then the most recent real prompt, then the working directory's
+   basename, with the model call left to the provider), so a path pasted,
+   dropped or `@`-mentioned as the opening message is stepped over instead of
+   being shown as the session's name.
 
 ## User-level settings (survive upgrades)
 
@@ -74,6 +80,7 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.2-rc.1`,
 | `dsh-tui .../screens/Chat.js` | Ctrl+R (the `history` action) fills its search dialog from `loadHistory(channel.cwd)`, so the search covers exactly what ↑/↓ walks |
 | `dsh-tui .../screens/SessionBrowser.js` | **whole-file fork**: resume drops the workspace rail, the `▣ <path>` project grouping and the `←` drill-in page, and keeps the stock current-directory scope (`allProjects: false`, `mod+a` inert), so it shows this project's sessions in one flat MRU list. Search, preview, rename, delete, clean and the `mod+s` runs filter stay; pins and the right-click menu do not exist in this fork. Test: `node ~/.dsh-tui/patches/test-resume-flat.mjs` |
 | `dsh-tui .../i18n.js` | `session-hint-list*` drop the rail / right-click-menu / scope-toggle wording (the fork advertises only the keys it keeps) |
+| `dsh-tui .../dsh-adapter/sessions/digest.js` | **title chain** for `/resume` rows, deterministic levels of Claude Code's own chain: a candidate that is nothing but a filesystem address (`isFileAddress`) is stepped over, the scan keeps looking for the first real prompt, then falls to the most recent real prompt (`lastEligiblePrompt`, newlines folded and clipped at `LAST_PROMPT_TITLE_CHARS = 200` the way Claude normalizes its `lastPrompt`), and only then to the working directory's basename. `hasPrompt` still counts address-only input, so such a session is never offered to the destructive empty-session clean-up. Test: `node ~/.dsh-tui/patches/test-title-skips-paths.mjs` |
 
 > **Reverted experiments (do not re-add):** a **cwd-scoped input history** was
 > reverted once during the 0.10.1 move, back when the resume browser was still

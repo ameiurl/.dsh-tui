@@ -40,6 +40,10 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
   # F3 hint copy for that browser (no rail / right-click-menu / scope-toggle).
   "$TUI_PKG/lib/types/i18n.js|i18n.js"
+  # F4 picker titles: an opening message that is nothing but a filesystem
+  # address is skipped, so a pasted path never becomes a /resume row's title
+  # (the directory basename stays the last resort).
+  "$TUI_PKG/lib/types/dsh-adapter/sessions/digest.js|digest.js"
 )
 
 needs_apply=0

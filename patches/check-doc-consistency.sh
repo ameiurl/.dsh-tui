@@ -73,6 +73,18 @@ ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$
 ck "i18n diff touches only session-hint-list*" \
    "! grep -E \"^[-+].*'session-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'session-hint-list\""
 
+echo "== §2 F4 title chain =="
+G="$LIB/types/dsh-adapter/sessions/digest.js"
+ck "digest.js: isFileAddress present"        "grep -q 'function isFileAddress' '$G'"
+ck "digest.js: lastEligiblePrompt present"   "grep -q 'function lastEligiblePrompt' '$G'"
+ck "digest.js: lastPrompt clipped at 200"    "grep -q 'LAST_PROMPT_TITLE_CHARS = 200' '$G'"
+# The empty-session signal must stay independent of the title candidate: if
+# these two ever collapse back into one variable, an address-only opening makes
+# a real conversation look empty — and `mod+x` deletes empty sessions.
+ck "digest.js: hasPrompt is not the title candidate" \
+   "grep -q 'sawPrompt || !head.whole' '$G'"
+ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPrompt' '$G'"
+
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"
 ck "ToolFileDiff .d.ts has no oldStart" "! grep -q 'oldStart' '$LIB/types/components/messages/ToolFileDiff.d.ts'"
@@ -81,6 +93,7 @@ echo "== §2/§3 scripts and tests referenced by the docs =="
 ck "resolve-patch-targets.mjs runs"  "node '$DIR/resolve-patch-targets.mjs'"
 ck "test-resume-flat.mjs passes"     "node '$DIR/test-resume-flat.mjs'"
 ck "test-history-cwd.mjs passes"     "node '$DIR/test-history-cwd.mjs'"
+ck "test-title-skips-paths.mjs passes" "node '$DIR/test-title-skips-paths.mjs'"
 ck "TARGETS count == original/ count" \
    "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/original' | wc -l)\" ]"
 ck "TARGETS count == diffs/ count" \

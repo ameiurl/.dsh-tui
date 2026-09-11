@@ -43,15 +43,16 @@
 
 > **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为 F1–F3：
 > F1 diff 渲染、**F2 ↑/↓ 跨会话历史（同样只看当前目录）**、
-> **F3 resume 只看当前目录（扁平、无 rail）**。
+> **F3 resume 只看当前目录（扁平、无 rail）**；2026-09-11 追加
+> **F4 标题链路：文件地址永不当标题**（仿 Claude Code 的确定性部分）。
 > 迁移时曾去掉五项旧定制，其中**旧 F3 的部分行为已恢复进当前的 F3**
 > （去掉 rail、列表扁平，但范围仍是当前工作目录）；
 > 仍去掉的四项是：旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、
 > 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 8 个目标文件**（3 个 F1 + 3 个 F2 + 2 个 F3；`node resolve-patch-targets.mjs`
-> 可列出），`patch-base-version` = `0.10.1`。
+> **当前补丁集 = 9 个目标文件**（3 个 F1 + 3 个 F2 + 2 个 F3 + 1 个 F4；
+> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.10.1`。
 >
 > **resume 浏览器不是 stock**（见 F3）：2026-09-11 曾按「恢复全量会话」做了一版**薄补丁**
 > （`SessionBrowser.js` + `view.js` + `i18n.js`，默认 `allProjects`、去掉 rail 与目录分组），
@@ -155,6 +156,62 @@
      ```
      它断言：当前目录的会话列出、其他目录的会话**不**列出、恰好一行会话、无分组头 /
      无 rail / 无钻取页、scope 不是"全部项目"、子运行仍折叠。
+
+### F4 — `/resume` 的标题：文件地址永不当标题（仿 Claude Code 的标题链路）
+- **涉及文件（1 个）**：
+  - `…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`（**薄改动**：新增 `isFileAddress()`
+    / `normalizeLastPrompt()` / `lastEligiblePrompt()`，`digestSession()` 的标题选择与
+    `recoverFirstPrompt()` 的扫描各改几行）。
+- **行为**：`/resume` 行的标题按 Claude Code 的链条解析，只取其中**确定性**的那几层：
+  1. 最后一条 `session/title` 事件（provider 自动标题 = `auto`；`/rename` 或 recap 点"应用"
+     = `renamed`）—— 对应 Claude 的 `customTitle || aiTitle`。模型那一层由 provider 负责，
+     TUI 不重复调用；
+  2. 否则取**第一条"不是文件地址"的人类消息**（`isFileAddress`，判据见下）—— 对应 Claude 的
+     `firstPrompt`。地址型首句不是被隐藏，而是**被跳过、继续往后找**；
+  3. 否则取**最近一条**合资格的人类消息（`lastEligiblePrompt`，倒序扫尾部窗口），并按 Claude
+     的 `normalizeLastPrompt` 归一化：换行折成空格、trim、超 200 字符截断加 `…` —— 对应
+     Claude 的 `lastPrompt` 层。只在前两层都空时才扫描，普通会话不多读一个字节；
+  4. 最后才是工作目录 basename（`source: 'fallback'`，上游行为未改）。
+- **"文件地址"判据**（只认"整串就是一个地址"，**绝不做子串匹配**）：
+  `^[/\\]`、`^~[/\\]`、`^\.{1,2}[/\\]`、`^[A-Za-z]:[\\/]`、`^@\S+$`；以及"单 token、
+  含分隔符、带字母（`\p{L}`，所以 `2024/09/11` 不算）、且带扩展名或至少两级"的相对路径
+  （`src/views/Setting.vue`、`src/views/Setting`）。**不匹配**的仍是标题：
+  `@src/views/Setting.vue 互转方向更改`、
+  `在admin_frontend中，@src/views/setting/Setting.vue 互转方向更改。`、
+  `工作/生活`、`2024/09/11`。
+- **`hasPrompt` 与标题解耦（关键，别改回去）**：地址型首句**仍然算"有对话"**。上游把
+  `hasPrompt` 从"标题候选"推导，若沿用它，一个"首句是路径、后面聊了一堆"的会话会被算成
+  **空会话** —— 而"清理空会话"是**破坏性**动作（`mod+x` 确认后删除），绝不能误删。所以
+  `digestSession` / `recoverFirstPrompt` 都分别记录 *sawPrompt（任何人类输入）* 与
+  *title 候选（合资格者）*，`hasPrompt = sawPrompt || !head.whole` 与上游语义逐字一致。
+- **与 Claude Code 2.1.201 的异同（有意为之）**：
+  - **照搬**：链条顺序、`lastPrompt` 的 200 字符归一化、以及"内容只是 URL/引用时不回显地址"
+    的意图（Claude 用提示词让模型改写成 "Review Slack thread"；这里没有可调的模型，只能跳过）。
+  - **不照搬**：① Claude 的 `qam = 10` 最小长度门槛是"要不要调用模型"的闸门，不是"能不能当
+    标题"的判据（它的兜底链最终仍会显示原始 firstPrompt），且按字符数对中英文不公平；
+    ② Claude 的 row summary 把 `lastPrompt` 排在 `firstPrompt` **之前**，这里只当**替补**用，
+    因为 dsh-tui 的 digest 上游语义就是"读第一条 prompt"，首句通常也更能给会话命名。
+  - **不引入模型调用**：`digest.js` 是"打开 picker 时对每个会话做有界读取"的纯同步层，
+    在这里发 LLM 请求会把 `/resume` 变成一次批量推理；模型标题这条路属于 provider 事件
+    （`auto`）和 recap（用户点"应用" → `renamed`）。
+- **历史/被否方案**：需求原话是"取标题时，是文件地址不取"。第一版把它做成**纯地址过滤器**
+  （命中地址 → 直接落到目录名）；看过 Claude Code 的实现后改成上面这套链路：地址只影响
+  **候选资格**，不影响"有对话"这一事实，并且优先用会话里**后面真正说的话**，而不是目录名。
+- **验证**：
+  1. `/resume` 里不应出现长得像路径的标题；首句是路径的会话应显示**后面那条真实消息**；
+  2. 只发过一个路径、之后再没说话的会话显示**目录名**（既不是路径，也不是空白行 —— 这也是
+     刻意不碰 `SessionListRow.js` 的原因：兜底永远非空，行本身不用改）；
+  3. 无头行为测试（合成 zstd 会话日志，不启动 TUI、不写用户数据）：
+     ```bash
+     node ~/.dsh-tui/patches/test-title-skips-paths.mjs
+     ```
+     它断言：地址型首句被跳过、其后的第一条真实消息胜出；地址型首句**不会**把会话标成空；
+     提及路径的正常句子 / `2024/09/11` / `工作/生活` 仍是标题；6 种地址写法全被跳过；
+     `>64KB` 日志里"开头是地址、后面才说话"时用尾窗口的最近消息（含折行与 200 字符截断）；
+     渐进恢复扫描（`recoverSessionTitle`）同规则、同样保留 `hasPrompt`。
+  4. 回归证据：对 `~/.dsh/sessions` 全部 141 条真实会话日志，改动前后 `digestSession()` 的
+     `{title, source, hasPrompt, titleComplete}` **逐条相同** → 现有 `session-index.json`
+     缓存无需作废，因此**没有**动 `store.js` 的 `SCHEMA_VERSION`。
 
 > 说明：`history.jsonl` 现有条目**全都没有 `cwd` 字段**（早年那版过滤器的遗留早已随
 > 200 条上限轮转出去），它们正是 F2 的「旧条目兜底池」：改完 ↑/↓ 立刻仍能看到全部老命令，
@@ -294,8 +351,10 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 覆盖面：§1.1 版本表 / §1.2 用户级设置 / F1 的 `DIFF_BODY_MAX_LINES` 与
 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 / F2 的 `loadHistory(cwd)` 与
 `historySeedCwd` 与 Ctrl+R 走 `channel.cwd` / F3 的无 rail 与 `allProjects: false` 与
-i18n 补丁只动 `session-hint-list*` / 仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
-目标数 = `original/` = `diffs/` 且命名一致 / 两个行为测试通过。
+i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastEligiblePrompt`、
+`LAST_PROMPT_TITLE_CHARS = 200` 与 `hasPrompt` 不再取自标题候选 /
+仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
+目标数 = `original/` = `diffs/` 且命名一致 / 三个行为测试通过。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
 
 ---
@@ -313,9 +372,14 @@ i18n 补丁只动 `session-hint-list*` / 仍应 stock 的 vim 与 `ToolFileDiff.
 | tool 包 0.1.1-rc.2 → 0.1.2-rc.1 | 上游 68/36 行变更（随 0.10.0 迁移处理） | 已并入 |
 | （非升级）**F3：resume 无 rail + 只看当前目录** | 整文件分叉：`SessionBrowser.js` 取 0.10.1 stock 与原分叉的 3-way 合并（上游两文件字节未变 → 0 冲突），`i18n.js` 只改 hint 文案 | 沿用 `23086fc` 那版分叉的"删 rail + 去目录分组 + 去钻取页"，但范围**固定当前目录**（`allProjects: false`，`mod+a` 置空）。中途被否掉的方案：薄补丁保留 rail 只去分组、rail 阈值 120→90、以及一度把默认设成 `allProjects: true`（列全部）——用户最终要的是**按当前目录过滤**。补丁集 4 → 6 个目标；新增 `test-resume-flat.mjs`。`patch-base-version` 仍 0.10.1 |
 | （非升级）**F2：↑/↓ 历史按当前目录过滤** | `history.js` 加 `cwd` 读写（约 40 行）、`PromptInput.js` 播种/打标、`Chat.js` Ctrl+R 改读过滤版（1 行）；3 个文件都是薄改动 | 写入时给条目打上提交目录，`loadHistory(cwd)` 只返回该目录条目；**旧的无标记条目在当前目录为空时兜底**（升级平滑），有本目录条目后自动让位。`historySeedCwd` 让播种**按目录重播**（workspace picker 能中途换目录），顺带修掉旧补丁"每次 render 都重新播种、会在落盘前抹掉刚提交命令"的竞态。去重按目录分别算。0.10.1 迁移时曾撤回过一版 cwd 过滤（当时 resume 还打算做全量），F3 定为「只看当前目录」后按用户要求恢复。补丁集 6 → 8 个目标；新增 `test-history-cwd.mjs`。`patch-base-version` 仍 0.10.1 |
-| （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
+| （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（当时 31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
+| （非升级）**F4：标题链路——文件地址永不当标题** | 只动 `digest.js` 一个文件（新增 3 个函数 + `digestSession`/`recoverFirstPrompt` 各改几行），UI 一行未碰 | 需求原话"取标题时，是文件地址不取"。**第一版是纯地址过滤器，看过 Claude Code 2.1.201 的实现后改成链路**：`session/title` → 第一条非地址 prompt → **最近一条**非地址 prompt（`normalizeLastPrompt`：折行/trim/200 字符截断，仿 Claude 的 `lastPrompt`）→ 目录名。刻意**不照搬** Claude 的 `qam = 10` 门槛（那是"要不要调模型"的闸门，且对中英文不公平），也**不**把 `lastPrompt` 提到 `firstPrompt` 之前（只当替补）；不在 `digest.js` 里发模型请求（那层归 provider 事件与 recap）。关键点：`hasPrompt` 与标题候选**解耦**，否则"首句是路径、后面聊了一堆"的会话会被当成空会话而进入 `mod+x` 的破坏性清理。回归：141 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-title-skips-paths.mjs`。`patch-base-version` 仍 0.10.1 |
 
 **定制状态备忘（含已恢复 / 已去掉）**
+
+> 编号复用提醒：下表是**旧编号**，其中「旧 F4 / 旧 F5」指 vim；2026-09-11 新增的
+> **F4 标题链路**（§2）只是借用了 F4 这个号，与 vim 无关，别按旧 F4 的描述去找文件。
+
 | 旧编号 | 内容 | 现状 |
 | --- | --- | --- |
 | 旧 F2 | `SessionListRow.js` 会话标题显示全文（去 `truncateWidth`） | stock：标题按宽度截断；补丁文件已删除 |
