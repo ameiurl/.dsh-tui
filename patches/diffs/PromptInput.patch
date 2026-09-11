@@ -1,5 +1,5 @@
 --- original/PromptInput.js	2026-09-11 09:42:48.482543513 +0800
-+++ backup/PromptInput.js	2026-09-11 09:42:48.504488431 +0800
++++ backup/PromptInput.js	2026-09-11 11:01:26.004101333 +0800
 @@ -24,7 +24,7 @@
  import { editInExternalEditor } from '../utils/externalEditor.js';
  import { setPromptEditorNode, EditorButton } from './PromptEditor.js';

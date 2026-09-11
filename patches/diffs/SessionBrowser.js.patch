@@ -1,0 +1,78 @@
+--- original/SessionBrowser.js	2026-09-11 10:55:44.610496844 +0800
++++ backup/SessionBrowser.js	2026-09-11 10:58:42.802406738 +0800
+@@ -115,8 +115,13 @@
+     const isTerminalFocused = useTerminalFocus();
+     const [sessions, setSessions] = React.useState([]);
+     const [loaded, setLoaded] = React.useState(false);
+-    const [filters, setFilters] = React.useState(DEFAULT_FILTERS);
+-    const [level, setLevel] = React.useState('sessions');
++    const [filters, setFilters] = React.useState(() => ({ ...DEFAULT_FILTERS, allProjects: true }));
++    // F2: always "all projects". The browser never drills into a directory
++    // level, so the workspace page, its rail, its wheel handler and the mod+a
++    // scope toggle are all unreachable — `setLevel` stays a no-op so a stray
++    // call cannot put the screen into a level this fork no longer renders.
++    const level = 'sessions';
++    const setLevel = () => { };
+     const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState('current');
+     const [workspaceFocusId, setWorkspaceFocusId] = React.useState('current');
+     const [workspaceQuery, setWorkspaceQuery] = React.useState('');
+@@ -253,7 +258,7 @@
+             return;
+         setSelectedWorkspaceId('current');
+         setWorkspaceFocusId('current');
+-        setFilters(current => ({ ...current, allProjects: false }));
++        // F2: scope never narrows to one directory, so allProjects stays on.
+     }, [selectedWorkspaceId, workspaceGroups]);
+     const scopeCwd = selectedWorkspace?.cwd ?? channel.cwd;
+     const scopeSameProject = React.useMemo(() => selectedWorkspace?.current !== false
+@@ -454,7 +459,9 @@
+     // too little width for two-line session rows.
+     const compactChrome = rows < 10;
+     const mandatoryLines = compactChrome ? COMPACT_MANDATORY_LINES : REGULAR_MANDATORY_LINES;
+-    const workspaceRail = columns >= WORKSPACE_RAIL_MIN_COLUMNS;
++    // F2: no directory rail and no workspace page — the session list always
++    // gets the full width, on every terminal size.
++    const workspaceRail = false;
+     const workspaceWidth = workspaceRail
+         ? Math.min(34, Math.max(26, Math.floor(columns * 0.24)))
+         : columns;
+@@ -760,11 +767,8 @@
+                 setPreviewOpen(open => !open);
+         }
+         else if (isMod(key) && input === 'a') {
+-            const target = filters.allProjects
+-                ? workspaceChoices.find(choice => choice.id === 'current')
+-                : workspaceChoices[0];
+-            if (target !== undefined)
+-                chooseWorkspace(target);
++            // F2: every project is already on screen, so there is nothing to
++            // toggle — the key is inert rather than a surprise scope switch.
+         }
+         else if (isMod(key) && input === 'b') {
+             applyFilters(current => ({ branchOnly: !current.branchOnly }));
+@@ -831,7 +835,7 @@
+         : `▣ ${t('session-workspace-scope')}  ${scope}`;
+     const scopeRight = level === 'workspaces'
+         ? t('session-workspace-project-count', { n: workspaceGroups.length })
+-        : t('session-workspace-switch');
++        : '';
+     const scopeRow = spreadRow(scopeLeft, scopeRight, inputBudget);
+     const activeQuery = level === 'workspaces' ? workspaceQuery : filters.query;
+     const searchPlaceholder = level === 'workspaces'
+@@ -849,13 +853,14 @@
+                 : fitHint([
+                     t('session-hint-list', {
+                         mod: modLabel,
+-                        projects: filters.allProjects ? t('session-toggle-on') : t('session-toggle-off'),
++                        // F2: no `projects` param — the hint no longer mentions the
++                        // directory scope, since every project is always listed.
+                         runs: filters.showSubagents ? t('session-toggle-on') : t('session-toggle-off'),
+                     }),
+                     t('session-hint-list-mid', { mod: modLabel }),
+                     t('session-hint-list-short', { mod: modLabel }),
+                 ], inputBudget);
+-    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, onClick: menu !== undefined ? closeMenu : undefined, children: [_jsxs(Box, { flexShrink: 0, children: [_jsx(Text, { color: "remember", bold: true, children: header.left }), _jsx(Text, { dimColor: true, children: `${' '.repeat(header.gap)}${header.right}` })] }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, borderStyle: compactChrome ? undefined : 'round', borderColor: !compactChrome && mode === 'list' ? 'permission' : undefined, borderDimColor: !compactChrome && mode !== 'list', paddingX: compactChrome ? 0 : 1, children: [_jsxs(Box, { height: 1, flexShrink: 0, overflow: "hidden", onClick: level === 'sessions' && mode === 'list' ? openWorkspaceMenu : undefined, onMouseEnter: level === 'sessions' && mode === 'list' ? () => setScopeHovered(true) : undefined, onMouseLeave: level === 'sessions' && mode === 'list' ? () => setScopeHovered(false) : undefined, backgroundColor: scopeHovered ? 'userMessageBackgroundHover' : undefined, children: [_jsx(Text, { color: "remember", bold: true, children: scopeRow.left }), _jsx(Text, { dimColor: true, children: `${' '.repeat(scopeRow.gap)}${scopeRow.right}` })] }), _jsx(SearchBox, { query: activeQuery, isFocused: mode === 'list', isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(searchPlaceholder, inputBudget), borderless: true, width: "100%" })] }), _jsxs("ink-box", { style: { flexDirection: 'row', gap: workspaceGap, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, children: [workspaceAreaVisible && (_jsxs("ink-box", { style: {
++    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, onClick: menu !== undefined ? closeMenu : undefined, children: [_jsxs(Box, { flexShrink: 0, children: [_jsx(Text, { color: "remember", bold: true, children: header.left }), _jsx(Text, { dimColor: true, children: `${' '.repeat(header.gap)}${header.right}` })] }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, borderStyle: compactChrome ? undefined : 'round', borderColor: !compactChrome && mode === 'list' ? 'permission' : undefined, borderDimColor: !compactChrome && mode !== 'list', paddingX: compactChrome ? 0 : 1, children: [_jsxs(Box, { height: 1, flexShrink: 0, overflow: "hidden", onClick: false, onMouseEnter: undefined, onMouseLeave: undefined, backgroundColor: scopeHovered ? 'userMessageBackgroundHover' : undefined, children: [_jsx(Text, { color: "remember", bold: true, children: scopeRow.left }), _jsx(Text, { dimColor: true, children: `${' '.repeat(scopeRow.gap)}${scopeRow.right}` })] }), _jsx(SearchBox, { query: activeQuery, isFocused: mode === 'list', isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(searchPlaceholder, inputBudget), borderless: true, width: "100%" })] }), _jsxs("ink-box", { style: { flexDirection: 'row', gap: workspaceGap, flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, children: [workspaceAreaVisible && (_jsxs("ink-box", { style: {
+                             flexDirection: 'column',
+                             width: workspaceRail ? workspaceWidth : columns,
+                             height: listHeight,
