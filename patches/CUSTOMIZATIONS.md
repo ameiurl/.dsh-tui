@@ -41,9 +41,10 @@
 
 ## 2. 定制功能清单（升级后逐项要「回来」的东西）
 
-> **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为连续的 F1–F4。同时按偏好**去掉**了三项
-> 旧定制（旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、旧 F5 vim 指示移到底部
-> 状态栏）：对应文件已恢复 stock，不再进入补丁集。找回办法见 §4 与 git 历史。
+> **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为连续的 F1–F3，并**去掉**四项旧定制：
+> 旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、旧 F5 vim 指示移到底部状态栏、
+> 旧 F7 `ToolFileDiff` 类型补充。前三项对应文件已恢复 stock；类型补充本就与运行时无关
+> （只影响 `tsc`），删除后不再有会随上游搬家而失效的 `.d.ts` 落点。找回办法见 §4 与 git 历史。
 
 ### F1 — Edit/Write 的 diff 用 Claude Code 统一风格渲染
 - **涉及文件（3 个）**：
@@ -82,15 +83,8 @@
   vim 相关（默认开启、`onVimChange` 上报、输入框内指示）已移除，重移植时不要带回。
 - **验证**：重启后 ↑/↓ 能翻到上次会话输过的命令；菜单在第 0 项按 ↑ 应进历史。
 
-### F4 — ToolFileDiff 类型补充
-- **文件**：`…/dsh-tui/lib/types/adapter/ports/channel-view.d.ts`
-- **行为**：`ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号）。
-- **落点提醒**：0.10.0 时该 interface 在 `lib/types/dsh-adapter/channel.d.ts`；0.10.1 把
-  channel 类型拆成 `dsh-adapter/channel/`，原文件变成 re-export barrel，实体迁到
-  `lib/types/adapter/ports/channel-view.d.ts`。再遇到类型搬家，`TARGETS` 跟着改。
-
 > 所有组件补丁都做了**语法校验门禁**：`apply-diff-patches.sh` 在写入前 `node --check`
-> （仅 `.js`；`.d.ts` 不校验），失败即中止，避免用旧补丁覆盖结构已变的上游文件。
+> （仅 `.js`），失败即中止，避免用旧补丁覆盖结构已变的上游文件。
 
 ---
 
@@ -126,7 +120,6 @@ dsh-patch check        # = bash ~/.dsh-tui/patches/apply-diff-patches.sh check
 TUI=~/.dsh/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui
 for rel in \
   lib/types/components/messages/AssistantToolUseMessage.js \
-  lib/types/adapter/ports/channel-view.d.ts \
   lib/types/components/PromptInput.js \
   lib/types/screens/SessionBrowser.js \
   lib/types/i18n.js ; do
@@ -145,7 +138,7 @@ done
 mkdir -p /tmp/port/<x> && cd /tmp/port/<x>
 cp "$TUI/<rel>" ours.js
 git merge-file -p ours.js base.js theirs.js > merged.js
-node --check merged.js        # 语法必须过（.d.ts 跳过这步）
+node --check merged.js        # 语法必须过
 grep -nE '^(<<<<<<<|=======|>>>>>>>)' merged.js   # 有冲突则按 §2 意图人工解
 ```
 - **无冲突** → `merged.js` 即新版补丁文件。
@@ -171,7 +164,7 @@ bash apply-diff-patches.sh check     # 期望全 OK
 
 ### Step 7 — 重启验证
 完全退出并重开 `dsh-tui`（进程会缓存已加载模块，必须重启才吃新 JS），然后按 §2 的
-「验证」逐项过 F1–F4，并顺手确认已去掉的三项仍是 stock（标题会截断、vim 默认关且
+「验证」逐项过 F1–F3，并顺手确认已去掉的四项仍是 stock（标题会截断、vim 默认关且
 `/vim` 后指示仍在输入框内、状态栏不再出现 `-- INSERT --`）。
 
 ---
@@ -184,7 +177,7 @@ bash apply-diff-patches.sh check     # 期望全 OK
 | beta.3 → beta.4 | 6/10 文件上游微变 | `SessionListRow.js`、`SessionBrowser.js` 字节不变 → 免移植；其余用 §3 方法 |
 | beta.4 → beta.5 | 8/10 TUI 文件上游全变（tool 两包字节不变，已补丁在位） | 全量 §3 重移植：beta.5 新增 header 悬浮提示/PageInset 等已并入；`SessionBrowser` 右键菜单（beta.5 新上、beta.4 平铺视图已移除）继续不启用，但 beta.5 同行的 rename `width:"100%"`、`Divider bleed:true` 修复已并入；`Chat.js` 注释校正为「toggle 落回 insert」（与实际一致）|
 | beta.5 → 0.10.0 | 10/10 全变；tool 两包 0.1.1-rc.2 → 0.1.2-rc.1（上游 68/36 行变更） | 全量 §3 重移植：`PromptInput` 上游大改（draft 图片绑定、`clearVimUndo()`、history 条目变 `{text, images}`、新增 fileOverlay），F4/F5/F6 手工重放（历史播种改为适配带 images 的条目结构）；`Chat` 新增 recap/BTW/statusEntries/图片预览等，vim 接线 3 处手工并入；`AssistantToolUseMessage` 上游 `addMargin`→`marginTopOnTurn` 改名 + hoverTint（沿用偏好：hover 不变底色，已删悬空定义）；`SessionBrowser` 仅 figures 路径 `cc/`→`terminal-utils/` 改名，等于旧已补丁 +1 行 import；`StatusLine`/`i18n` 微变自动并入；`SessionListRow` 字节不变 → 免移植；版本提示语已并入 |
-| 0.10.0 → 0.10.1 | 3/5 目标上游变化：`AssistantToolUseMessage`（94 行，新增 `foldBodyLines` 长行裁剪）、`i18n`（11 行）、channel 类型大拆分；`PromptInput`/`SessionBrowser` **字节不变** → 免移植；tool 两包仍 0.1.2-rc.1 → 免移植 | 同时按偏好**删掉三项定制**：SessionListRow（旧 F2 标题不截断）、Chat/StatusLine/PromptInput 的 vim 改动（旧 F4/F5）——三个文件移出补丁集、恢复 stock；F1 的 new-file 上限与上游 `foldBodyLines` 手工合流（二者同作用于 `bodyLines`）；旧 F7 类型补丁落点改到 `adapter/ports/channel-view.d.ts`；补丁集 10 → 7 个目标文件，`patch-base-version` = 0.10.1 |
+| 0.10.0 → 0.10.1 | 3/5 目标上游变化：`AssistantToolUseMessage`（94 行，新增 `foldBodyLines` 长行裁剪）、`i18n`（11 行）、channel 类型大拆分；`PromptInput`/`SessionBrowser` **字节不变** → 免移植；tool 两包仍 0.1.2-rc.1 → 免移植 | 同时**删掉四项定制**：SessionListRow（旧 F2 标题不截断）、Chat/StatusLine/PromptInput 的 vim 改动（旧 F4/F5）、ToolFileDiff 类型补充（旧 F7）——对应文件移出补丁集、恢复 stock；F1 的 new-file 上限与上游 `foldBodyLines` 手工合流（二者同作用于 `bodyLines`）；补丁集 10 → 6 个目标文件（先 7，再去掉类型补丁），`patch-base-version` = 0.10.1 |
 | tool 包 0.1.0-rc.8 → 0.1.1-rc.2 | 字节不变 | 免移植 |
 | tool 包 0.1.1-rc.2 → 0.1.2-rc.1 | 上游 68/36 行变更（随 0.10.0 迁移处理） | 已并入 |
 
@@ -194,6 +187,7 @@ bash apply-diff-patches.sh check     # 期望全 OK
 | 旧 F2 | `SessionListRow.js` 会话标题显示全文（去 `truncateWidth`） | stock：标题按宽度截断；补丁文件已删除 |
 | 旧 F4 | vim 默认 ON、INSERT 起手（`PromptInput` + `Chat` 初始状态） | stock：vim 默认 OFF，`/vim` 开启 |
 | 旧 F5 | `INSERT/NORMAL` 指示从输入框移到 `StatusLine` | stock：指示在输入框内；`Chat`/`StatusLine` 接线已移除 |
+| 旧 F7 | `ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号；0.10.1 迁移时曾短暂编号为 F4） | 不再打补丁；字段由 tool 包（JS）产出、渲染器（JS）动态读取，`.d.ts` 只影响 `tsc`，安装后的包不做类型检查，因此零运行时影响。需要类型时在自己工程里 `declare module` 增强 |
 
 备份目录语义：`original/`=纯净上游；`backup/`=已补丁（apply 恢复源）；
 `diffs/*.patch`=original→backup 差异（供查看）。git 历史（`~/.dsh-tui` 仓库）保留每代
