@@ -123,21 +123,22 @@ const check = (cond, msg) => {
   else { report(`FAIL: ${msg}`); failures += 1; }
 };
 
-const seen = ['AAA', 'BBB', 'CCC'].filter(token => plain.includes(token));
-check(seen.length === 3, `sessions from 3 working directories are all listed (${seen.join(',') || 'none'})`);
-check((plain.match(/☆/g) ?? []).length === 3, `exactly three session rows (${(plain.match(/☆/g) ?? []).length})`);
-check(!plain.includes('▣ /server/www/mallphp') && !plain.includes('▣ /home/amei/.dsh-tui'),
-  'no project group headers — one flat list');
-check(!plain.includes('← 选择目录') && !plain.includes('← choose directory'), 'no rail switch hint');
-check(!plain.includes('查看会话') && !plain.includes('view sessions'), 'no workspace drill-in page');
-check(plain.includes('全部项目') || plain.includes('all projects'), 'scope reads as "all projects"');
-check(!plain.includes('← 工作目录'), 'list hint does not advertise a directory rail');
-// This fork has no pins and no right-click menu (the whole-fork trade-off), so
-// the hint must not advertise them; the keys it does keep are checked instead.
-check(!plain.includes('固定') && !plain.includes('Ctrl+P'), 'list hint does not advertise the dropped pin key');
-check(plain.includes('重命名') || plain.includes('rename'), 'list hint advertises rename');
+check(plain.includes('AAA'), "the current directory's session is listed");
+check(!plain.includes('BBB') && !plain.includes('CCC'),
+  'sessions from other working directories are NOT listed');
+check((plain.match(/\u2606/g) ?? []).length === 1, `exactly one session row (${(plain.match(/\u2606/g) ?? []).length})`);
+check(!plain.includes('/server/www/mallphp'), 'no other project appears at all');
+check(!plain.includes('\u25a3'), 'no project group headers \u2014 one flat list');
+check(!plain.includes('\u2190 \u9009\u62e9\u76ee\u5f55'), 'no rail switch hint');
+check(!plain.includes('\u67e5\u770b\u4f1a\u8bdd') && !plain.includes('view sessions'), 'no workspace drill-in page');
+check(plain.includes('.dsh-tui'), 'scope row names the current directory');
+check(!plain.includes('\u5168\u90e8\u9879\u76ee') && !plain.includes('all projects'), 'scope is not "all projects"');
+check(!plain.includes('\u2190 \u5de5\u4f5c\u76ee\u5f55'), 'list hint does not advertise a directory rail');
+check(!plain.includes('\u56fa\u5b9a') && !plain.includes('Ctrl+P'), 'list hint does not advertise the dropped pin key');
+check(plain.includes('\u91cd\u547d\u540d') || plain.includes('rename'), 'list hint advertises rename');
 check(!plain.includes('RUN hidden subagent'), 'sub-agent runs stay folded by default');
-check(plain.includes('Enter') && (plain.includes('恢复') || plain.includes('resume')), 'list hint renders');
+check(plain.includes('Enter'), 'list hint renders');
+report(failures === 0 ? '\nPASS: resume lists the current working directory only, flat and rail-free.' : `\n${failures} check(s) failed.`);
+process.exit(failures === 0 ? 0 : 1);
 
-report(failures === 0 ? '\nPASS: resume lists every project flat, with no workspace rail.' : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

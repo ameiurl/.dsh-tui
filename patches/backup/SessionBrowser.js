@@ -86,13 +86,13 @@ export function SessionBrowser({ channel, home, sameProject, onClose, }) {
     const isTerminalFocused = useTerminalFocus();
     const [sessions, setSessions] = React.useState([]);
     const [loaded, setLoaded] = React.useState(false);
-    // F3: open on EVERY project, not just the current one. The stock default
-    // (`DEFAULT_FILTERS.allProjects === false`) plus this fork's removed rail
-    // meant the browser showed the current directory's sessions with the scope
-    // label already reading "all projects" — the toggle was the only way out
-    // and nothing advertised it. The scope row's `{{projects}}` marker now
-    // reports on rather than off.
-    const [filters, setFilters] = React.useState(() => ({ ...DEFAULT_FILTERS, allProjects: true }));
+    // F3: this fork keeps the rail removed (one flat list, no `▣ <path>`
+    // grouping) but scopes it to the CURRENT working directory, so resume shows
+    // this project's history only — the wanted behaviour. `DEFAULT_FILTERS`
+    // already carries `allProjects: false`; it is spelled out here, and `mod+a`
+    // below is inert, because with the rail gone there is no visible control to
+    // widen the scope back and no directory menu to come back through.
+    const [filters, setFilters] = React.useState(() => ({ ...DEFAULT_FILTERS, allProjects: false }));
     // The cursor is a session ID, not a row index.
     //
     // Rows are reordered by almost everything the browser does: a rename touches
@@ -421,7 +421,9 @@ export function SessionBrowser({ channel, home, sameProject, onClose, }) {
             setPreviewOpen(open => !open);
         }
         else if (isMod(key) && input === 'a') {
-            applyFilters(current => ({ allProjects: !current.allProjects }));
+            // F3: inert. The scope is always the current working directory; the
+            // rail that used to widen it is gone, so a scope toggle here would
+            // only produce a list with no visible way back.
         }
         else if (isMod(key) && input === 'b') {
             applyFilters(current => ({ branchOnly: !current.branchOnly }));
@@ -482,7 +484,8 @@ export function SessionBrowser({ channel, home, sameProject, onClose, }) {
             : fitHint([
                 t('session-hint-list', {
                     mod: modLabel,
-                    projects: filters.allProjects ? t('session-toggle-on') : t('session-toggle-off'),
+                    // F3: no `projects` param — the scope is fixed to the current
+                    // directory, so the hint does not advertise a scope toggle.
                     runs: filters.showSubagents ? t('session-toggle-on') : t('session-toggle-off'),
                 }),
                 t('session-hint-list-mid', { mod: modLabel }),
