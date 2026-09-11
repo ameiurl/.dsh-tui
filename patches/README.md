@@ -49,17 +49,18 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.2-rc.1`,
 | `dsh-tool-fs/lib/index.js` | `computeHunkDiffs` + `presentationMeta` now carry 1-based `oldStart`/`newStart` per hunk |
 | `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}`, result-time hunk diffs with line numbers via `presentationMeta` + new `presentResult` (model-facing output text unchanged) |
 | `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest); tool-card hover keeps its background (upstream `hoverTint` branch removed) |
-| `dsh-tui .../screens/SessionBrowser.js` | resume browser drops the workspace rail & current-directory scope — always shows the full session history flat |
 | `dsh-tui .../components/PromptInput.js` | ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
-| `dsh-tui .../i18n.js` | resume/session-browser copy aligned to the no-workspace-rail browser (`全部项目` / `all projects` scope label + hints) |
 
 Deliberately **stock** (previously customized, removed in the 0.10.0 → 0.10.1 move):
 `SessionListRow.js` (titles truncate again), `Chat.js` / `StatusLine.js` and the vim
 parts of `PromptInput.js` (vim is OFF by default, `/vim` enables it, and the
-`INSERT`/`NORMAL` indicator lives in the input box as upstream ships it), and the
-`ToolFileDiff` `.d.ts` (the optional `oldStart`/`newStart` fields are produced and
-read in plain JS; the declaration only matters to `tsc`, so it is not patched —
-add a `declare module` augmentation in your own project if you ever need it).
+`INSERT`/`NORMAL` indicator lives in the input box as upstream ships it),
+`SessionBrowser.js` + `i18n.js` (resume opens scoped to the current working
+directory with the rail, right-click menu and pins intact — `mod+a` shows all
+directories; that default has no settings/env/CLI switch and is not remembered),
+and the `ToolFileDiff` `.d.ts` (the optional `oldStart`/`newStart` fields are
+produced and read in plain JS; the declaration only matters to `tsc`, so it is not
+patched — add a `declare module` augmentation in your own project if you ever need it).
 
 The component patch is version-sensitive: `apply-diff-patches.sh` refuses to
 install a backup that no longer passes `node --check` against a newer upstream.
