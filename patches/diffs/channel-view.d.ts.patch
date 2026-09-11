@@ -1,6 +1,6 @@
---- original/channel.d.ts	2026-09-09 10:51:37.335762783 +0800
-+++ backup/channel.d.ts	2026-09-09 10:51:37.338651115 +0800
-@@ -94,6 +94,10 @@
+--- original/channel-view.d.ts	2026-09-11 09:42:48.496372819 +0800
++++ backup/channel-view.d.ts	2026-09-11 09:42:48.513472327 +0800
+@@ -88,6 +88,10 @@
      /** Prior content, or null for a new file / no before-image. */
      readonly oldText: string | null;
      readonly newText: string;
@@ -9,5 +9,5 @@
 +    readonly oldStart?: number;
 +    readonly newStart?: number;
  }
- /** Pending-call render intent (structural subset of dsh-tools ToolCallView). */
- export type ToolCallView = {
+ /** Completed-call render intent (structural subset of dsh-tools
+  *  ToolResultView). `web` results and unknown shapes fall back to raw text. */

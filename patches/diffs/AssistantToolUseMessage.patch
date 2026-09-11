@@ -1,5 +1,5 @@
---- original/AssistantToolUseMessage.js	2026-09-09 10:51:37.328655209 +0800
-+++ backup/AssistantToolUseMessage.js	2026-09-09 10:51:37.332197069 +0800
+--- original/AssistantToolUseMessage.js	2026-09-11 09:42:48.479504373 +0800
++++ backup/AssistantToolUseMessage.js	2026-09-11 09:42:48.501324151 +0800
 @@ -1,5 +1,6 @@
  import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
  import React from 'react';
@@ -7,7 +7,7 @@
  import { extname } from 'node:path';
  import { Box, Text, useTerminalSize } from '../../ui.js';
  import { stringWidth } from '../../ink/stringWidth.js';
-@@ -65,9 +66,14 @@
+@@ -66,9 +67,14 @@
  }
  /** The collapsed text body keeps three lines. */
  const TEXT_BODY_MAX_LINES = 3;
@@ -25,7 +25,7 @@
  /** Minimum terminal width for the two-pane diff: below this the panes
   *  would squeeze under ~50 columns each and the unified view reads better. */
  const SPLIT_DIFF_MIN_COLS = 110;
-@@ -102,9 +108,119 @@
+@@ -103,9 +109,119 @@
          lines.pop();
      return lines;
  }
@@ -148,7 +148,7 @@
  function diffLines(diffs) {
      const out = [];
      let prevPath;
-@@ -116,15 +232,52 @@
+@@ -117,15 +233,52 @@
                  out.push(dim('⋯'));
          }
          prevPath = diff.path;
@@ -206,7 +206,7 @@
  /** Join the text blocks of a view's content payload (read/generic cards). */
  function contentLines(content) {
      const text = (content ?? []).map(block => (block.type === 'text' ? block.text ?? '' : '')).join('').trimEnd();
-@@ -402,7 +555,10 @@
+@@ -442,7 +595,10 @@
              body = [dim(`Running… (${formatDuration(Math.max(0, Date.now() - (tool.startedAt ?? Date.now())))})`)];
          }
      }
@@ -215,10 +215,10 @@
 +    // its whole body); every other diff body stays uncapped.
 +    const newFileOnlyDiff = view?.card === 'diff' && (view.diffs ?? []).length > 0 && view.diffs.every(diff => diff.oldText === null);
 +    const cap = view?.card === 'diff' ? (newFileOnlyDiff ? NEW_FILE_DIFF_MAX_LINES : DIFF_BODY_MAX_LINES) : TEXT_BODY_MAX_LINES;
-     const bodySource = body.map(line => line.text).join('\n');
-     const argsLanguage = jsonArgsLanguage(displayArgs);
-     // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
-@@ -432,38 +588,27 @@
+     // Long-line clip before anything downstream reads the body: the syntax
+     // highlighter walks `bodySource` by line index, so the folded text must be
+     // the single source of truth for both.
+@@ -476,38 +632,27 @@
          : ordinaryToolBackground === 'strong'
              ? 'toolCardBackground'
              : undefined;

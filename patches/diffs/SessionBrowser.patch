@@ -1,5 +1,5 @@
---- original/SessionBrowser.js	2026-09-09 10:51:37.348435071 +0800
-+++ backup/SessionBrowser.js	2026-09-09 10:51:37.353346894 +0800
+--- original/SessionBrowser.js	2026-09-11 09:42:48.488137993 +0800
++++ backup/SessionBrowser.js	2026-09-11 09:42:48.507281409 +0800
 @@ -4,24 +4,21 @@
  import { Divider } from '../components/design-system/Divider.js';
  import { HintLine } from '../components/design-system/HintLine.js';

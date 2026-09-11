@@ -26,12 +26,9 @@ declare -a TARGETS=(
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js|dsh-tool-fs.index.js"
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-str-replace-editor/lib/index.js|dsh-tool-str-replace-editor.index.js"
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
-  "$TUI_PKG/lib/types/dsh-adapter/channel.d.ts|channel.d.ts"
-  "$TUI_PKG/lib/types/components/sessions/SessionListRow.js|SessionListRow.js"
+  "$TUI_PKG/lib/types/adapter/ports/channel-view.d.ts|channel-view.d.ts"
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
   "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
-  "$TUI_PKG/lib/types/screens/Chat.js|Chat.js"
-  "$TUI_PKG/lib/types/screens/StatusLine.js|StatusLine.js"
   "$TUI_PKG/lib/types/i18n.js|i18n.js"
 )
 

@@ -10,7 +10,8 @@ import { SyntaxText } from '../SyntaxText.js';
 import { useTooltip } from '../Tooltip.js';
 import { formatDuration } from '../../terminal-utils/format.js';
 import { formatClock } from '../../trajectory/format.js';
-import { t } from '../../i18n.js';
+import { foldLongLines } from '../../utils/fold-long-lines.js';
+import { getLang, t } from '../../i18n.js';
 import { revealLinesOf, snapReveal } from '../smoothReveal.js';
 import { useRevealVersion } from '../../hooks/useRevealVersion.js';
 /** Tool display names: DSH emits lowercase tool ids (`bash`); display common
@@ -189,6 +190,28 @@ function capLines(lines, max, verbose) {
         { ...dim(`… +${lines.length - max} lines (ctrl+o to expand)`), revealOnHover: true },
     ];
 }
+/** Long-line clip for the body rows (utils/fold-long-lines.ts): the line cap
+ *  above bounds how MANY rows a card paints, this bounds how many rows ONE
+ *  row can paint. A `read` of a minified file, a terminal result whose last
+ *  line never broke, or a `write` payload is a single 100k-char line — under
+ *  `wrap="wrap"` the body would lay out thousands of visual rows per frame
+ *  no matter what the line budget says. Identity-preserving (same array, same
+ *  line objects) when every line fits, so the ordinary card allocates
+ *  nothing. */
+function foldBodyLines(lines) {
+    let out;
+    for (let index = 0; index < lines.length; index++) {
+        const line = lines[index];
+        const folded = foldLongLines(line.text);
+        if (folded.hiddenChars === 0) {
+            out?.push(line);
+            continue;
+        }
+        out ??= lines.slice(0, index);
+        out.push({ ...line, text: folded.text });
+    }
+    return out ?? lines;
+}
 /** Header title from the presentation view: terminal cards keep the
  *  `Name(command)` shape; everything else renders the tool's own title
  *  (`Edit /path`, `Read /path (1 - 100)`) with the first word bold. The
@@ -211,21 +234,35 @@ function clipHeaderArgs(args) {
  *  hundreds of KB, and the exact cost the HEADER_ARGS_BUDGET comment above
  *  keeps out of the header must not sneak back in through folding. (Lone-\r
  *  titles are not a thing presentCall produces; CRLF is normalized on the
- *  first line only.) Single-line titles return undefined: nothing to fold,
- *  rendering stays byte-identical to the unfolded card. */
-function foldTerminalTitle(title) {
+ *  first line only.)
+ *
+ *  Two independent folds:
+ *   - `foldLines` (the `dsh-tui.foldTerminalCommand` setting): a multi-line
+ *     script collapses to its first source line, reported as `+N lines`.
+ *   - The long-line clip (always on — utils/fold-long-lines.ts): a command is
+ *     frequently ONE enormous line (`python -c …`, a minified blob, a pasted
+ *     `curl` body). This header Text WRAPS, so an unclipped 200k-char command
+ *     lays out thousands of rows on the card header itself — the same stall
+ *     HEADER_ARGS_BUDGET keeps out of the args half of the line.
+ *
+ *  Single short titles return undefined: nothing to fold, rendering stays
+ *  byte-identical to the unfolded card (and the header stays tooltip-silent). */
+function foldTerminalTitle(title, foldLines) {
     const firstEnd = title.indexOf('\n');
-    if (firstEnd === -1)
+    let hiddenLines = 0;
+    let body = title;
+    if (firstEnd !== -1 && foldLines) {
+        let separators = 1;
+        for (let at = title.indexOf('\n', firstEnd + 1); at !== -1; at = title.indexOf('\n', at + 1))
+            separators++;
+        // Same trailing-newline rule as sideLines: a terminator is not a line.
+        hiddenLines = separators - (title.endsWith('\n') ? 1 : 0);
+        body = title.slice(0, title.charCodeAt(firstEnd - 1) === 13 ? firstEnd - 1 : firstEnd);
+    }
+    const clipped = foldLongLines(body);
+    if (hiddenLines <= 0 && clipped.hiddenChars === 0)
         return undefined;
-    let separators = 1;
-    for (let at = title.indexOf('\n', firstEnd + 1); at !== -1; at = title.indexOf('\n', at + 1))
-        separators++;
-    // Same trailing-newline rule as sideLines: a terminator is not a line.
-    const hidden = separators - (title.endsWith('\n') ? 1 : 0);
-    if (hidden <= 0)
-        return undefined;
-    const first = title.slice(0, title.charCodeAt(firstEnd - 1) === 13 ? firstEnd - 1 : firstEnd);
-    return { first, hidden };
+    return { first: clipped.text, hiddenLines: Math.max(0, hiddenLines), hiddenChars: clipped.hiddenChars };
 }
 /** Addendum line appended to the header hover tooltip when the header hides
  *  content (folded script / clipped args / width-truncated title): start or
@@ -289,7 +326,7 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
         return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", ...headerTooltip, children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
     }
     if (isTerminal) {
-        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), _jsx(Text, { dimColor: true, children: ` … +${folded.hidden} lines (ctrl+o to expand)` })] })) })] }));
+        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), folded.hiddenLines > 0 && (_jsx(Text, { dimColor: true, children: ` … +${folded.hiddenLines} lines (ctrl+o to expand)` }))] })) })] }));
     }
     const trimmed = title.trim();
     if (trimmed === '') {
@@ -345,14 +382,17 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
     // command) — then the call view's title stands.
     const headerTitle = tool.resultView?.title ?? tool.callView?.title;
     const headerIsTerminal = view?.card === 'terminal';
-    // Fold only the terminal header: multi-line command script, folding on,
-    // and the card not verbose/expanded (Ctrl+O and row click both land in
-    // `verbose`, so expansion reuses the existing state machine). Memoized on
-    // the title reference: settled titles never change, so the 1s
-    // useAnimationFrame tick of a running card re-renders without rescanning.
-    const foldedHeader = React.useMemo(() => headerIsTerminal && foldTerminalCommand && !verbose && headerTitle !== undefined
-        ? foldTerminalTitle(headerTitle)
-        : undefined, [headerIsTerminal, foldTerminalCommand, verbose, headerTitle]);
+    // Fold the terminal header: multi-line command script (setting-gated) plus
+    // the always-on long-line clip, both off once the card is verbose/expanded
+    // (Ctrl+O and the row click both land in `verbose`, so expansion reuses the
+    // existing state machine). Memoized on the title reference: settled titles
+    // never change, so the 1s useAnimationFrame tick of a running card
+    // re-renders without rescanning. `lang` joins the deps because the inline
+    // marker is localized.
+    const lang = getLang();
+    const foldedHeader = React.useMemo(() => headerIsTerminal && !verbose && headerTitle !== undefined
+        ? foldTerminalTitle(headerTitle, foldTerminalCommand)
+        : undefined, [headerIsTerminal, foldTerminalCommand, verbose, headerTitle, lang]);
     // Live elapsed clock while the call runs: the
     // 1s tick re-renders the card; elapsed derives from wall-clock refs.
     const [viewportRef] = useAnimationFrame(isRunning ? 1000 : null);
@@ -403,11 +443,15 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
         }
     }
     const cap = view?.card === 'diff' ? DIFF_BODY_MAX_LINES : TEXT_BODY_MAX_LINES;
-    const bodySource = body.map(line => line.text).join('\n');
+    // Long-line clip before anything downstream reads the body: the syntax
+    // highlighter walks `bodySource` by line index, so the folded text must be
+    // the single source of truth for both.
+    const bodyLines = verbose ? body : foldBodyLines(body);
+    const bodySource = bodyLines.map(line => line.text).join('\n');
     const argsLanguage = jsonArgsLanguage(displayArgs);
     // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
     // long error body must not be the reason it disappears.
-    const lines = capLines(body, cap, verbose);
+    const lines = capLines(bodyLines, cap, verbose);
     const rendered = footnote === undefined ? lines : [...lines, { text: footnote, tone: 'hint' }];
     // Smooth reveal (line-unit, pending CALL body only): model-authored prose
     // (diff hunks, write content) flows in at ~30fps; the settled RESULT view,

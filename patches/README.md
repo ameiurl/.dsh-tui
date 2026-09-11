@@ -42,20 +42,22 @@ was built against (`patch-base-version`).
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.1.2-rc.1`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.1.2-rc.1`,
-`@deepseek-harness-tui/dsh-tui@0.10.0`.
+`@deepseek-harness-tui/dsh-tui@0.10.1`.
 
 | file | change |
 | --- | --- |
 | `dsh-tool-fs/lib/index.js` | `computeHunkDiffs` + `presentationMeta` now carry 1-based `oldStart`/`newStart` per hunk |
 | `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}`, result-time hunk diffs with line numbers via `presentationMeta` + new `presentResult` (model-facing output text unchanged) |
-| `dsh-tui .../AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest) |
-| `dsh-tui .../channel.d.ts` | `ToolFileDiff` type gains optional `oldStart`/`newStart` |
-| `dsh-tui .../sessions/SessionListRow.js` | session list title shows the full text (no `truncateWidth` cut) — one line, no wrap |
+| `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest); tool-card hover keeps its background (upstream `hoverTint` branch removed) |
+| `dsh-tui .../adapter/ports/channel-view.d.ts` | `ToolFileDiff` type gains optional `oldStart`/`newStart` (0.10.1 moved the interface here; `dsh-adapter/channel.d.ts` is now just a re-export barrel) |
 | `dsh-tui .../screens/SessionBrowser.js` | resume browser drops the workspace rail & current-directory scope — always shows the full session history flat |
-| `dsh-tui .../components/PromptInput.js` | vim mode ON by default starting in INSERT (type straight away; Esc enters NORMAL for vim keys; `/vim` still toggles, enabling also lands in INSERT); `INSERT/NORMAL` text moved OUT of the input box and reported via `onVimChange`; ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
-| `dsh-tui .../screens/Chat.js` | holds the vim-mode state, passes `onVimChange` to PromptInput and `vim` to StatusLine |
-| `dsh-tui .../screens/StatusLine.js` | renders `-- INSERT --` / `-- NORMAL --` right after the cwd in the status line |
+| `dsh-tui .../components/PromptInput.js` | ↑/↓ seed from the persisted history file, and at the suggestion-menu boundary they fall through into history |
 | `dsh-tui .../i18n.js` | resume/session-browser copy aligned to the no-workspace-rail browser (`全部项目` / `all projects` scope label + hints) |
+
+Deliberately **stock** (previously customized, removed in the 0.10.0 → 0.10.1 move):
+`SessionListRow.js` (titles truncate again), `Chat.js` / `StatusLine.js` and the vim
+parts of `PromptInput.js` (vim is OFF by default, `/vim` enables it, and the
+`INSERT`/`NORMAL` indicator lives in the input box as upstream ships it).
 
 The component patch is version-sensitive: `apply-diff-patches.sh` refuses to
 install a backup that no longer passes `node --check` against a newer upstream.

@@ -352,7 +352,7 @@ const DOUBLE_CLICK_MS = 500;
  * working) interrupts the turn and delivers them right away; Ctrl+Enter
  * aborts the turn and sends the current input immediately.
  */
-export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, onVimChange, }) {
+export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp, onRunCommand, selectionActive, fillText, onFillConsumed, onRewindRequest, onBackgroundRequest, backgroundAgentsNeedingInput, controllerRef, onCaretImage, caretPreviewOpen = false, onDismissCaretPreview, }) {
     const [themeName] = useTheme();
     // Raw stdout writer for OSC 52 clipboard writes (selection copy) — must
     // bypass the frame pipeline; null outside a mounted Ink App.
@@ -381,22 +381,13 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
      * i/a/o (…) return to INSERT. Enabled in insert mode so the transition
      * is seamless; the mode is session-scoped (not persisted).
      */
-    // vim mode is ON by default and starts in INSERT submode (user
-    // preference — type straight away; Esc drops to NORMAL for vim keys).
-    // `/vim` still toggles it off/on.
-    const [vimEnabled, setVimEnabled] = React.useState(true);
+    const [vimEnabled, setVimEnabled] = React.useState(false);
     /** Insert submode (false = vim NORMAL). */
     const [vimInsert, setVimInsert] = React.useState(true);
-    const vimEnabledRef = React.useRef(true);
+    const vimEnabledRef = React.useRef(false);
     const vimInsertRef = React.useRef(true);
     vimEnabledRef.current = vimEnabled;
     vimInsertRef.current = vimInsert;
-    /** Report vim mode changes to the caller (status-line indicator): called
-     *  with the NEW (enabled, insert) pair on every toggle/submode switch. */
-    const notifyVimChange = (enabled, insert) => {
-        if (onVimChange !== undefined)
-            onVimChange(enabled, insert);
-    };
     /** Undo owns the draft's image bindings as well as its text and caret. */
     const vimUndoRef = React.useRef([]);
     /** Pending vim operator: `d` pressed, awaiting its second key. */
@@ -645,7 +636,6 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                 // never `u` its way back past edits made while vim was off.
                 vimInsertRef.current = true;
                 setVimInsert(true);
-                notifyVimChange(next, true);
                 vimPendingRef.current = '';
                 clearVimUndo();
                 return next;
@@ -2292,27 +2282,23 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                 case 'i': // insert at the caret
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 case 'I': { // insert at the line's first non-blank (vim `I`)
                     setInput(value, vimLineFirstNonBlank(value, cursor));
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 }
                 case 'a': { // insert after the caret
                     setInput(value, nextGraphemeBoundary(bounds, cursor));
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 }
                 case 'A': { // insert at the line end
                     setInput(value, vimLineEnd(value, cursor));
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 }
                 case 'o': { // new line below, then insert
@@ -2321,7 +2307,6 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                     vimNormalEdit(value.slice(0, end) + '\n' + value.slice(end), end + 1);
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 }
                 case 'O': { // new line above, then insert
@@ -2330,7 +2315,6 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                     vimNormalEdit(value.slice(0, start) + '\n' + value.slice(start), start);
                     vimInsertRef.current = true;
                     setVimInsert(true);
-                    notifyVimChange(true, true);
                     return;
                 }
                 default:
@@ -2344,7 +2328,6 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                     event.stopImmediatePropagation();
                     vimInsertRef.current = false;
                     setVimInsert(false);
-                    notifyVimChange(true, false);
                     return;
                 }
             }
@@ -2374,7 +2357,6 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                         setFileSelected(0);
                         vimInsertRef.current = true;
                         setVimInsert(true);
-                        notifyVimChange(true, true);
                         return;
                     }
                     event.stopImmediatePropagation();
@@ -3052,7 +3034,7 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                     const max = Math.max(0, viewport.total - viewport.maxRows);
                     expandedScrollRef.current = Math.max(0, Math.min(expandedScrollRef.current + Math.round(event.deltaY), max));
                     setExpandedTick(tick => tick + 1);
-                }, children: editorRows }), _jsxs(Box, { flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, children: [_jsx(Text, { dimColor: true, children: t('input-expand-editor-position', {
+                }, children: editorRows }), _jsxs(Box, { flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, children: [vimEnabled && (_jsxs(Text, { bold: true, color: vimInsert ? 'success' : 'warning', children: [vimInsert ? 'INSERT' : 'NORMAL', ' '] })), _jsx(Text, { dimColor: true, children: t('input-expand-editor-position', {
                             line: cursorLine(value, cursor) + 1,
                             col: cursorColumn(value, cursor) + 1,
                         }) }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: `${t('input-expand-editor-hint-send')} · ${t('input-expand-editor-hint-collapse')}` })] }), _jsxs(Box, { flexDirection: "row", flexShrink: 0, paddingLeft: 1, paddingRight: 1, columnGap: 1, children: [_jsx(EditorButton, { label: `⏎ ${t('input-expand-editor-send')}`, hint: "Ctrl+Enter", primary: true, accent: promptAccent, onClick: submitFromEditor }), _jsx(EditorButton, { label: t('input-expand-editor-collapse'), hint: "Esc", onClick: collapseEditor }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { dimColor: true, children: t('input-expand-editor-scroll') })] })] })) : null;
@@ -3105,7 +3087,7 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
                                 : undefined, rows: peekVisualLines.map((row, index) => (_jsx(Text, { wrap: "truncate-end", children: row }, index))), onRowPick: () => {
                                 updateFoldBlock(null);
                                 setHovered(false);
-                            } }) }))] })), lastNotification && (_jsx(Box, { position: "absolute", marginTop: -1, height: 1, width: "100%", paddingLeft: 2, paddingRight: 1, flexDirection: "column", justifyContent: "flex-end", overflow: "hidden", children: _jsx(Box, { justifyContent: "flex-end", children: _jsx(Text, { color: lastNotification.color, dimColor: !lastNotification.color, wrap: "truncate", children: lastNotification.text }) }) })), _jsx(EffortInputBorder, { effort: channel.reasoningEffort, levels: channel.effortLevels, columns: columns, onLight: isLightThemeActive(themeName), idleColor: promptAccent, topRightLabel: topRightLabel, children: _jsxs(Box, { flexDirection: "row", alignItems: "flex-start", width: "100%", children: [_jsx(EffortChargeGlyph, { effort: channel.reasoningEffort, levels: channel.effortLevels, working: channel.working }), _jsx(Box, { ref: expanded ? undefined : valueBoxRef, flexGrow: 1, flexShrink: 1, onClick: handleValueClick, onDragStart: handleDragStart, onDragMove: handleDragMove, onDragEnd: handleDragEnd, children: value.length === 0 ? (_jsxs(_Fragment, { children: [_jsx(Text, { inverse: true, children: " " }), _jsx(EffortTierBadge, { effort: channel.reasoningEffort, levels: channel.effortLevels, onLight: isLightThemeActive(themeName), columns: columns, leadingColumns: 3 })] })) : (_jsx(Box, { flexDirection: "column", children: rendered })) }), expandEnabled && (_jsx(Box, { flexShrink: 0, onClick: (event) => {
+                            } }) }))] })), lastNotification && (_jsx(Box, { position: "absolute", marginTop: -1, height: 1, width: "100%", paddingLeft: 2, paddingRight: 1, flexDirection: "column", justifyContent: "flex-end", overflow: "hidden", children: _jsx(Box, { justifyContent: "flex-end", children: _jsx(Text, { color: lastNotification.color, dimColor: !lastNotification.color, wrap: "truncate", children: lastNotification.text }) }) })), _jsx(EffortInputBorder, { effort: channel.reasoningEffort, levels: channel.effortLevels, columns: columns, onLight: isLightThemeActive(themeName), idleColor: promptAccent, topRightLabel: topRightLabel, children: _jsxs(Box, { flexDirection: "row", alignItems: "flex-start", width: "100%", children: [_jsx(EffortChargeGlyph, { effort: channel.reasoningEffort, levels: channel.effortLevels, working: channel.working }), vimEnabled && (_jsxs(Text, { bold: true, color: vimInsert ? 'success' : 'warning', children: [vimInsert ? 'INSERT' : 'NORMAL', " "] })), _jsx(Box, { ref: expanded ? undefined : valueBoxRef, flexGrow: 1, flexShrink: 1, onClick: handleValueClick, onDragStart: handleDragStart, onDragMove: handleDragMove, onDragEnd: handleDragEnd, children: value.length === 0 ? (_jsxs(_Fragment, { children: [_jsx(Text, { inverse: true, children: " " }), _jsx(EffortTierBadge, { effort: channel.reasoningEffort, levels: channel.effortLevels, onLight: isLightThemeActive(themeName), columns: columns, leadingColumns: 3 })] })) : (_jsx(Box, { flexDirection: "column", children: rendered })) }), expandEnabled && (_jsx(Box, { flexShrink: 0, onClick: (event) => {
                                 event.stopImmediatePropagation();
                                 toggleExpand();
                             }, onMouseEnter: () => {
