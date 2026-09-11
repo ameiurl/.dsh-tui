@@ -28,6 +28,8 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
   # F2 input history: seed ↑/↓ from the persisted history file (all directories).
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
+  # F3 resume rail: lower the rail's minimum terminal width 120 -> 90 columns.
+  "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
 )
 
 needs_apply=0

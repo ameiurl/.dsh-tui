@@ -1,0 +1,19 @@
+--- original/SessionBrowser.js	2026-09-11 11:13:33.843749810 +0800
++++ backup/SessionBrowser.js	2026-09-11 11:13:33.846846262 +0800
+@@ -30,8 +30,14 @@
+  * off the content — decoration, and the first thing a short terminal drops.
+  */
+ const RULE_PRIORITY = [2];
+-/** Wide screens keep the working-directory rail visible beside sessions. */
+-const WORKSPACE_RAIL_MIN_COLUMNS = 120;
++/** Screens that keep the working-directory rail visible beside sessions.
++ *
++ * Upstream shows the rail only from 120 columns; on narrower terminals it
++ * silently disappears and the ← drill-in page is the only way to reach another
++ * working directory. This install runs 90-119 column terminals, so the rail
++ * would be missing exactly where it is wanted. 90 columns still leaves the
++ * session list 63 cells (90 - 26 rail - 1 gap), enough for a two-line row. */
++const WORKSPACE_RAIL_MIN_COLUMNS = 90;
+ /** Content width below which preview replaces the session list. */
+ const SPLIT_MIN_COLUMNS = 100;
+ const WORKSPACE_ROW_HEIGHT = 2;
