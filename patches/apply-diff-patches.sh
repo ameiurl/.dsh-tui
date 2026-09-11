@@ -28,9 +28,10 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
   # F2 input history: seed ↑/↓ from the persisted history file (all directories).
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
-  # F3 resume browser: flat all-projects list, no workspace rail (whole-file fork).
+  # F3 resume browser: whole-file fork — no workspace rail, no directory
+  # grouping, one flat list scoped to the current working directory.
   "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
-  # F3 hint/scope copy for the no-rail browser (全部项目 / all projects).
+  # F3 hint copy for that browser (no rail / right-click-menu / scope-toggle).
   "$TUI_PKG/lib/types/i18n.js|i18n.js"
 )
 

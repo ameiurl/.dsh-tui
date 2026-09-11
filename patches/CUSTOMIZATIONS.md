@@ -169,32 +169,65 @@ done < <(node resolve-patch-targets.mjs)
 
 ### Step 4 — 3-way 重移植（核心）
 把**旧补丁相对旧原版的改动**合并进**新上游文件**：
-- `base`   = 旧 `patches/original/<x>`（旧原版）
-- `theirs` = 旧 `patches/backup/<x>`（旧已补丁）
+- `base`   = 旧 `patches/original/<备份名>`（旧原版）
+- `theirs` = 旧 `patches/backup/<备份名>`（旧已补丁）
 - `ours`   = 新装的上游文件（新版原版）
+
+> 备份名不一定等于文件 basename：tool 两包叫 `dsh-tool-fs.index.js` /
+> `dsh-tool-str-replace-editor.index.js`。用 §3 那条 `resolve-patch-targets.mjs`
+> 输出里的第二列即可，不要靠猜。
+
 ```bash
-mkdir -p /tmp/port/<x> && cd /tmp/port/<x>
-cp "$TUI/<rel>" ours.js
+cd ~/.dsh-tui/patches
+P=~/.dsh-tui/patches        # 备份库
+T=/tmp/port                 # 临时工作区
+name=SessionBrowser.js      # ← 换成 §3 报 RE-PORT 的那个备份名
+target=$(node resolve-patch-targets.mjs | awk -F'|' -v n="$name" '$2==n{print $1}')
+
+rm -rf "$T/$name" && mkdir -p "$T/$name" && cd "$T/$name"
+cp "$P/original/$name" base.js
+cp "$P/backup/$name"   theirs.js
+cp "$target"           ours.js            # 新装的上游原版
 git merge-file -p ours.js base.js theirs.js > merged.js
-node --check merged.js        # 语法必须过
+node --check merged.js                    # 语法必须过（.d.ts 跳过）
 grep -nE '^(<<<<<<<|=======|>>>>>>>)' merged.js   # 有冲突则按 §2 意图人工解
 ```
 - **无冲突** → `merged.js` 即新版补丁文件。
-- **有冲突** → 打开看上下文，按 §2 每个功能的「行为」决定取舍（例如菜单边界是
-  「落历史」而非环绕；beta 新增 props 保留并**追加**我们的回调等）。
-- 只想去掉某项定制（如 vim），可只抽出该功能的 hunk 重打，而不是整文件合并。
+- **自检**：`cmp -s ours.js base.js` —— 相等说明上游对这份文件**字节没变**，`merged.js`
+  应当与 `backup/<name>` 完全一致（可用 `cmp` 确认），等于白捡一次"重移植成功"。
+  （这套 3-way 是幂等的：即使 `ours` 已经是打过补丁的版本，合并结果也仍是打过补丁的版本。）
+- **有冲突** → 打开看上下文，按 §2 每个功能的「行为」决定取舍（例如 F3 的三条底线是
+  「无 rail + 范围=当前目录 + 扁平列表」；菜单边界是「落历史」而非环绕等）。
+- 某个目标**上游没变**（§3 报 `unchanged`）：不需要合并，`ours` 就是 `original/<x>`，
+  直接 `cp backup/<x>` 那套照旧即可。
+- 只想去掉某项定制，可只抽出该功能的 hunk 重打，而不是整文件合并。
 - 解完再 `node --check`。
 
 ### Step 5 — 落库 + 应用
 ```bash
-cp 新版上游文件(ours) original/<x>
-cp merged.js              backup/<x>
-diff -u original/<x> backup/<x> > diffs/<x>.patch || true
+cd ~/.dsh-tui/patches
+name=SessionBrowser.js                       # 逐个 RE-PORT 的文件重复
+cp /tmp/port/$name/ours.js   original/$name  # 新版原版入库
+cp /tmp/port/$name/merged.js backup/$name    # 新版已补丁入库
+diff -u original/$name backup/$name > diffs/$name.patch || true   # diff 非 0 是正常的
+
 # 全部处理完后：
-echo "<新版 dsh-tui 版本>" > patch-base-version
 bash apply-diff-patches.sh apply     # 写入 + 语法门禁
 bash apply-diff-patches.sh check     # 期望全 OK
+node resolve-patch-targets.mjs | wc -l   # 目标数应等于 original/ 里的文件数
+echo "<新版 dsh-tui 版本>" > patch-base-version   # 上面两步都过了再写
 ```
+
+> **为何最后才写 `patch-base-version`**：它是自动重打的信任锚。先写的话，中途失败会留下
+> "版本已对齐、文件其实没落库"的状态，下次升级 `dsh-patch` 会拿旧 backup 覆盖新上游。
+
+### Step 5.5 — 提交快照（`patches/` 是 git 仓库的一部分）
+```bash
+cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto dsh-tui <版本>"
+```
+升级前的快照留在 history 里，下次重移植的 `base`/`theirs` 随时可从旧提交取回
+（`git show <旧提交>:patches/backup/<x>`）。
+
 
 ### Step 6 — 确认用户级设置还在（§1.2）
 `~/.dsh/settings.yaml` 有 `dsh-tui: { diffLayout: unified }`；`theme.json` 是
