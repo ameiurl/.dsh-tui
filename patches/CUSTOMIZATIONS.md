@@ -41,12 +41,14 @@
 
 ## 2. 定制功能清单（升级后逐项要「回来」的东西）
 
-> **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为连续的 F1–F2，并**去掉**五项旧定制：
-> 旧 F2 会话标题不截断、旧 F3 resume 全量会话、旧 F4 vim 默认开启/INSERT 起手、
-> 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充。对应文件都已恢复 stock
-> （类型补充本就与运行时无关，只影响 `tsc`）。找回办法见 §4 与 git 历史。
+> **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为 F1–F3：
+> F1 diff 渲染、F2 ↑/↓ 跨会话历史、**F3 resume 全量扁平会话（无 rail）**。
+> 迁移时曾去掉五项旧定制，其中**旧 F3「resume 全量会话」已按用户要求恢复为当前的 F3**；
+> 仍去掉的四项是：旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、
+> 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
+> 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 5 个目标文件**（3 个 F1 + 1 个 F2 + 1 个 F3；`node resolve-patch-targets.mjs`
+> **当前补丁集 = 6 个目标文件**（3 个 F1 + 1 个 F2 + 2 个 F3；`node resolve-patch-targets.mjs`
 > 可列出），`patch-base-version` = `0.10.1`。
 >
 > **resume 浏览器 = stock，这是最终决定**：2026-09-11 曾按「F2 恢复全量会话」做了一版
@@ -90,22 +92,33 @@
   命令行快检：`node -e "import('.../lib/types/history.js').then(m=>console.log(m.loadHistory().length))"`
   应等于 `history.jsonl` 的行数（不再过滤）。
 
-### F3 — resume 左侧目录栏（rail）在 90 列以上就显示
-- **涉及文件（1 个）**：`…/dsh-tui/lib/types/screens/SessionBrowser.js`
-- **问题**：stock 只在 `columns >= 120` 时渲染 rail（`WORKSPACE_RAIL_MIN_COLUMNS = 120`）。
-  窄于 120 列的终端上 left rail **整个消失**，只剩 scope 行，看其他工作目录得按 `←` 钻
-  进目录页 —— 这个安装常用 90–119 列终端，正好落在"看不到 rail"的区间里。
-- **行为**：把阈值降到 **90**（`const WORKSPACE_RAIL_MIN_COLUMNS = 90`）。90 列时
-  `sessionAreaWidth = 90 - 26(rail) - 1(gap) = 63`，两行式会话行仍然放得下；
-  < 90 列仍走原来的窄终端路径（rail 隐藏、`←` 钻目录页）。
-  只改这一个常量，**不动** stock 的 rail、目录分组、右键菜单、pin。
-- **重移植注意**：上游若把阈值改为常量以外的东西（例如按内容宽度决定），
-  按同样意图重放：rail 在 90+ 列可见。
-- **验证**：`/resume` 在 100 列左右的终端里左侧应直接列出其他工作目录（`▣ mallphp` 等）；
-  命令行无头渲染快检（多宽度断言，不启动 TUI、不写文件）：
-  ```bash
-  node ~/.dsh-tui/patches/test-rail-width.mjs
-  ```
+### F3 — resume / 会话浏览显示全部历史会话（扁平、无左侧目录栏）
+- **涉及文件（2 个）**：
+  - `…/dsh-tui/lib/types/screens/SessionBrowser.js`（**整文件分叉**：删掉 rail / 目录分组 /
+    目录钻取页，保留搜索、MRU 排序、预览、重命名、删除、清空壳、子运行折叠）
+  - `…/dsh-tui/lib/types/i18n.js`（`session-scope-all` → `全部项目`/`all projects`，
+    `session-hint-list*` 去掉 rail / 右键菜单字样）
+- **行为**：`/resume` 打开即**平铺列出所有工作目录的历史会话**：
+  - 左侧**没有**目录栏，没有 `▣ <path>` 目录分组行，没有目录钻取页（`←` 不生效）；
+  - `allProjects` **默认开启**（分叉原本沿用 stock 的 `DEFAULT_FILTERS.allProjects=false`，
+    又删了 rail，结果只显示当前目录、scope 却写着"全部项目" —— 已修正为默认全量）；
+  - scope 行读作 `▣ 工作目录 全部项目`；`mod+a` 仍在（切回/切出当前目录视图，
+    提示里的 `全部项目（开/关）` 会跟着变）。
+  - **代价（与 stock 的差异，用户已接受）**：这个分叉没有 pin（`mod+p`）与右键菜单，
+    `session-hint-list*` 里也不再列这些按键。
+- **重移植注意**：这是**整文件分叉**（504 行 vs stock 911 行），不是小补丁。升级时按 §3
+  走 3-way：`base` = 旧 stock、`theirs` = 本目录 `backup/SessionBrowser.js`、
+  `ours` = 新 stock。实测 0.10.0 → 0.10.1 上游两文件**字节未变**，因此合并 0 冲突、
+  结果等于旧分叉原样；真遇到上游大改时优先保住「无 rail + 默认 allProjects + 扁平」三条。
+- **验证**：
+  1. `/resume` 应看到所有目录的历史会话、无左侧目录栏；
+  2. `mod+a` 能切到只列当前目录再切回来；
+  3. 命令行无头渲染快检（不启动 TUI、不写文件）：
+     ```bash
+     node ~/.dsh-tui/patches/test-resume-flat.mjs
+     ```
+     它断言三个目录的会话都列出、无分组头/无 rail/无钻取页、scope 读作"全部项目"、
+     子运行仍折叠、提示不再宣传 pin。
 
 > 说明：`history.jsonl` 里部分条目还留着一个已废弃的 `cwd` 字段（那版过滤器的遗留）。
 > stock 的 `parseRaw` 只读 `text`/`ts`，多余字段被忽略、不影响显示；文件因此保持原样不动。
@@ -190,13 +203,12 @@ bash apply-diff-patches.sh check     # 期望全 OK
 「验证」逐项过 F1–F3：
 - **F1**：触发一次 Edit/Write，看 CC 统一式 diff（行号 + 绿红底；NEW 文件只出前 10 行）。
 - **F2**：↑/↓ 能翻到以前任何目录输过的命令（历史全局共用）；菜单在第 0 项按 ↑ 进历史。
-- **F3**：`/resume` 在 90+ 列终端左侧应直接列出其他工作目录（`▣ mallphp` 等），
-  窄终端仍走 `←` 钻目录页；命令行侧：`node ~/.dsh-tui/patches/test-rail-width.mjs`。
+- **F3**：`/resume` 应**平铺列出所有目录**的历史会话、左侧**无目录栏**、无 `▣ 目录` 分组行；
+  `mod+a` 能切到"只看当前目录"再切回；命令行侧：`node ~/.dsh-tui/patches/test-resume-flat.mjs`。
 
-并顺手确认已去掉的五项仍是 stock：**`/resume` 默认只列当前工作目录那组会话**（F3 只把
-rail 的可见宽度从 120 降到 90，没有改这个默认），rail / 右键菜单 / pin 都在、`mod+a`
-才看全部；会话标题按宽度截断；vim 默认关且 `/vim` 后指示仍在输入框内、状态栏不再出现
-`-- INSERT --`。
+并顺手确认仍是 stock 的部分：会话标题按宽度截断；vim 默认关且 `/vim` 后指示仍在输入框内、
+状态栏不再出现 `-- INSERT --`。**resume 浏览器已不是 stock**（F3 分叉：无 rail、默认全部
+项目），所以不要再拿"只列当前目录"去核对它。
 
 ---
 
@@ -211,14 +223,13 @@ rail 的可见宽度从 120 降到 90，没有改这个默认），rail / 右键
 | 0.10.0 → 0.10.1 | 3/5 目标上游变化：`AssistantToolUseMessage`（94 行，新增 `foldBodyLines` 长行裁剪）、`i18n`（11 行）、channel 类型大拆分；`PromptInput`/`SessionBrowser` **字节不变** → 免移植；tool 两包仍 0.1.2-rc.1 → 免移植 | 同时**删掉五项定制**：SessionListRow（旧 F2 标题不截断）、SessionBrowser + i18n（旧 F3 resume 全量会话）、Chat/StatusLine/PromptInput 的 vim 改动（旧 F4/F5）、ToolFileDiff 类型补充（旧 F7）——对应文件移出补丁集、恢复 stock；F1 的 new-file 上限与上游 `foldBodyLines` 手工合流（二者同作用于 `bodyLines`）；补丁集 10 → 4 个目标文件（10→7→6→4），`patch-base-version` = 0.10.1 |
 | tool 包 0.1.0-rc.8 → 0.1.1-rc.2 | 字节不变 | 免移植 |
 | tool 包 0.1.1-rc.2 → 0.1.2-rc.1 | 上游 68/36 行变更（随 0.10.0 迁移处理） | 已并入 |
-| （非升级）resume 全量扁平会话：试过 → **决定不要** | 不是重移植：`SessionBrowser.js` / `view.js` / `i18n.js` 三个目标都取自 0.10.1 stock | 曾实现一版**薄补丁**（默认 `allProjects`、`level` 钉在 `'sessions'`、`workspaceRail=false`、`view.js` 不产 `▣ <path>` 分组头），比 `0b9e7d0` 那个 45KB 整文件分叉克制得多（右键菜单/pin/rename/delete/Tab 预览全保留）。但用户明确要「只列当前工作目录的」→ **整版撤回**：三个文件恢复 stock、从 `original/backup/diffs/TARGETS` 删除、`test-resume-flat.mjs` 删除，补丁集回到 4 个目标。更早那版「↑/↓ 历史按 `cwd` 过滤」（`history.js` + `history.d.ts` + 回填脚本）也一并撤回。`patch-base-version` 始终 0.10.1 |
-| （非升级）rail 可见宽度 120 → 90 | 不是重移植：`SessionBrowser.js` 一个常量取自 0.10.1 stock | 起因：用户报「左侧的其他目录不显示」——实测 stock 只在 ≥120 列渲染 rail，90–119 列整个 rail 消失（只能 `←` 钻目录页）。只改 `WORKSPACE_RAIL_MIN_COLUMNS = 90`，补丁集 4 → 5 个目标；新增 `test-rail-width.mjs`（150/118/100/92 列断言 rail 列出其他目录，88 列断言隐藏）。`patch-base-version` 仍 0.10.1 |
+| （非升级）**F3：恢复 resume 全量扁平会话（无 rail）** | 整文件分叉：`SessionBrowser.js` 取 0.10.1 stock 与原分叉的 3-way 合并（上游两文件字节未变 → 0 冲突），`i18n.js` 只改 scope/hint 文案 | 沿用 23086fc 那版分叉（删 rail + 目录分组 + 钻取页），并把它遗留的 `allProjects=false` 默认改成 **true**：否则删了 rail 之后只剩当前目录、scope 却写着"全部项目"。中途试过两版都被推翻：(a) 薄补丁式"保留 rail 只去分组"，(b) 只把 rail 阈值 120→90 —— 用户确认要的是"左侧没有目录栏、全历史平铺"。补丁集 4 → 6 个目标；新增 `test-resume-flat.mjs`。`patch-base-version` 仍 0.10.1 |
 
-**已去掉的定制（勿在重移植时带回）**
+**定制状态备忘（含已恢复 / 已去掉）**
 | 旧编号 | 内容 | 现状 |
 | --- | --- | --- |
 | 旧 F2 | `SessionListRow.js` 会话标题显示全文（去 `truncateWidth`） | stock：标题按宽度截断；补丁文件已删除 |
-| 旧 F3 | resume 浏览器去掉 workspace rail / 当前目录过滤，永远平坦显示全部会话（`SessionBrowser.js` + `i18n.js` 文案；0.10.1 迁移中曾短暂编号为 F2） | stock：默认只列当前工作目录那组会话（`selectedWorkspaceId='current'` + `DEFAULT_FILTERS.allProjects=false`），rail / 右键菜单 / pin 都在；按 `mod+a` 或点 rail 的「全部工作目录」才看全部。该默认**没有** settings/env/CLI 开关，也不会记忆，每次打开都回到当前目录。**用户已确认要的就是这个默认**（2026-09-11 恢复又被撤回，见上表「resume 全量扁平会话」一行），别再自动带回。注意 F3 只把 rail 的**可见宽度**从 120 降到 90，没有动这个默认 |
+| 旧 F3 | resume 浏览器去掉 workspace rail / 当前目录过滤，永远平坦显示全部会话 | **已恢复为 F3**（2026-09-11 用户最终确认：要"左侧没有目录栏、全历史平铺"）。实现沿用 `23086fc` 那版分叉，并修正为默认 `allProjects: true`。别再退回 stock 的"只列当前目录"；也不要再尝试"保留 rail 只去分组"的薄补丁 |
 | 旧 F4 | vim 默认 ON、INSERT 起手（`PromptInput` + `Chat` 初始状态） | stock：vim 默认 OFF，`/vim` 开启 |
 | 旧 F5 | `INSERT/NORMAL` 指示从输入框移到 `StatusLine` | stock：指示在输入框内；`Chat`/`StatusLine` 接线已移除 |
 | 旧 F7 | `ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号；0.10.1 迁移时曾短暂编号为 F4） | 不再打补丁；字段由 tool 包（JS）产出、渲染器（JS）动态读取，`.d.ts` 只影响 `tsc`，安装后的包不做类型检查，因此零运行时影响。需要类型时在自己工程里 `declare module` 增强 |

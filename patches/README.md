@@ -8,9 +8,9 @@ Two customizations live here:
    like Claude Code: **unified layout with real line numbers, context lines and
    `+`/`-` markers** (instead of the default side-by-side panes), plus a Claude
    Code diff palette.
-2. **Cross-session input history** — ↑/↓ recall the persisted `history.jsonl`
-   (one shared history file; `/resume` itself is stock and stays scoped to the
-   current working directory).
+2. **Resume & input history** — `/resume` lists **every project's** sessions in
+   one flat list (no workspace rail, no per-directory grouping), and ↑/↓ recall
+   the persisted `history.jsonl` (one shared history file).
 
 ## User-level settings (survive upgrades)
 
@@ -56,25 +56,21 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.2-rc.1`,
 | `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}`, result-time hunk diffs with line numbers via `presentationMeta` + new `presentResult` (model-facing output text unchanged) |
 | `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest); tool-card hover keeps its background (upstream `hoverTint` branch removed) |
 | `dsh-tui .../components/PromptInput.js` | ↑/↓ seed from the persisted history file (the whole file — one shared history across directories), and at the suggestion-menu boundary they fall through into history |
-| `dsh-tui .../screens/SessionBrowser.js` | `WORKSPACE_RAIL_MIN_COLUMNS` 120 → **90**, so the working-directory rail (which lists the other directories) is rendered on ordinary 90–119 column terminals instead of silently disappearing — below 90 columns the stock `←` drill-in page remains the narrow path. One constant; nothing else about the browser changes. Test: `node ~/.dsh-tui/patches/test-rail-width.mjs` |
+| `dsh-tui .../screens/SessionBrowser.js` | **whole-file fork**: resume drops the workspace rail, the `▣ <path>` project grouping and the `←` drill-in page, and opens with `allProjects: true`, so every project's sessions are listed flat (MRU order) from the first render. Search, preview, rename, delete, clean and the `mod+s` runs filter stay; pins and the right-click menu do not exist in this fork. Test: `node ~/.dsh-tui/patches/test-resume-flat.mjs` |
+| `dsh-tui .../i18n.js` | `session-scope-all` → `全部项目` / `all projects`; `session-hint-list*` drop the rail / right-click-menu wording |
 
-> **Reverted experiments (do not re-add):**
-> (1) a flat **all-projects resume** (`SessionBrowser.js` + `sessions/view.js` +
-> `i18n.js` — `allProjects: true`, `level` pinned to `'sessions'`,
-> `workspaceRail = false`, no `▣ <path>` group rows), and (2) **cwd-scoped input
-> history** (`history.js` + `history.d.ts`, each entry tagged with its submitting
-> directory). Resume stays scoped to the current working directory (the rail
-> threshold above does not change that default): rail / right-click menu / pins
-> intact, `mod+a` shows every directory.
+> **Reverted experiments (do not re-add):** a **cwd-scoped input history**
+> (`history.js` + `history.d.ts`, each entry tagged with its submitting directory)
+> was tried and reverted — ↑/↓ recall the one shared history file. Likewise, two
+> half-measures for the resume browser were tried and rejected before the F3 fork:
+> a thin patch that kept the rail and only removed the grouping, and simply
+> lowering the rail's minimum width from 120 to 90 columns. The wanted behaviour is
+> the fork: **no rail at all, all projects flat**.
 
 Deliberately **stock** (previously customized, removed in the 0.10.0 → 0.10.1 move):
 `SessionListRow.js` (titles truncate again), `Chat.js` / `StatusLine.js` and the vim
 parts of `PromptInput.js` (vim is OFF by default, `/vim` enables it, and the
 `INSERT`/`NORMAL` indicator lives in the input box as upstream ships it),
-`i18n.js` and the resume **scope** default (resume still opens scoped to the
-current working directory with the rail, right-click menu and pins intact —
-`mod+a` shows all directories; that default has no settings/env/CLI switch and is
-not remembered; only the rail's minimum width is patched, see the table above),
 and the `ToolFileDiff` `.d.ts` (the optional `oldStart`/`newStart` fields are
 produced and read in plain JS; the declaration only matters to `tsc`, so it is not
 patched — add a `declare module` augmentation in your own project if you ever need it).
