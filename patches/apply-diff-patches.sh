@@ -26,13 +26,8 @@ declare -a TARGETS=(
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js|dsh-tool-fs.index.js"
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-str-replace-editor/lib/index.js|dsh-tool-str-replace-editor.index.js"
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
-  # F3 input history: seed ↑/↓ from the persisted history file (all directories).
+  # F2 input history: seed ↑/↓ from the persisted history file (all directories).
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
-  # F2 resume browser: flat all-projects list (browser chrome + view rows +
-  # the hint strings that would otherwise advertise the removed rail).
-  "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"
-  "$TUI_PKG/lib/types/sessions/view.js|view.js"
-  "$TUI_PKG/lib/types/i18n.js|i18n.js"
 )
 
 needs_apply=0
