@@ -41,6 +41,17 @@ against the `backup/` copies, syntax-checks (`node --check`) before writing,
 and warns when the installed `dsh-tui` version differs from the one the patch
 was built against (`patch-base-version`).
 
+After any re-apply, check that the docs still describe what is installed:
+
+```bash
+bash ~/.dsh-tui/patches/check-doc-consistency.sh   # exit 0 = docs and code agree
+```
+
+It asserts the version table, each customization's code facts and the scripts
+these docs name. Documentation drifts precisely during upgrades — the 0.10.1
+move left a "resume browser = stock" conclusion that the code had outgrown — so
+it belongs at the end of every one.
+
 ### Where the backups live
 
 | dir | contents |

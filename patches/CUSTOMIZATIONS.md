@@ -127,7 +127,11 @@
 - **涉及文件（2 个）**：
   - `…/dsh-tui/lib/types/screens/SessionBrowser.js`（**整文件分叉**：删掉 rail / 目录分组 /
     目录钻取页，列表保持扁平；保留搜索、MRU 排序、预览、重命名、删除、清空壳、子运行折叠）
-  - `…/dsh-tui/lib/types/i18n.js`（`session-hint-list*` 去掉 rail / 右键菜单 / 范围开关字样）
+  - `…/dsh-tui/lib/types/i18n.js`（**只改** `session-hint-list` / `-mid` / `-short`
+    这三个 key，去掉 rail / 右键菜单 / 范围开关字样）。其余 key 一律保持 stock：
+    `session-scope-all` 是 `allProjects` 三元里的**死分支**（`SessionBrowser.js` 把它
+    钉成 `false` 且从不修改），补丁曾一度把它带成旧文案「全部项目」——2026-09-11 已改回
+    stock 的「全部工作目录」。**别再带回来**：既不可达，又让补丁面变大、与本节描述不符。
 - **行为**：`/resume` 打开即列出**当前工作目录**的历史会话，一列扁平：
   - 左侧**没有**目录栏、没有 `▣ <path>` 目录分组行、没有目录钻取页（`←` 不生效）；
   - 范围**固定在 `channel.cwd`**：`{ ...DEFAULT_FILTERS, allProjects: false }`；
@@ -278,6 +282,22 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 并顺手确认仍是 stock 的部分：会话标题按宽度截断；vim 默认关且 `/vim` 后指示仍在输入框内、
 状态栏不再出现 `-- INSERT --`。**resume 浏览器已不是 stock**（F3 分叉：无 rail、扁平列表，但范围仍是当前目录）。
 
+### Step 8 — 文档一致性核对
+本文档是下次重移植的依据，所以**文档里过时的一句 = 一条错误指令**（每次升级都可能悄悄
+漂移：0.10.1 那次就留下过「resume 浏览器 = stock」这种与代码相反的结论）。一条命令把
+§1 的版本、§2 每条「行为」断言的代码事实、§3 引用的脚本全部核对一遍：
+
+```bash
+bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
+```
+
+覆盖面：§1.1 版本表 / §1.2 用户级设置 / F1 的 `DIFF_BODY_MAX_LINES` 与
+`NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 / F2 的 `loadHistory(cwd)` 与
+`historySeedCwd` 与 Ctrl+R 走 `channel.cwd` / F3 的无 rail 与 `allProjects: false` 与
+i18n 补丁只动 `session-hint-list*` / 仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
+目标数 = `original/` = `diffs/` 且命名一致 / 两个行为测试通过。
+失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
+
 ---
 
 ## 4. 参考：历次版本迁移记录（帮助判断重移植量）
@@ -293,6 +313,7 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 | tool 包 0.1.1-rc.2 → 0.1.2-rc.1 | 上游 68/36 行变更（随 0.10.0 迁移处理） | 已并入 |
 | （非升级）**F3：resume 无 rail + 只看当前目录** | 整文件分叉：`SessionBrowser.js` 取 0.10.1 stock 与原分叉的 3-way 合并（上游两文件字节未变 → 0 冲突），`i18n.js` 只改 hint 文案 | 沿用 `23086fc` 那版分叉的"删 rail + 去目录分组 + 去钻取页"，但范围**固定当前目录**（`allProjects: false`，`mod+a` 置空）。中途被否掉的方案：薄补丁保留 rail 只去分组、rail 阈值 120→90、以及一度把默认设成 `allProjects: true`（列全部）——用户最终要的是**按当前目录过滤**。补丁集 4 → 6 个目标；新增 `test-resume-flat.mjs`。`patch-base-version` 仍 0.10.1 |
 | （非升级）**F2：↑/↓ 历史按当前目录过滤** | `history.js` 加 `cwd` 读写（约 40 行）、`PromptInput.js` 播种/打标、`Chat.js` Ctrl+R 改读过滤版（1 行）；3 个文件都是薄改动 | 写入时给条目打上提交目录，`loadHistory(cwd)` 只返回该目录条目；**旧的无标记条目在当前目录为空时兜底**（升级平滑），有本目录条目后自动让位。`historySeedCwd` 让播种**按目录重播**（workspace picker 能中途换目录），顺带修掉旧补丁"每次 render 都重新播种、会在落盘前抹掉刚提交命令"的竞态。去重按目录分别算。0.10.1 迁移时曾撤回过一版 cwd 过滤（当时 resume 还打算做全量），F3 定为「只看当前目录」后按用户要求恢复。补丁集 6 → 8 个目标；新增 `test-history-cwd.mjs`。`patch-base-version` 仍 0.10.1 |
+| （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 | 旧编号 | 内容 | 现状 |

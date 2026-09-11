@@ -763,7 +763,7 @@ const dict = {
     'session-kind-fork': { zh: '回溯分支', en: 'Rewound branch' },
     'session-kind-subagent': { zh: '子 agent 运行', en: 'Sub-agent run' },
     'session-project-unknown': { zh: '（未记录目录）', en: '(no directory recorded)' },
-    'session-scope-all': { zh: '全部项目', en: 'all projects' },
+    'session-scope-all': { zh: '全部工作目录', en: 'all working directories' },
     'session-search-placeholder': { zh: '输入以搜索 · {{scope}}', en: 'Type to search · {{scope}}' },
     'session-workspace-scope': { zh: '工作目录', en: 'Working directory' },
     'session-workspace-switch': { zh: '← 选择目录', en: '← choose directory' },
