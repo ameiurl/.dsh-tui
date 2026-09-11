@@ -26,8 +26,15 @@ declare -a TARGETS=(
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js|dsh-tool-fs.index.js"
   "$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-tool-str-replace-editor/lib/index.js|dsh-tool-str-replace-editor.index.js"
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js"
-  # F2 input history: seed ↑/↓ from the persisted history file (all directories).
+  # F2 input history: tag each entry with the directory it was submitted in and
+  # read it back scoped to the current working directory (untagged legacy
+  # entries act as a fallback until the directory has entries of its own).
+  "$TUI_PKG/lib/types/history.js|history.js"
+  # F2 ↑/↓ walk: seed from that scoped history — re-seeded when the working
+  # directory changes — and tag what this session submits.
   "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js"
+  # F2 Ctrl+R: the search dialog reads through the same scoped loadHistory().
+  "$TUI_PKG/lib/types/screens/Chat.js|Chat.js"
   # F3 resume browser: whole-file fork — no workspace rail, no directory
   # grouping, one flat list scoped to the current working directory.
   "$TUI_PKG/lib/types/screens/SessionBrowser.js|SessionBrowser.js"

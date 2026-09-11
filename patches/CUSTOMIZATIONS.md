@@ -42,20 +42,22 @@
 ## 2. 定制功能清单（升级后逐项要「回来」的东西）
 
 > **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为 F1–F3：
-> F1 diff 渲染、F2 ↑/↓ 跨会话历史、**F3 resume 只看当前目录（扁平、无 rail）**。
+> F1 diff 渲染、**F2 ↑/↓ 跨会话历史（同样只看当前目录）**、
+> **F3 resume 只看当前目录（扁平、无 rail）**。
 > 迁移时曾去掉五项旧定制，其中**旧 F3 的部分行为已恢复进当前的 F3**
 > （去掉 rail、列表扁平，但范围仍是当前工作目录）；
 > 仍去掉的四项是：旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、
 > 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 6 个目标文件**（3 个 F1 + 1 个 F2 + 2 个 F3；`node resolve-patch-targets.mjs`
+> **当前补丁集 = 8 个目标文件**（3 个 F1 + 3 个 F2 + 2 个 F3；`node resolve-patch-targets.mjs`
 > 可列出），`patch-base-version` = `0.10.1`。
 >
-> **resume 浏览器 = stock，这是最终决定**：2026-09-11 曾按「F2 恢复全量会话」做了一版
-> 薄补丁（`SessionBrowser.js` + `view.js` + `i18n.js`，去掉 rail 与目录分组），随后用户
-> 明确「只列当前工作目录的」→ 已整版撤回，三个文件恢复 stock、补丁集回到 4 个目标。
-> 不要再自动带回。
+> **resume 浏览器不是 stock**（见 F3）：2026-09-11 曾按「恢复全量会话」做了一版**薄补丁**
+> （`SessionBrowser.js` + `view.js` + `i18n.js`，默认 `allProjects`、去掉 rail 与目录分组），
+> 用户明确「只列当前工作目录的」→ **那版整版撤回**。随后重做了一版**整文件分叉**
+> （沿用 `23086fc` 的删 rail / 去分组 / 去钻取页，范围固定当前目录），即当前的 F3，
+> 那才是最终决定。被否掉的是「列全部项目」，**不是**「无 rail 扁平列表」，别搞混。
 
 ### F1 — Edit/Write 的 diff 用 Claude Code 统一风格渲染
 - **涉及文件（3 个）**：
@@ -79,19 +81,47 @@
 - **验证**：触发一次 Edit/Write，看是否 CC 统一式（行号 + 绿红底）；NEW 文件只出
   前 10 行（`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行。
 
-### F2 — ↑/↓ 跨会话历史 + 建议菜单边界落历史
-- **涉及文件（1 个）**：`…/dsh-tui/lib/types/components/PromptInput.js`
+### F2 — ↑/↓ 跨会话历史（**按当前工作目录过滤**）+ 建议菜单边界落历史
+- **涉及文件（3 个）**：
+  - `…/dsh-tui/lib/types/history.js` —— 写入时给条目打上提交目录（`cwd` 字段），
+    读取时 `loadHistory(cwd)` 只返回该目录的条目。`loadHistory` 新增**可选**参数，
+    不传即旧行为（返回全部）。`history.d.ts` **不补**，理由同旧 F7：
+    安装后的包不做类型检查，声明只影响 `tsc`。
+  - `…/dsh-tui/lib/types/components/PromptInput.js` —— ↑/↓ 播种改走
+    `loadHistory(channel.cwd)`，提交时 `appendHistory(text, channel.cwd)` 打标。
+  - `…/dsh-tui/lib/types/screens/Chat.js` —— Ctrl+R 历史搜索改读
+    `loadHistory(channel.cwd)`，与 ↑/↓ 范围一致。
 - **行为**：
-  - ↑/↓ 读取**持久化历史文件**（跨会话、跨进程可翻，**全部目录共用一份**，
-    `loadHistory()` 原样返回 `~/.dsh-tui/history.jsonl` 的内容；Ctrl+R 历史搜索同理）。
+  - ↑/↓ 读取**持久化历史文件**（跨会话、跨进程可翻），但**只列当前工作目录的条目**；
+    Ctrl+R 同理（同一份 `loadHistory`）。
+  - **播种按目录重播**：`historySeedCwd` 记住上次播种用的目录，目录变了
+    （workspace picker 可以中途换工作区）就重新播种并结束进行中的历史游走。
+    这顺带修掉旧补丁的一个竞态：旧版在**每次 render** 都重新播种，提交后若在落盘前
+    重渲染，刚提交的命令会被从内存历史里抹掉；现在只在挂载/换目录时播种。
+  - **旧条目兜底**（升级平滑的关键）：打标之前写入的条目没有 `cwd`。
+    当**当前目录一条都没有**时，`loadHistory(cwd)` 返回这些无标记条目，所以刚改完
+    ↑/↓ 不会突然变空；一旦该目录攒下自己的条目，兜底池立刻让位
+    ——别的目录的命令不会永久泄漏进来。
+  - **去重按目录分别算**：同一句话在另一个目录提交算**新条目**（`last.cwd === cwd`
+    才算连续重复），否则合并会把条目留在错误的目录标签下。
   - 在命令建议菜单顶部/底部再按 ↑/↓ **落到历史**（而非 stock 的环绕）。
-- **重移植注意**：只保留这两组改动（`loadHistory` 播种 + 菜单边界落历史）；
+- **重移植注意**：只保留「按目录播种/打标 + 菜单边界落历史」；
   vim 相关（默认开启、`onVimChange` 上报、输入框内指示）已移除，重移植时不要带回。
-  **不要**给 `history.js` 加按目录过滤：曾经加过一版（写入记 `cwd` + 读取按 `cwd` 过滤），
-  已按用户要求撤回，`original/backup` 里也不再保留 `history.js`。
-- **验证**：重启后 ↑/↓ 能翻到上次会话（任何目录）输过的命令；菜单在第 0 项按 ↑ 应进历史。
-  命令行快检：`node -e "import('.../lib/types/history.js').then(m=>console.log(m.loadHistory().length))"`
-  应等于 `history.jsonl` 的行数（不再过滤）。
+  三个文件的改动都很薄（`history.js` 约 40 行、`Chat.js` 1 行、`PromptInput.js` 是
+  播种块 + 两处传参），若上游大改，底线是「条目带目录 + 读取按目录过滤 + 旧条目兜底」。
+- **验证**：
+  1. 重启后 ↑/↓ 能翻到**本目录**以前输过的命令；换个目录启动应看不到这里的命令。
+  2. 菜单在第 0 项按 ↑ 应进历史。
+  3. 命令行无头测试（临时 `HOME`，绝不碰真实历史文件）：
+     ```bash
+     node ~/.dsh-tui/patches/test-history-cwd.mjs
+     ```
+     断言：条目带 `cwd` 落盘、按目录过滤、旧无标记条目兜底且在有本目录条目后让位、
+     跨目录同名文本不合并、未过滤读取返回全部、真实 `history.jsonl` 未被改动。
+  4. 过渡期快检——当前 200 条**全无 `cwd`**，所以过滤前后条数应相等：
+     ```bash
+     node -e "import('$HOME/.dsh/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui/lib/types/history.js').then(m=>console.log(m.loadHistory().length, m.loadHistory(process.cwd()).length))"
+     ```
 
 ### F3 — resume：只列**当前工作目录**的历史会话（扁平、无左侧目录栏）
 - **涉及文件（2 个）**：
@@ -122,8 +152,9 @@
      它断言：当前目录的会话列出、其他目录的会话**不**列出、恰好一行会话、无分组头 /
      无 rail / 无钻取页、scope 不是"全部项目"、子运行仍折叠。
 
-> 说明：`history.jsonl` 里部分条目还留着一个已废弃的 `cwd` 字段（那版过滤器的遗留）。
-> stock 的 `parseRaw` 只读 `text`/`ts`，多余字段被忽略、不影响显示；文件因此保持原样不动。
+> 说明：`history.jsonl` 现有条目**全都没有 `cwd` 字段**（早年那版过滤器的遗留早已随
+> 200 条上限轮转出去），它们正是 F2 的「旧条目兜底池」：改完 ↑/↓ 立刻仍能看到全部老命令，
+> 等各目录攒下带标记的新条目后自动按目录分化。**文件不需要迁移，保持原样**。
 
 > 所有组件补丁都做了**语法校验门禁**：`apply-diff-patches.sh` 在写入前 `node --check`
 > （仅 `.js`），失败即中止，避免用旧补丁覆盖结构已变的上游文件。
@@ -237,7 +268,9 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 完全退出并重开 `dsh-tui`（进程会缓存已加载模块，必须重启才吃新 JS），然后按 §2 的
 「验证」逐项过 F1–F3：
 - **F1**：触发一次 Edit/Write，看 CC 统一式 diff（行号 + 绿红底；NEW 文件只出前 10 行）。
-- **F2**：↑/↓ 能翻到以前任何目录输过的命令（历史全局共用）；菜单在第 0 项按 ↑ 进历史。
+- **F2**：↑/↓ 只翻到**当前目录**输过的命令（别的目录不出现；旧的**无**标记条目仍作兜底，
+  所以刚改完看起来和以前一样）；菜单在第 0 项按 ↑ 进历史。命令行侧：
+  `node ~/.dsh-tui/patches/test-history-cwd.mjs`。
 - **F3**：`/resume` 应只列**当前目录**的会话（别的目录不出现）、左侧**无目录栏**、
   无 `▣ 目录` 分组行；`mod+a` 不再切换范围；命令行侧：
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`。
@@ -259,6 +292,7 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 | tool 包 0.1.0-rc.8 → 0.1.1-rc.2 | 字节不变 | 免移植 |
 | tool 包 0.1.1-rc.2 → 0.1.2-rc.1 | 上游 68/36 行变更（随 0.10.0 迁移处理） | 已并入 |
 | （非升级）**F3：resume 无 rail + 只看当前目录** | 整文件分叉：`SessionBrowser.js` 取 0.10.1 stock 与原分叉的 3-way 合并（上游两文件字节未变 → 0 冲突），`i18n.js` 只改 hint 文案 | 沿用 `23086fc` 那版分叉的"删 rail + 去目录分组 + 去钻取页"，但范围**固定当前目录**（`allProjects: false`，`mod+a` 置空）。中途被否掉的方案：薄补丁保留 rail 只去分组、rail 阈值 120→90、以及一度把默认设成 `allProjects: true`（列全部）——用户最终要的是**按当前目录过滤**。补丁集 4 → 6 个目标；新增 `test-resume-flat.mjs`。`patch-base-version` 仍 0.10.1 |
+| （非升级）**F2：↑/↓ 历史按当前目录过滤** | `history.js` 加 `cwd` 读写（约 40 行）、`PromptInput.js` 播种/打标、`Chat.js` Ctrl+R 改读过滤版（1 行）；3 个文件都是薄改动 | 写入时给条目打上提交目录，`loadHistory(cwd)` 只返回该目录条目；**旧的无标记条目在当前目录为空时兜底**（升级平滑），有本目录条目后自动让位。`historySeedCwd` 让播种**按目录重播**（workspace picker 能中途换目录），顺带修掉旧补丁"每次 render 都重新播种、会在落盘前抹掉刚提交命令"的竞态。去重按目录分别算。0.10.1 迁移时曾撤回过一版 cwd 过滤（当时 resume 还打算做全量），F3 定为「只看当前目录」后按用户要求恢复。补丁集 6 → 8 个目标；新增 `test-history-cwd.mjs`。`patch-base-version` 仍 0.10.1 |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 | 旧编号 | 内容 | 现状 |
@@ -268,6 +302,7 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 | 旧 F4 | vim 默认 ON、INSERT 起手（`PromptInput` + `Chat` 初始状态） | stock：vim 默认 OFF，`/vim` 开启 |
 | 旧 F5 | `INSERT/NORMAL` 指示从输入框移到 `StatusLine` | stock：指示在输入框内；`Chat`/`StatusLine` 接线已移除 |
 | 旧 F7 | `ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号；0.10.1 迁移时曾短暂编号为 F4） | 不再打补丁；字段由 tool 包（JS）产出、渲染器（JS）动态读取，`.d.ts` 只影响 `tsc`，安装后的包不做类型检查，因此零运行时影响。需要类型时在自己工程里 `declare module` 增强 |
+| （无编号） | ↑/↓ 历史按 `cwd` 过滤（`history.js` + `history.d.ts` + 回填脚本） | **已恢复为 F2 的一部分**：0.10.1 迁移时曾整版撤回（当时代价是 ↑/↓ 立刻变空），2026-09-11 F3 定为「只看当前目录」后按用户要求恢复，并加了**旧条目兜底**解决空窗。`history.d.ts` 仍不打补丁（同旧 F7 的理由） |
 
 备份目录语义：`original/`=纯净上游；`backup/`=已补丁（apply 恢复源）；
 `diffs/*.patch`=original→backup 差异（供查看）。git 历史（`~/.dsh-tui` 仓库）保留每代

@@ -1,0 +1,13 @@
+--- original/Chat.js	2026-09-11 14:31:16.891029981 +0800
++++ backup/Chat.js	2026-09-11 14:31:43.164901400 +0800
+@@ -3169,7 +3169,9 @@
+             return;
+         }
+         if (actionMatches('history', input, key) && !helpOpen) {
+-            setHistoryEntries(loadHistory());
++            // Ctrl+R searches the same directory-scoped history ↑/↓ walks:
++            // `loadHistory(cwd)` returns this working directory's entries.
++            setHistoryEntries(loadHistory(channel.cwd));
+             dispatchOverlay({
+                 type: 'open',
+                 overlay: { kind: 'history', query: '', cursor: 0, focus: 0 },

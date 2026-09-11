@@ -452,23 +452,32 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
     const valueRef = React.useRef(value);
     const cursorRef = React.useRef(cursor);
     const history = React.useRef([]);
+    const historyIndex = React.useRef(-1);
+    const historyDraft = React.useRef({ text: '', images: [] });
     // ↑/↓ history walk: seeded from the persisted history file (oldest first,
     // newest last — `loadHistory()` returns newest-first), so the arrows
     // recall inputs from earlier sessions, not just this mount. Bash-style:
     // in-session submissions append on top of the seed. Persisted entries
     // carry no image bindings, so the seed adapts them to the in-memory shape.
-    {
+    //
+    // The seed is scoped to the working directory and re-runs whenever that
+    // directory changes (the workspace picker can move the channel mid-session),
+    // so ↑/↓ never offer another directory's commands. Guarding on the directory
+    // instead of re-seeding on every render also stops a re-render that lands
+    // before a fresh write is durable from clobbering in-session submissions.
+    const historySeedCwd = React.useRef(undefined);
+    if (historySeedCwd.current !== channel.cwd) {
+        historySeedCwd.current = channel.cwd;
+        historyIndex.current = -1;
         try {
-            const persisted = loadHistory().map(entry => ({ text: entry.text, images: [] })).reverse();
-            if (persisted.length > 0)
-                history.current = persisted;
+            history.current = loadHistory(channel.cwd)
+                .map(entry => ({ text: entry.text, images: [] }))
+                .reverse();
         }
         catch {
             // Best-effort: an unreadable history file just leaves ↑/↓ empty.
         }
     }
-    const historyIndex = React.useRef(-1);
-    const historyDraft = React.useRef({ text: '', images: [] });
     /** Visible `[Image #N]` labels are presentation only; this sidecar carries
      * the non-reusable capability for the current draft. History/rewind text
      * restored without this map can never bind to a later image by accident. */
@@ -983,7 +992,7 @@ export function PromptInput({ channel, suspended = false, helpOpen, onToggleHelp
         if (history.current.length > HISTORY_LIMIT)
             history.current.shift();
         historyIndex.current = -1;
-        void appendHistory(text);
+        void appendHistory(text, channel.cwd);
     };
     const clearDeliveredDraft = () => {
         syncImageGeneration();
