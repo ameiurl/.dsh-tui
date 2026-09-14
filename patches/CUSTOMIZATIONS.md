@@ -44,7 +44,7 @@
 > **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为 F1–F3：
 > F1 diff 渲染、**F2 ↑/↓ 跨会话历史（同样只看当前目录）**、
 > **F3 resume 只看当前目录（扁平、无 rail）**；2026-09-11 追加
-> **F4 标题链路：按 Claude Code 的取名链**（最近一条 prompt 优先）。
+> **F4 标题链路：按 Claude Code 的取名链**（最近一条 prompt 优先）+ **文件地址不当标题**。
 > 迁移时曾去掉五项旧定制，其中**旧 F3 的部分行为已恢复进当前的 F3**
 > （去掉 rail、列表扁平，但范围仍是当前工作目录）；
 > 仍去掉的四项是：旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、
@@ -157,54 +157,66 @@
      它断言：当前目录的会话列出、其他目录的会话**不**列出、恰好一行会话、无分组头 /
      无 rail / 无钻取页、scope 不是"全部项目"、子运行仍折叠。
 
-### F4 — `/resume` 的标题按 Claude Code 的取名链
+### F4 — `/resume` 的标题按 Claude Code 的取名链，且文件地址永不当标题
 - **涉及文件（1 个）**：
   - `…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`（**薄改动**：新增 `LAST_PROMPT_TITLE_CHARS`
-    / `normalizeLastPrompt()` / `lastPromptOf()`，`digestSession()` 的标题表达式改成链条；
-    `recoverFirstPrompt()`、`hasPrompt` 等一律保持 stock）。
+    / `isFileAddress()` / `normalizeLastPrompt()` / `lastPromptOf()`，`digestSession()` 的标题选择与
+    `recoverFirstPrompt()` 的扫描各改几行）。
 - **行为**：没有任何 `session/title` 事件的会话，按 Claude Code 的取名顺序取名
-  （它的链条是 `customTitle || aiTitle || lastPrompt || summaryHint || firstPrompt`）：
+  （它的链条是 `customTitle || aiTitle || lastPrompt || summaryHint || firstPrompt`），
+  两层 prompt 候选都必须是"**整串不是文件地址**"：
   1. 最后一条 `session/title` 事件（provider 自动标题 = `auto`；`/rename` 或 recap 点"应用"
-     = `renamed`）—— 对应 Claude 的 `customTitle || aiTitle`；
-  2. 否则**最近一条人类消息**（`lastPromptOf()`，倒序扫窗口，命中即返回）—— 对应 Claude 的
-     `lastPrompt`，并按它的 `normalizeLastPrompt` 归一化：换行折成空格、trim、
+     = `renamed`）—— 对应 Claude 的 `customTitle || aiTitle`。**这一层不受过滤影响**：
+     人和模型写下的名字照用；
+  2. 否则**最近一条非地址人类消息**（`lastPromptOf()`，倒序扫、跳过地址，命中即返回）——
+     对应 Claude 的 `lastPrompt`，并按它的 `normalizeLastPrompt` 归一化：换行折成空格、trim、
      超 `LAST_PROMPT_TITLE_CHARS = 200` 截断加 `…`；
-  3. 否则**第一条人类消息**（上游原逻辑）—— 对应 Claude 的 `firstPrompt`；
-  4. 最后才是工作目录 basename（`source: 'fallback'`，上游原样）。
-     只有第 1 层为空时才做倒序扫描，已有标题的会话一个字节都不多读。
-- **本层不做内容过滤（有意为之）**：地址、URL、命令都原样上报。Claude 的链条也不过滤——
-  它把"内容只是 URL/引用时该写成什么"交给**写标题的那一层**（标题提示词里写死
-  `If the content is just a URL or reference, describe what the user is asking about`）。
-  所以"文件地址不当标题"这件事，在 dsh-tui 里属于 provider 标题 / recap（模型层）的职责，
-  不属于 `digest.js`（读取层）。**第一版曾在读取层做地址过滤（`isFileAddress`）和"地址→目录名"
-  替换，已整体退回**：那是把写作层的活搬进读取层，还会让 `/resume` 显示的标题与日志内容对不上。
+  3. 否则**第一条非地址人类消息** —— 对应 Claude 的 `firstPrompt`（上游逻辑 + 跳过地址）；
+  4. 最后才是工作目录 basename（`source: 'fallback'`，上游原样、非空）。
+     第 1 层有值时不做倒序扫描，已有标题的会话一个字节都不多读。
+- **"文件地址"判据**（只认"整串就是一个地址"，**绝不做子串匹配**）：
+  `^[/\\]`、`^~[/\\]`、`^\.{1,2}[/\\]`、`^[A-Za-z]:[\\/]`、`^@\S+$`；以及"单 token、
+  含分隔符、带字母（`\p{L}`，所以 `2024/09/11` 不算）、且带扩展名或至少两级"的相对路径
+  （`src/views/Setting.vue`、`src/views/Setting`）。**不匹配**的仍是标题：
+  `@src/views/Setting.vue 互转方向更改`、
+  `在admin_frontend中，@src/views/setting/Setting.vue 互转方向更改。`、
+  `工作/生活`、`2024/09/11`。
+- **`hasPrompt` 与标题候选解耦（关键，别改回去）**：地址型首句**仍然算"有对话"**。
+  `digestSession()` 里 `prompt` 收下**任何**人类输入（它决定 `hasPrompt`，表达式逐字保持上游），
+  `opening` 才是第一个合资格的标题候选；`recoverFirstPrompt()` 同样分开返回
+  `prompt`（首个非地址候选）与 `hasPrompt`（是否见过任何人类输入）。若把两者合并，
+  一个"首句是路径、后面聊了一堆"的会话会被算成**空会话** —— 而"清理空会话"是**破坏性**动作
+  （`mod+x` 确认后删除），绝不能误删。
 - **与 Claude Code 2.1.201 的对应关系**：
 
   | Claude Code | 这里 |
   | --- | --- |
-  | `customTitle \|\| aiTitle`（`/rename`、hook `sessionTitle`、模型写的 `ai-title`） | `session/title` 事件：`renamed` / `auto` |
-  | `lastPrompt` + `normalizeLastPrompt`（折行、trim、200 字符 + `…`） | `lastPromptOf()` + `normalizeLastPrompt()` |
+  | `customTitle \|\| aiTitle`（`/rename`、hook `sessionTitle`、模型写的 `ai-title`） | `session/title` 事件：`renamed` / `auto`（**不过滤**） |
+  | `lastPrompt` + `normalizeLastPrompt`（折行、trim、200 字符 + `…`） | `lastPromptOf()` + `normalizeLastPrompt()`，额外跳过地址 |
   | `summaryHint` | dsh-tui 无对应字段，跳过 |
-  | `firstPrompt` | 上游的首条人类消息逻辑 |
+  | `firstPrompt` | 上游首条人类消息逻辑，额外跳过地址 |
   | 提示词生成 3–7 词标题（`qam = 10` 最小长度、1000 字符内容窗口、JSON `{title}`） | **不在 `digest.js` 做**：provider 标题事件与 recap 的"建议标题"已经是这一层 |
   | 无标题时的兜底（窗口标题退到 sessionId 前 8 位，picker 返回 null） | 目录 basename（上游原样、且非空，所以 `SessionListRow.js` 不用改） |
 
-- **历史/被否方案**：需求原话是"取标题时，是文件地址不取"。**第一版**据此做成读取层的地址
-  过滤器（连 `hasPrompt` 都与标题候选解耦，防止"首句是路径"的会话被当成空会话而进 `mod+x`
-  的破坏性清理）；看过 Claude Code 的实现后**整版退回**，改成上面这条"只照 Claude 的链条、
-  读取层不做内容判断"的版本——过滤、解耦、`recoverFirstPrompt` 的跳过逻辑全部撤销。
+- **历史/被否方案**：需求原话是"取标题时，是文件地址不取"。一共做过三版：
+  ① **纯地址过滤器**（过滤 + `hasPrompt` 解耦，但链条仍是上游的"首条 prompt"）；
+  ② **只照 Claude 的链条、读取层不做内容判断**（`lastPrompt` 优先，但地址会原样上报）；
+  ③ **当前版 = ① 的过滤 + ② 的链条**（用户最终选定）：Claude 的顺序 + 两层 prompt 都跳过地址。
+  被否掉的是 ② 的"不过滤"（会把路径显示成标题）与 ① 的"只认首条 prompt"（不采用 Claude
+  的 `lastPrompt` 优先）。
 - **验证**：
-  1. `/resume` 中：有标题事件的会话显示该标题；没有的显示**最近一条消息**（不是第一条）；
-  2. 只发过一句话的会话显示那句话；只发过一个路径的会话**显示那个路径**（读取层不过滤）；
-     没有任何输入的会话显示目录名；
-  3. 无头行为测试（合成 zstd 会话日志，不启动 TUI、不写用户数据）：
+  1. `/resume` 中：有标题事件的会话显示该标题；没有的显示**最近一条真实消息**（不是第一条、
+     也不是路径）；只发过路径、之后再没说话的会话显示**目录名**（既不是路径，也不是空白行）；
+  2. 无头行为测试（合成 zstd 会话日志，不启动 TUI、不写用户数据）：
      ```bash
      node ~/.dsh-tui/patches/test-resume-title-chain.mjs
      ```
      它断言：`session/title` 优先且 `auto`/`renamed` 溯源不变；最近消息胜过首句；多行折成一行、
-     超 200 字符截断；只有路径的日志原样上报路径；空会话 `hasPrompt=false` + 目录名；
-     `>64KB` 日志从尾窗口取最近消息；`recoverSessionTitle` 仍是 stock 的"首条 prompt"契约。
-  4. 回归证据：对 `~/.dsh/sessions` 全部 142 条真实会话日志，改动前后 `digestSession()` 的
+     超 200 字符截断；**首句是地址 → 用后面那条真实消息**、**最近一条是地址 → 用更早的真实消息**；
+     7 种地址写法单独出现时都回落到目录名且 `hasPrompt=true`；提及路径的正常句子 / `2024/09/11` /
+     `工作/生活` 仍是标题；空会话 `hasPrompt=false` + 目录名；`>64KB` 日志从尾窗口取最近消息；
+     `recoverSessionTitle` 跳过地址、对地址型会话保留 `hasPrompt`。
+  3. 回归证据：对 `~/.dsh/sessions` 全部 161 条真实会话日志，改动前后 `digestSession()` 的
      `{title, source, hasPrompt, titleComplete}` **逐条相同** → 现有 `session-index.json`
      缓存无需作废，因此**没有**动 `store.js` 的 `SCHEMA_VERSION`。
 
@@ -346,8 +358,8 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 覆盖面：§1.1 版本表 / §1.2 用户级设置 / F1 的 `DIFF_BODY_MAX_LINES` 与
 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 / F2 的 `loadHistory(cwd)` 与
 `historySeedCwd` 与 Ctrl+R 走 `channel.cwd` / F3 的无 rail 与 `allProjects: false` 与
-i18n 补丁只动 `session-hint-list*` / F4 的 `lastPromptOf`、`normalizeLastPrompt`、
-`LAST_PROMPT_TITLE_CHARS = 200` 与读取层不做内容过滤（无 `isFileAddress`）/
+i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
+`LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 仍取自非过滤候选 /
 仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
 目标数 = `original/` = `diffs/` 且命名一致 / 三个行为测试通过。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
@@ -368,7 +380,7 @@ i18n 补丁只动 `session-hint-list*` / F4 的 `lastPromptOf`、`normalizeLastP
 | （非升级）**F3：resume 无 rail + 只看当前目录** | 整文件分叉：`SessionBrowser.js` 取 0.10.1 stock 与原分叉的 3-way 合并（上游两文件字节未变 → 0 冲突），`i18n.js` 只改 hint 文案 | 沿用 `23086fc` 那版分叉的"删 rail + 去目录分组 + 去钻取页"，但范围**固定当前目录**（`allProjects: false`，`mod+a` 置空）。中途被否掉的方案：薄补丁保留 rail 只去分组、rail 阈值 120→90、以及一度把默认设成 `allProjects: true`（列全部）——用户最终要的是**按当前目录过滤**。补丁集 4 → 6 个目标；新增 `test-resume-flat.mjs`。`patch-base-version` 仍 0.10.1 |
 | （非升级）**F2：↑/↓ 历史按当前目录过滤** | `history.js` 加 `cwd` 读写（约 40 行）、`PromptInput.js` 播种/打标、`Chat.js` Ctrl+R 改读过滤版（1 行）；3 个文件都是薄改动 | 写入时给条目打上提交目录，`loadHistory(cwd)` 只返回该目录条目；**旧的无标记条目在当前目录为空时兜底**（升级平滑），有本目录条目后自动让位。`historySeedCwd` 让播种**按目录重播**（workspace picker 能中途换目录），顺带修掉旧补丁"每次 render 都重新播种、会在落盘前抹掉刚提交命令"的竞态。去重按目录分别算。0.10.1 迁移时曾撤回过一版 cwd 过滤（当时 resume 还打算做全量），F3 定为「只看当前目录」后按用户要求恢复。补丁集 6 → 8 个目标；新增 `test-history-cwd.mjs`。`patch-base-version` 仍 0.10.1 |
 | （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（当时 31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
-| （非升级）**F4：/resume 标题按 Claude Code 的取名链** | 只动 `digest.js` 一个文件（新增 `LAST_PROMPT_TITLE_CHARS` / `normalizeLastPrompt` / `lastPromptOf`，`digestSession()` 的标题表达式改成链条），UI 一行未碰 | 需求原话是"取标题时，是文件地址不取"。**第一版**据此在读取层做地址过滤（`isFileAddress`，并把 `hasPrompt` 与标题候选解耦），看过 Claude Code 2.1.201 的实现后**整版退回**：读取层不做内容判断，只照它的链条`customTitle \|\| aiTitle \|\| lastPrompt \|\| summaryHint \|\| firstPrompt` —— 标题事件 → **最近一条 prompt**（`normalizeLastPrompt`：折行/trim/200 字符截断）→ 首条 prompt → 目录名。"地址不当标题"改由 provider 标题 / recap（写标题的那一层）负责。回归：142 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-resume-title-chain.mjs`。`patch-base-version` 仍 0.10.1 |
+| （非升级）**F4：/resume 标题 = Claude 取名链 + 地址过滤** | 只动 `digest.js` 一个文件（新增 `LAST_PROMPT_TITLE_CHARS` / `isFileAddress` / `normalizeLastPrompt` / `lastPromptOf`，`digestSession()` 的标题选择与 `recoverFirstPrompt()` 各改几行），UI 一行未碰 | 三版迭代：① 纯地址过滤器 → ② 只照 Claude 链条、读取层不过滤 → ③ **当前版**：Claude 的顺序（标题事件 → **最近一条** prompt → 首条 prompt → 目录名，`normalizeLastPrompt` 折行/trim/200 字符截断）+ 两层 prompt 都跳过文件地址。`hasPrompt` 与标题候选解耦（`digestSession` 用未过滤的 `prompt`，`recoverFirstPrompt` 返回 `hasPrompt`），否则地址型首句的会话会被当成空会话进 `mod+x` 的破坏性清理。回归：161 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-resume-title-chain.mjs`。`patch-base-version` 仍 0.10.1 |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 

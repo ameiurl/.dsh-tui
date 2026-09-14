@@ -81,13 +81,18 @@ ck "digest.js: lastPrompt clipped at 200"    "grep -q 'LAST_PROMPT_TITLE_CHARS =
 # Claude's order: the RECENT prompt is asked for before the opening one, and
 # only when no title event was written.
 ck "digest.js: recent prompt precedes the first" \
-   "grep -q 'const named = recent ?? prompt' '$G'"
-# The reader filters nothing — content judgements (an address, a URL, a bare
-# command) belong to whatever WRITES a title. This assertion is the regression
-# guard for the reverted address filter: do not bring it back here.
-ck "digest.js: no content filter in the reader" \
-   "! grep -qE 'isFileAddress|lastEligiblePrompt|sawPrompt' '$G'"
+   "grep -q 'const named = recent ?? opening' '$G'"
+ck "digest.js: isFileAddress present"        "grep -q 'function isFileAddress' '$G'"
+ck "digest.js: title candidate skips addresses" \
+   "grep -q 'opening === undefined && !isFileAddress(found)' '$G'"
+ck "digest.js: recent prompt skips addresses" \
+   "grep -q 'found !== undefined && !isFileAddress(found)' '$G'"
+# An address-only opening must stay a CONVERSATION: `prompt` keeps any human
+# input while `opening` holds the title candidate, and the recovery scan reports
+# hasPrompt separately. Collapsing the two makes such a session look empty — and
+# `mod+x` deletes empty sessions.
 ck "digest.js: hasPrompt stays stock"        "grep -q 'const hasPrompt = prompt !== undefined || !head.whole' '$G'"
+ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPrompt' '$G'"
 
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"
