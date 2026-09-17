@@ -43,6 +43,14 @@ ck "dsh-tool-fs = 0.1.2-rc.1"    "grep -q '\"version\": \"0.1.2-rc.1\"' '$TOOLS/
 ck "dsh-tool-str-replace-editor = 0.1.2-rc.1" \
    "grep -q '\"version\": \"0.1.2-rc.1\"' '$TOOLS/dsh-tool-str-replace-editor/package.json'"
 ck "profile dir is still dsh-tui" "[ -d '$DSH_HOME/profiles/dsh-tui' ]"
+# The version table is the first thing an upgrade invalidates and the last thing
+# anyone remembers to edit: assert the docs actually SAY the baseline this
+# checkout is built against (the label above only reports the installed one).
+BASE="$(cat "$DIR/patch-base-version")"
+ck "CUSTOMIZATIONS.md §1.1 records the baseline $BASE" \
+   "grep -qE 'patch-base-version.+\`$BASE\`' '$DIR/CUSTOMIZATIONS.md'"
+ck "README.md source list names dsh-tui@$BASE" \
+   "grep -q 'dsh-tui@$BASE' '$DIR/README.md'"
 
 echo "== §1.2 user-level settings =="
 ck "settings.yaml has diffLayout: unified" "grep -q 'diffLayout: unified' '$DSH_HOME/settings.yaml'"
@@ -84,14 +92,26 @@ ck "digest.js: recent prompt precedes the first" \
    "grep -q 'const named = recent ?? opening' '$G'"
 ck "digest.js: isFileAddress present"        "grep -q 'function isFileAddress' '$G'"
 ck "digest.js: title candidate skips addresses" \
-   "grep -q 'opening === undefined && !isFileAddress(found)' '$G'"
+   "grep -q 'opening === undefined && human?.text !== undefined && !isFileAddress(human.text)' '$G'"
 ck "digest.js: recent prompt skips addresses" \
-   "grep -q 'found !== undefined && !isFileAddress(found)' '$G'"
-# An address-only opening must stay a CONVERSATION: `prompt` keeps any human
-# input while `opening` holds the title candidate, and the recovery scan reports
-# hasPrompt separately. Collapsing the two makes such a session look empty — and
-# `mod+x` deletes empty sessions.
-ck "digest.js: hasPrompt stays stock"        "grep -q 'const hasPrompt = prompt !== undefined || !head.whole' '$G'"
+   "grep -q 'found?.text !== undefined && !isFileAddress(found.text)' '$G'"
+# An address-only opening must stay a CONVERSATION: every human message counts
+# as evidence while only `opening` holds the title candidate, and the recovery
+# scan reports hasPrompt separately. Collapsing the two makes such a session
+# look empty — and `mod+x` deletes empty sessions. 0.10.2 upstream tracks that
+# evidence as `hasHumanMessage` and folds it into completeness, which is the
+# same separation; the shape is pinned because the F4 filter rides on it.
+ck "digest.js: hasPrompt counts any human message" \
+   "grep -q 'const hasPrompt = hasHumanMessage || !completeHead' '$G'"
+ck "digest.js: humanPrompt result is consumed as { text }" \
+   "grep -q 'const human = humanPrompt(line)' '$G'"
+ck "digest.js: recovery skips an address opening" \
+   "grep -q 'found.text === undefined || isFileAddress(found.text)' '$G'"
+# 0.10.2 verifies a log's first line is a real `session` line before calling it
+# completely read; a fixture opening with anything else reports an empty session
+# as a full conversation (see §4's 0.10.2 row). Keep the fixture honest.
+ck "title-chain fixture opens with a real session first line" \
+   "grep -q \"type: 'session', version: 0\" '$DIR/test-resume-title-chain.mjs'"
 ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPrompt' '$G'"
 
 echo "== §2 deliberately stock (must NOT be patched) =="

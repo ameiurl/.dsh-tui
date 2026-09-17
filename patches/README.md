@@ -70,7 +70,7 @@ it belongs at the end of every one.
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.1.2-rc.1`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.1.2-rc.1`,
-`@deepseek-harness-tui/dsh-tui@0.10.1`.
+`@deepseek-harness-tui/dsh-tui@0.10.2`.
 
 | file | change |
 | --- | --- |

@@ -1,6 +1,6 @@
---- original/Chat.js	2026-09-11 14:31:16.891029981 +0800
-+++ backup/Chat.js	2026-09-11 14:31:43.164901400 +0800
-@@ -3169,7 +3169,9 @@
+--- original/Chat.js	2026-09-17 14:33:43.522945322 +0800
++++ backup/Chat.js	2026-09-17 14:33:43.525482528 +0800
+@@ -3181,7 +3181,9 @@
              return;
          }
          if (actionMatches('history', input, key) && !helpOpen) {

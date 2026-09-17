@@ -575,6 +575,9 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     /** Subagent dashboard (Ctrl+A): displays active/completed subagents. */
     const [subagentDashboardOpen, setSubagentDashboardOpen] = React.useState(false);
     const [jobsPanelOpen, setJobsPanelOpen] = React.useState(false);
+    // MessageList forwards these open handlers to every memoized row. Their
+    // identities must survive token/metrics updates, including for tool rows.
+    const openJobsPanel = React.useCallback(() => setJobsPanelOpen(true), []);
     /** Detail view for a specific subagent (opened from dashboard). */
     const [subagentDetailId, setSubagentDetailId] = React.useState(null);
     /**
@@ -616,18 +619,21 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const loadedContextVisible = channel.rows.length === 0 && channel.loadedContext !== undefined;
     /** Startup context panel: collapsed by default, toggled with Ctrl+P. */
     const [loadedContextOpen, setLoadedContextOpen] = React.useState(false);
-    /**
-     * The context panel changes the height of the main-screen transcript by a
-     * large amount. In inline mode that invalidates the renderer's previous
-     * scrollback/layout correspondence; asking it to repaint from the physical
-     * viewport prevents the collapsed frame from reusing stale blank cells.
-     */
     const toggleLoadedContext = React.useCallback(() => {
         setLoadedContextOpen(previous => !previous);
+    }, []);
+    const renderedLoadedContextOpen = React.useRef(loadedContextOpen);
+    React.useLayoutEffect(() => {
+        if (renderedLoadedContextOpen.current === loadedContextOpen)
+            return;
+        renderedLoadedContextOpen.current = loadedContextOpen;
+        // Reanchor after the new panel geometry commits. Requesting it in the
+        // key handler lets a pending paint consume it on the old tall layout,
+        // leaving the collapsed summary stranded outside the physical viewport.
         const ink = instances.get(process.stdout) ?? instances.values().next().value;
         ink?.invalidatePrevFrame();
         ink?.reanchorViewport();
-    }, []);
+    }, [loadedContextOpen]);
     /**
      * Click-to-act targets: the Ink instance's hyperlink-open callback (wired
      * in the effect below) resolves every clickable target the transcript
@@ -2474,6 +2480,12 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         // Subagent dashboard or detail scene: it owns the keyboard while open.
         if (subagentDashboardOpen || subagentDetailId !== null)
             return;
+        // The `/jobs` panel replaces the conversation too, so it owns Esc (close)
+        // and k (kill) while open. Unguarded, Esc meant to CLOSE the panel also
+        // reached the chat:cancel branch below whenever a turn was in flight —
+        // dismissing the panel and killing the turn with one key.
+        if (jobsPanelOpen)
+            return;
         // A plugin scene (dsh-tui-scenes) or the trajectory scene owns the whole
         // screen while open: every key belongs to it. Unguarded, an Esc meant to
         // CLOSE the scene also reached the chat:cancel branch below whenever a
@@ -3556,7 +3568,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 // sessions keep the full intro; restored ones settle instantly.
                                 // A remount after a whole screen closed also settles instantly
                                 // (see suppressLogoIntroRef).
-                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: (agentId) => setSubagentDetailId(agentId), onOpenJobs: () => setJobsPanelOpen(true), onOpenFile: openFileActions, onPreviewImage: openImagePreview, suppressImageGraphics: activePreview !== null })] }), (() => {
+                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: setSubagentDetailId, onOpenJobs: openJobsPanel, onOpenFile: openFileActions, onPreviewImage: openImagePreview, suppressImageGraphics: activePreview !== null })] }), (() => {
                         // Gutter mode (settings `dsh-tui.scrollGutter`): the timeline
                         // rail (default), the proportional scrollbar, or nothing. The
                         // slot keeps its 2 columns in both rendered modes (Qwen's

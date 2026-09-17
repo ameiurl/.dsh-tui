@@ -52,7 +52,11 @@ const check = (cond, msg) => {
 
 /** One log line, compressed on its own so the file is a chain of frames. */
 const frame = value => zstdCompressSync(Buffer.from(`${JSON.stringify(value)}\n`, 'utf8'));
-const boot = () => ({ type: 'session/header', time: 1, data: { id: 'synthetic' } });
+// A real log opens with a flat `session` line (no `data` wrapper), and 0.10.2
+// added a first-line check before it calls a log completely read: a fixture
+// that opens with anything else would silently report `complete: false` and
+// `hasPrompt: true`, hiding empty sessions from the cheap path.
+const boot = () => ({ type: 'session', version: 0, id: 'synthetic', createdAt: 1, cwd: CWD });
 const user = text => ({
   type: 'user/message',
   time: 2,

@@ -15,12 +15,12 @@
 ### 1.1 版本
 | 组件 | 位置 | 版本 |
 | --- | --- | --- |
-| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.10.1` |
+| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.10.2` |
 | profile 目录名 | `~/.dsh/profiles/dsh-tui` | （旧版本叫 `tui`） |
 | delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.10.0` |
 | launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.2-rc.1` |
 | tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.2-rc.1` |
-| 补丁构建基线 | `patches/patch-base-version` | `0.10.1` |
+| 补丁构建基线 | `patches/patch-base-version` | `0.10.2` |
 
 **版本关系（重要，别再踩坑）：**
 - dsh-tui `0.10.0-beta` 线与生态 `0.1.1-rc.2` 配套；peer 范围二者相同，可互换 minor。
@@ -28,7 +28,7 @@
   `tuiThemes` 缺失而 boot 失败。
 - delegating 壳只拦「profile 的 major/minor 比壳更旧」；同 minor 的 patch 错位只提示不拦。
   所以 `beta.3`（同 `0.10`）能跑，`0.9.3`（minor 9 < 10）会被拦。
-- 壳 `0.10.0` + profile `0.10.1` 属同 minor patch 错位，壳只提示不拦（实测可跑）。
+- 壳 `0.10.0` + profile `0.10.2` 属同 minor patch 错位，壳只提示不拦（实测可跑）。
 
 ### 1.2 用户级设置（升级后确认仍在）
 | 文件 | 内容 | 作用 |
@@ -52,7 +52,7 @@
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
 > **当前补丁集 = 9 个目标文件**（3 个 F1 + 3 个 F2 + 2 个 F3 + 1 个 F4；
-> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.10.1`。
+> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.10.2`。
 >
 > **resume 浏览器不是 stock**（见 F3）：2026-09-11 曾按「恢复全量会话」做了一版**薄补丁**
 > （`SessionBrowser.js` + `view.js` + `i18n.js`，默认 `allProjects`、去掉 rail 与目录分组），
@@ -162,6 +162,12 @@
   - `…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`（**薄改动**：新增 `LAST_PROMPT_TITLE_CHARS`
     / `isFileAddress()` / `normalizeLastPrompt()` / `lastPromptOf()`，`digestSession()` 的标题选择与
     `recoverFirstPrompt()` 的扫描各改几行）。
+- **0.10.2 的结构锚点（重移植时先看这条）**：上游把 `humanPrompt()` 改成返回
+  `{ text }`（无文本消息如纯图片 = `{ text: undefined }`），空会话判据也从
+  `prompt !== undefined || !head.whole` 换成 `hasHumanMessage || !completeHead`，
+  并要求日志首行 `type === 'session'` 才算"读完"。F4 的过滤建立在这个形状上：
+  标题候选一律读 `human?.text` / `found.text`，而"任何人类消息都算有对话"由
+  `hasHumanMessage` 承担 —— 这正是 F4 要的解耦，所以**不要再按 0.10.1 的字符串形状回改**。
 - **行为**：没有任何 `session/title` 事件的会话，按 Claude Code 的取名顺序取名
   （它的链条是 `customTitle || aiTitle || lastPrompt || summaryHint || firstPrompt`），
   两层 prompt 候选都必须是"**整串不是文件地址**"：
@@ -381,6 +387,7 @@ i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastPromptOf`
 | （非升级）**F2：↑/↓ 历史按当前目录过滤** | `history.js` 加 `cwd` 读写（约 40 行）、`PromptInput.js` 播种/打标、`Chat.js` Ctrl+R 改读过滤版（1 行）；3 个文件都是薄改动 | 写入时给条目打上提交目录，`loadHistory(cwd)` 只返回该目录条目；**旧的无标记条目在当前目录为空时兜底**（升级平滑），有本目录条目后自动让位。`historySeedCwd` 让播种**按目录重播**（workspace picker 能中途换目录），顺带修掉旧补丁"每次 render 都重新播种、会在落盘前抹掉刚提交命令"的竞态。去重按目录分别算。0.10.1 迁移时曾撤回过一版 cwd 过滤（当时 resume 还打算做全量），F3 定为「只看当前目录」后按用户要求恢复。补丁集 6 → 8 个目标；新增 `test-history-cwd.mjs`。`patch-base-version` 仍 0.10.1 |
 | （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（当时 31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
 | （非升级）**F4：/resume 标题 = Claude 取名链 + 地址过滤** | 只动 `digest.js` 一个文件（新增 `LAST_PROMPT_TITLE_CHARS` / `isFileAddress` / `normalizeLastPrompt` / `lastPromptOf`，`digestSession()` 的标题选择与 `recoverFirstPrompt()` 各改几行），UI 一行未碰 | 三版迭代：① 纯地址过滤器 → ② 只照 Claude 链条、读取层不过滤 → ③ **当前版**：Claude 的顺序（标题事件 → **最近一条** prompt → 首条 prompt → 目录名，`normalizeLastPrompt` 折行/trim/200 字符截断）+ 两层 prompt 都跳过文件地址。`hasPrompt` 与标题候选解耦（`digestSession` 用未过滤的 `prompt`，`recoverFirstPrompt` 返回 `hasPrompt`），否则地址型首句的会话会被当成空会话进 `mod+x` 的破坏性清理。回归：161 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-resume-title-chain.mjs`。`patch-base-version` 仍 0.10.1 |
+| **0.10.1 → 0.10.2**（2026-09-17，profile 由应用内 update-restart 升级） | 升级把 **7/9** 个 TUI 目标文件恢复成 stock；上游**真正变化**的只有 2 个：`Chat.js`（63 行：`/jobs` 面板自己接管 Esc/`k`（否则关面板的 Esc 会顺手取消进行中的回合）、`openJobsPanel` 用 `useCallback` 稳定 handler 身份、`LoadedContextPanel` 的折叠 reanchor 移进 `useLayoutEffect`）与 `digest.js`（149 行：`humanPrompt()` 改返回 `{ text }`、`completeHead` 取代 `head.whole` 且要求首行是 `session`、`hasPrompt = hasHumanMessage \|\| !completeHead`、`recoverFirstPrompt()` 开始回报 `hasPrompt`）；其余 7 个（`AssistantToolUseMessage`/`history`/`PromptInput`/`SessionBrowser`/`i18n` 等）**字节未变** → 直接 `cp backup/` 恢复；tool 两包仍 0.1.2-rc.1 且补丁未被覆盖 → 免移植 | `Chat.js` 0 冲突（就那 1 行 Ctrl+R）；`digest.js` 5 处冲突按 §2 F4 解：候选判断全部改走 `.text`（`lastPromptOf`/`opening`），`opening` 只收"有文本且非地址"的候选，而"任何人类消息都算有对话"交给上游的 `hasHumanMessage`，`recoverFirstPrompt()` 继续在 `.text` 上跳过地址并单独回报 `hasPrompt`。**上游收紧暴露的两个坑（已一并修）**：①0.10.2 会校验日志**首行 `type === 'session'`** 才算读完，而 `test-resume-title-chain.mjs` 的夹具从写下那天起就用 `session/header`（真实日志 171 条全是 `session`；0.10.1 不校验所以没暴露）→ 夹具改成真实首行，否则空会话会被误判成"有对话/没读完"，进而骗过 `mod+x` 的空会话清理；②`check-doc-consistency.sh` 里 3 条断言引用的是旧代码形状（`prompt !== undefined \|\| !head.whole` 等），随代码一起上新，并补 5 条锚点（`{ text }` 形状、recovery 跳地址、夹具首行、两份文档的版本号）。回归：**171 条真实会话日志上 patched vs pristine 0.10.2 的 `digestSession()` 逐条相同**（title/source/hasPrompt 全等；无异常、无地址标题）→ 缓存不作废，未动 `SCHEMA_VERSION`。补丁集仍 **9** 个目标，`patch-base-version` = `0.10.2` |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 

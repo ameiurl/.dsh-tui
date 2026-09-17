@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { scheduler } from 'node:timers/promises';
-import { decodeFrame, decodeFrames, decodeTail, readWindow, resyncFrames, walkFrames } from './frames.js';
+import { decodeFrame, decodeTail, readWindow, resyncFrames, walkFrames } from './frames.js';
 /** Head window budget. Eight times the measured worst-case prompt offset. */
 export const HEAD_WINDOW_BYTES = 64 * 1024;
 /** Head frame ceiling — a cost bound independent of how the bytes compress. */
@@ -71,14 +71,14 @@ function isHumanSource(source) {
         return false;
     return source['kind'] === 'user';
 }
-/** The human prompt carried by one log line, in either of its two forms. */
+/** A human message is conversation evidence even when it has no title text. */
 function humanPrompt(line) {
     const data = line['data'];
     if (data === null || typeof data !== 'object')
         return undefined;
     const record = data;
     if (line['type'] === 'user/message') {
-        return isHumanSource(record['source']) ? textOfContent(record['content']) : undefined;
+        return isHumanSource(record['source']) ? { text: textOfContent(record['content']) } : undefined;
     }
     // The inbox splice precedes the durable user/message and reaches the log
     // several frames earlier, which is what keeps the head window small.
@@ -86,16 +86,20 @@ function humanPrompt(line) {
         const inserted = record['inserted'];
         if (!Array.isArray(inserted))
             return undefined;
+        let found = false;
         for (const message of inserted) {
             if (message === null || typeof message !== 'object')
                 continue;
             const entry = message;
             if (entry['role'] !== 'user' || !isHumanSource(entry['source']))
                 continue;
+            found = true;
             const text = textOfContent(entry['content']);
             if (text !== undefined)
-                return text;
+                return { text };
         }
+        if (found)
+            return { text: undefined };
     }
     return undefined;
 }
@@ -152,24 +156,36 @@ function timeOf(line) {
 export function digestSession(path, cwd) {
     const head = readWindow(path, HEAD_WINDOW_BYTES);
     if (head === undefined) {
-        return { title: undefined, hasPrompt: false, model: undefined, label: undefined };
+        return { title: undefined, hasPrompt: true, model: undefined, label: undefined };
     }
-    const headLines = decodeFrames(head.buffer, walkFrames(head.buffer, 0, HEAD_MAX_FRAMES));
+    const headFrames = walkFrames(head.buffer, 0, HEAD_MAX_FRAMES);
+    const headLines = [];
+    let completeHead = head.whole && headFrames.at(-1)?.end === head.buffer.length;
+    for (const frame of headFrames) {
+        const lines = decodeFrame(head.buffer, frame);
+        if (lines === undefined)
+            completeHead = false;
+        else
+            headLines.push(...lines);
+    }
+    completeHead &&= headLines[0]?.['type'] === 'session';
     let prompt;
+    let hasHumanMessage = false;
     let headTitle;
     let label;
     for (const line of headLines) {
-        prompt ??= humanPrompt(line);
+        const human = humanPrompt(line);
+        hasHumanMessage ||= human !== undefined;
+        prompt ??= human?.text;
         headTitle ??= titleOf(line);
         label ??= labelOf(line);
     }
-    // Absence of a prompt only means "empty" when the window actually saw the
-    // whole log. A log too large for the window has a conversation in it by
-    // construction, and erring toward listing it is the safe direction: hiding
-    // a real session is a defect, showing a boot artifact is a nuisance.
-    const hasPrompt = prompt !== undefined || !head.whole;
-    // A head window that already covered the whole log IS the tail.
-    const tail = head.whole ? undefined : readWindow(path, TAIL_WINDOW_BYTES, true);
+    // The byte window, frame limit, decoding and parsing must ALL cover the
+    // log before absence proves emptiness. Unknown is visible, never eligible
+    // for destructive cleanup; title text is not required for image-only input.
+    const hasPrompt = hasHumanMessage || !completeHead;
+    // Only a completely decoded head can stand in for the tail.
+    const tail = completeHead ? undefined : readWindow(path, TAIL_WINDOW_BYTES, true);
     const tailLines = tail === undefined ? headLines : decodeTail(tail);
     let tailTitle;
     let model;
@@ -189,7 +205,7 @@ export function digestSession(path, cwd) {
         hasPrompt,
         model,
         label,
-        ...(!head.whole && tailTitle === undefined ? {} : { titleComplete: true }),
+        ...(!completeHead && tailTitle === undefined ? {} : { titleComplete: true }),
     };
 }
 /** Read exactly one stable range from an already-open snapshot. */
@@ -341,6 +357,7 @@ async function recoverFirstPrompt(path, bytes, signal) {
     }
     try {
         let position = 0;
+        let hasPrompt = false;
         while (position < bytes) {
             signal?.throwIfAborted();
             const page = await forwardPage(handle, position, bytes, signal);
@@ -350,10 +367,14 @@ async function recoverFirstPrompt(path, bytes, signal) {
                 const lines = decodeFrame(page.buffer, frame);
                 if (lines === undefined)
                     return { prompt: undefined, complete: false };
+                if (position === 0 && frame.start === 0 && lines[0]?.['type'] !== 'session') {
+                    return { prompt: undefined, complete: false };
+                }
                 for (const line of lines) {
                     const prompt = humanPrompt(line);
-                    if (prompt !== undefined)
-                        return { prompt, complete: true };
+                    hasPrompt ||= prompt !== undefined;
+                    if (prompt?.text !== undefined)
+                        return { prompt: prompt.text, complete: true, hasPrompt: true };
                 }
             }
             const consumed = page.frames[page.frames.length - 1].end;
@@ -362,7 +383,7 @@ async function recoverFirstPrompt(path, bytes, signal) {
             position += consumed;
             await scheduler.yield();
         }
-        return { prompt: undefined, complete: true };
+        return { prompt: undefined, complete: bytes > 0, ...(bytes > 0 ? { hasPrompt } : {}) };
     }
     finally {
         await handle.close().catch(() => { });
@@ -381,7 +402,7 @@ export async function recoverSessionTitle(path, bytes, signal) {
     return {
         title: opening.prompt === undefined ? undefined : { text: opening.prompt, source: 'prompt' },
         complete: opening.complete,
-        ...(opening.complete ? { hasPrompt: opening.prompt !== undefined } : {}),
+        ...(opening.hasPrompt === undefined ? {} : { hasPrompt: opening.hasPrompt }),
     };
 }
 /** Hash the previous EOF neighborhood before carrying title evidence forward. */

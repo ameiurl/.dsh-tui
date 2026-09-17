@@ -1,5 +1,5 @@
---- original/digest.js	2026-09-02 11:00:17.279576168 +0800
-+++ backup/digest.js	2026-09-14 16:07:31.720906774 +0800
+--- original/digest.js	2026-09-17 14:33:43.607539414 +0800
++++ backup/digest.js	2026-09-17 14:33:43.610297942 +0800
 @@ -19,6 +19,14 @@
   * is the evidence behind {@link SessionTitle.source}, which is why the picker
   * can dim a fallback and explain a name instead of merely displaying one.
@@ -25,7 +25,7 @@
  /** The first text block of a message `content` payload. */
  function textOfContent(content) {
      if (typeof content === 'string')
-@@ -99,6 +110,74 @@
+@@ -103,6 +114,74 @@
      }
      return undefined;
  }
@@ -92,15 +92,15 @@
 +function lastPromptOf(lines) {
 +    for (let at = lines.length - 1; at >= 0; at -= 1) {
 +        const found = humanPrompt(lines[at]);
-+        if (found !== undefined && !isFileAddress(found))
-+            return normalizeLastPrompt(found);
++        if (found?.text !== undefined && !isFileAddress(found.text))
++            return normalizeLastPrompt(found.text);
 +    }
 +    return undefined;
 +}
  /** A `session/title` payload, with the provenance that classifies it. */
  function titleOf(line) {
      if (line['type'] !== 'session/title')
-@@ -144,6 +223,12 @@
+@@ -148,6 +227,12 @@
  /**
   * Read both windows of one session log.
   *
@@ -113,37 +113,29 @@
   * @param path - Absolute artifact path.
   * @param cwd - Working directory, for the last-resort title.
   * @returns The digest. An unreadable log still yields a usable record: the
-@@ -156,17 +241,27 @@
+@@ -169,14 +254,19 @@
+             headLines.push(...lines);
      }
-     const headLines = decodeFrames(head.buffer, walkFrames(head.buffer, 0, HEAD_MAX_FRAMES));
-     let prompt;
+     completeHead &&= headLines[0]?.['type'] === 'session';
+-    let prompt;
 +    let opening;
+     let hasHumanMessage = false;
      let headTitle;
      let label;
      for (const line of headLines) {
--        prompt ??= humanPrompt(line);
-+        const found = humanPrompt(line);
-+        if (found !== undefined) {
-+            // `prompt` is any human input at all, because that is what "this
-+            // session has a conversation" means; `opening` is the first input
-+            // that could also NAME it (an address cannot — isFileAddress).
-+            prompt ??= found;
-+            if (opening === undefined && !isFileAddress(found))
-+                opening = found;
-+        }
+         const human = humanPrompt(line);
++        // Any human message at all — prose, a pasted path, or an image with no
++        // text — is evidence that this log holds a conversation. Only
++        // `opening` has to be able to NAME it, and an address cannot
++        // (isFileAddress): it is input, just not a title.
+         hasHumanMessage ||= human !== undefined;
+-        prompt ??= human?.text;
++        if (opening === undefined && human?.text !== undefined && !isFileAddress(human.text))
++            opening = human.text;
          headTitle ??= titleOf(line);
          label ??= labelOf(line);
      }
-     // Absence of a prompt only means "empty" when the window actually saw the
-     // whole log. A log too large for the window has a conversation in it by
-     // construction, and erring toward listing it is the safe direction: hiding
--    // a real session is a defect, showing a boot artifact is a nuisance.
-+    // a real session is a defect, showing a boot artifact is a nuisance. An
-+    // address-only opening counts here too — it is input, just not a title.
-     const hasPrompt = prompt !== undefined || !head.whole;
-     // A head window that already covered the whole log IS the tail.
-     const tail = head.whole ? undefined : readWindow(path, TAIL_WINDOW_BYTES, true);
-@@ -181,11 +276,17 @@
+@@ -197,11 +287,17 @@
          if (route !== undefined)
              model = route;
      }
@@ -165,7 +157,7 @@
          hasPrompt,
          model,
          label,
-@@ -328,7 +429,15 @@
+@@ -344,7 +440,15 @@
          await handle.close().catch(() => { });
      }
  }
@@ -182,7 +174,7 @@
  async function recoverFirstPrompt(path, bytes, signal) {
      signal?.throwIfAborted();
      let handle;
-@@ -337,32 +446,37 @@
+@@ -353,7 +457,7 @@
      }
      catch {
          signal?.throwIfAborted();
@@ -191,8 +183,7 @@
      }
      try {
          let position = 0;
-+        let sawPrompt = false;
-         while (position < bytes) {
+@@ -362,24 +466,29 @@
              signal?.throwIfAborted();
              const page = await forwardPage(handle, position, bytes, signal);
              if (page === undefined)
@@ -203,17 +194,24 @@
                  if (lines === undefined)
 -                    return { prompt: undefined, complete: false };
 +                    return { prompt: undefined, hasPrompt: undefined, complete: false };
+                 if (position === 0 && frame.start === 0 && lines[0]?.['type'] !== 'session') {
+-                    return { prompt: undefined, complete: false };
++                    return { prompt: undefined, hasPrompt: undefined, complete: false };
+                 }
                  for (const line of lines) {
 -                    const prompt = humanPrompt(line);
--                    if (prompt !== undefined)
--                        return { prompt, complete: true };
+-                    hasPrompt ||= prompt !== undefined;
+-                    if (prompt?.text !== undefined)
+-                        return { prompt: prompt.text, complete: true, hasPrompt: true };
 +                    const found = humanPrompt(line);
 +                    if (found === undefined)
 +                        continue;
-+                    sawPrompt = true;
-+                    if (isFileAddress(found))
++                    hasPrompt = true;
++                    // A path names no conversation: keep looking for a prompt
++                    // that does, while the address still counts as evidence.
++                    if (found.text === undefined || isFileAddress(found.text))
 +                        continue;
-+                    return { prompt: found, hasPrompt: true, complete: true };
++                    return { prompt: found.text, complete: true, hasPrompt: true };
                  }
              }
              const consumed = page.frames[page.frames.length - 1].end;
@@ -223,17 +221,3 @@
              position += consumed;
              await scheduler.yield();
          }
--        return { prompt: undefined, complete: true };
-+        return { prompt: undefined, hasPrompt: sawPrompt, complete: true };
-     }
-     finally {
-         await handle.close().catch(() => { });
-@@ -381,7 +495,7 @@
-     return {
-         title: opening.prompt === undefined ? undefined : { text: opening.prompt, source: 'prompt' },
-         complete: opening.complete,
--        ...(opening.complete ? { hasPrompt: opening.prompt !== undefined } : {}),
-+        ...(opening.complete ? { hasPrompt: opening.hasPrompt === true } : {}),
-     };
- }
- /** Hash the previous EOF neighborhood before carrying title evidence forward. */
