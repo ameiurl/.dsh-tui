@@ -17,7 +17,7 @@
 | --- | --- | --- |
 | `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.10.2` |
 | profile 目录名 | `~/.dsh/profiles/dsh-tui` | （旧版本叫 `tui`） |
-| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.10.0` |
+| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.10.2` |
 | launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.2-rc.1` |
 | tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.2-rc.1` |
 | 补丁构建基线 | `patches/patch-base-version` | `0.10.2` |
@@ -28,7 +28,10 @@
   `tuiThemes` 缺失而 boot 失败。
 - delegating 壳只拦「profile 的 major/minor 比壳更旧」；同 minor 的 patch 错位只提示不拦。
   所以 `beta.3`（同 `0.10`）能跑，`0.9.3`（minor 9 < 10）会被拦。
-- 壳 `0.10.0` + profile `0.10.2` 属同 minor patch 错位，壳只提示不拦（实测可跑）。
+- 壳与 profile 现均为 `0.10.2`（2026-09-17 对齐）。此前是壳 `0.10.0` + profile `0.10.2`：
+  同 minor 的 patch 错位壳只提示不拦（实测可跑），但建议对齐 —— profile 升级后上游会在
+  退出提示里给出命令：`npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@<profile>`
+  （`--legacy-peer-deps` 绕过 npm 12 的 peer 解析崩溃；壳是瘦壳，跳过 peer 解析是安全的）。
 
 ### 1.2 用户级设置（升级后确认仍在）
 | 文件 | 内容 | 作用 |
@@ -388,6 +391,7 @@ i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastPromptOf`
 | （非升级）**文档/代码一致性核对** | 审计出 3 处漂移：①§2 开头「resume 浏览器 = stock…补丁集回到 4 个目标」与 F3 章节直接相反；②`README` 标题写 `all-projects`；③i18n 补丁把**死分支** `session-scope-all` 带成旧文案「全部项目」（stock 是「全部工作目录」） | ①②**改文档**（那句是上一轮加 F3 时的漏改）；③**改代码**——i18n 补丁现在只动 `session-hint-list*` 三个 key，不回带无关 hunk。新增 `check-doc-consistency.sh`（当时 31 项断言，见 §3 Step 8），把"文档描述的就是装着的代码"变成可重跑的检查——**每次升级后都该跑一遍**，因为漂移正是升级时留下的。`patch-base-version` 仍 0.10.1 |
 | （非升级）**F4：/resume 标题 = Claude 取名链 + 地址过滤** | 只动 `digest.js` 一个文件（新增 `LAST_PROMPT_TITLE_CHARS` / `isFileAddress` / `normalizeLastPrompt` / `lastPromptOf`，`digestSession()` 的标题选择与 `recoverFirstPrompt()` 各改几行），UI 一行未碰 | 三版迭代：① 纯地址过滤器 → ② 只照 Claude 链条、读取层不过滤 → ③ **当前版**：Claude 的顺序（标题事件 → **最近一条** prompt → 首条 prompt → 目录名，`normalizeLastPrompt` 折行/trim/200 字符截断）+ 两层 prompt 都跳过文件地址。`hasPrompt` 与标题候选解耦（`digestSession` 用未过滤的 `prompt`，`recoverFirstPrompt` 返回 `hasPrompt`），否则地址型首句的会话会被当成空会话进 `mod+x` 的破坏性清理。回归：161 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-resume-title-chain.mjs`。`patch-base-version` 仍 0.10.1 |
 | **0.10.1 → 0.10.2**（2026-09-17，profile 由应用内 update-restart 升级） | 升级把 **7/9** 个 TUI 目标文件恢复成 stock；上游**真正变化**的只有 2 个：`Chat.js`（63 行：`/jobs` 面板自己接管 Esc/`k`（否则关面板的 Esc 会顺手取消进行中的回合）、`openJobsPanel` 用 `useCallback` 稳定 handler 身份、`LoadedContextPanel` 的折叠 reanchor 移进 `useLayoutEffect`）与 `digest.js`（149 行：`humanPrompt()` 改返回 `{ text }`、`completeHead` 取代 `head.whole` 且要求首行是 `session`、`hasPrompt = hasHumanMessage \|\| !completeHead`、`recoverFirstPrompt()` 开始回报 `hasPrompt`）；其余 7 个（`AssistantToolUseMessage`/`history`/`PromptInput`/`SessionBrowser`/`i18n` 等）**字节未变** → 直接 `cp backup/` 恢复；tool 两包仍 0.1.2-rc.1 且补丁未被覆盖 → 免移植 | `Chat.js` 0 冲突（就那 1 行 Ctrl+R）；`digest.js` 5 处冲突按 §2 F4 解：候选判断全部改走 `.text`（`lastPromptOf`/`opening`），`opening` 只收"有文本且非地址"的候选，而"任何人类消息都算有对话"交给上游的 `hasHumanMessage`，`recoverFirstPrompt()` 继续在 `.text` 上跳过地址并单独回报 `hasPrompt`。**上游收紧暴露的两个坑（已一并修）**：①0.10.2 会校验日志**首行 `type === 'session'`** 才算读完，而 `test-resume-title-chain.mjs` 的夹具从写下那天起就用 `session/header`（真实日志 171 条全是 `session`；0.10.1 不校验所以没暴露）→ 夹具改成真实首行，否则空会话会被误判成"有对话/没读完"，进而骗过 `mod+x` 的空会话清理；②`check-doc-consistency.sh` 里 3 条断言引用的是旧代码形状（`prompt !== undefined \|\| !head.whole` 等），随代码一起上新，并补 5 条锚点（`{ text }` 形状、recovery 跳地址、夹具首行、两份文档的版本号）。回归：**171 条真实会话日志上 patched vs pristine 0.10.2 的 `digestSession()` 逐条相同**（title/source/hasPrompt 全等；无异常、无地址标题）→ 缓存不作废，未动 `SCHEMA_VERSION`。补丁集仍 **9** 个目标，`patch-base-version` = `0.10.2` |
+| （非升级）**全局壳 0.10.0 → 0.10.2 对齐** | 壳是瘦壳（`bin/dsh-tui.js` + `package.json`，逻辑永远来自 profile 副本），所以只按上游提示跑 `npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@0.10.2`；结果 `dsh-tui version` 显示 launcher/profile 双双 0.10.2 | 踩到一个与包无关的坑：**本机 `https_proxy=127.0.0.1:7890` 已不可用**，npm 拿不到新 packument 就退回本地缓存 → 报 `ETARGET No matching version found for …@0.10.2`（而 0.10.2 其实 11:45 就发布了，profile 也是 14:26 用 pnpm 装上的）。直连（`curl --noproxy '*'`）正常，于是用 `env -u https_proxy -u http_proxy -u all_proxy npm install -g …` 绕开代理安装成功。**下次装包报 notarget 先怀疑代理+缓存，别怀疑版本号**。壳升级不动 profile 与 `~/.dsh/profiles/node_modules/@deepseek-ai/*`（tool 两包仍带补丁、9/9 目标 check 通过） |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 

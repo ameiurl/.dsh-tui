@@ -37,7 +37,12 @@ ck() { # ck <description> <shell condition>
 echo "== §1.1 version table =="
 ck "profile dsh-tui = $(node -p "require('$TUI_PKG/package.json').version" 2>/dev/null)" \
    "[ \"\$(node -p \"require('$TUI_PKG/package.json').version\")\" = \"\$(cat '$DIR/patch-base-version')\" ]"
-ck "shell dsh-tui = 0.10.0"      "grep -q '\"version\": \"0.10.0\"' '$GLOBAL/@deepseek-harness-tui/dsh-tui/package.json'"
+SHELL_PKG="$GLOBAL/@deepseek-harness-tui/dsh-tui"
+# The shell is a thin delegator whose version should track the profile it
+# launches; asserting equality catches both a stale shell and a doc table that
+# still names the old one.
+ck "shell dsh-tui = $(node -p "require('$SHELL_PKG/package.json').version" 2>/dev/null)" \
+   "[ \"\$(node -p \"require('$SHELL_PKG/package.json').version\")\" = \"\$(node -p \"require('$TUI_PKG/package.json').version\")\" ]"
 ck "launcher dsh = 0.1.2-rc.1"   "grep -q '\"version\": \"0.1.2-rc.1\"' '$GLOBAL/@deepseek-ai/dsh/package.json'"
 ck "dsh-tool-fs = 0.1.2-rc.1"    "grep -q '\"version\": \"0.1.2-rc.1\"' '$TOOLS/dsh-tool-fs/package.json'"
 ck "dsh-tool-str-replace-editor = 0.1.2-rc.1" \
