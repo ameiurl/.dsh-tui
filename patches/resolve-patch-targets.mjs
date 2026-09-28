@@ -32,7 +32,12 @@ if (!block) {
   console.error('cannot find the TARGETS array in apply-diff-patches.sh');
   process.exit(1);
 }
-const entries = [...block[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+// Comment lines inside the array may quote words; only real entries count.
+const body = block[1]
+  .split('\n')
+  .filter(line => !/^\s*#/.test(line))
+  .join('\n');
+const entries = [...body.matchAll(/"([^"]+)"/g)].map(m => m[1]);
 
 for (const entry of entries) {
   const [rawTarget, backup] = entry.split('|');

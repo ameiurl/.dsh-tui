@@ -1,0 +1,25 @@
+--- original/dsh-adapter.index.js	2026-09-28 20:48:52.062352960 +0800
++++ backup/dsh-adapter.index.js	2026-09-28 20:48:52.065254060 +0800
+@@ -48,6 +48,13 @@
+     expandEditor: Schema.boolean().default(true),
+     smoothStreaming: Schema.boolean().default(true),
+     mermaidDiagrams: Schema.boolean().default(true),
++    // F5: /settings still offers "Auto recap on open" and channel.ts still reads
++    // `ns.value.recapOnOpen !== false`, but 0.11.1 dropped the key from this
++    // Config schema. The write path then refused the field ("Config field
++    // \"recapOnOpen\" is not volatile") and the read could never see `false`, so
++    // auto-recap was stuck on. Declared here — and marked volatile below — so the
++    // row saves again and `recapOnOpen: false` is a real, persisted preference.
++    recapOnOpen: Schema.boolean().default(true),
+     statusBar: Schema.object({
+         compact: Schema.boolean().default(DEFAULT_STATUS_BAR.compact),
+         model: Schema.boolean().default(DEFAULT_STATUS_BAR.model),
+@@ -81,7 +88,7 @@
+ }), [
+     'diffLayout', 'thinkingFold', 'toolBackground', 'scrollGutter', 'pageMargin',
+     'foldTerminalCommand', 'promptSessionLabel', 'expandEditor', 'smoothStreaming',
+-    'mermaidDiagrams', 'effortDefault', 'statusBar', 'whale', 'whaleIdle', 'minimal',
++    'mermaidDiagrams', 'recapOnOpen', 'effortDefault', 'statusBar', 'whale', 'whaleIdle', 'minimal',
+     'lang', 'fullscreen', 'terminalImages', 'shortcuts',
+ ]);
+ /**

@@ -82,6 +82,11 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/screens/SessionSupervisor.js|SessionSupervisor.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
   # F3 hint copy for that screen (no rail, so no ←/→ pane switch to advertise).
   "$TUI_PKG/lib/types/i18n.js|i18n.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  # F5 `recapOnOpen`: 0.11.1 kept the /settings row and the read that consumes
+  # it but dropped the key from the adapter's Config schema, so saving the row
+  # failed with 'not volatile' and auto-recap could never be turned off.
+  # Declared (and marked volatile) again — see CUSTOMIZATIONS.md §2 F5.
+  "$TUI_PKG/lib/types/dsh-adapter/index.js|dsh-adapter.index.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
   # F4 resume titles: a session with no title event is named the way Claude
   # Code names one — its most recent human prompt first (normalized to one
   # line, clipped at 200 characters), its opening prompt second, and the
