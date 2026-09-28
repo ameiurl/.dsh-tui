@@ -204,6 +204,8 @@ ck "apply script is idempotent on diff-applied files (OK-PATCHED)" \
    "grep -q 'OK-PATCHED' '$DIR/apply-diff-patches.sh'"
 ck "apply script aborts when a target cannot be written" \
    "grep -q 'ABORT: cannot write' '$DIR/apply-diff-patches.sh'"
+ck "apply script's closing note names the profile patch (not the dropped settings.yaml)" \
+   "grep -q \"profile's cordis.patch.yml\" '$DIR/apply-diff-patches.sh'"
 ck "every target has a stored diff to fall back on" \
    "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/diffs'/*.patch | wc -l)\" ]"
 # README tells the reader to just run `dsh-patch`; assert the alias really is

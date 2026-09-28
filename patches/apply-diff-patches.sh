@@ -279,5 +279,6 @@ done
 if [[ "$applied" -eq 0 && "$needs_apply" -eq 0 && "$drift" -eq 0 ]]; then
   echo "Nothing to do — every target already matches its patched backup."
 fi
-echo "Done. Theme files, ~/.dsh-tui/theme.json and ~/.dsh/settings.yaml live in"
-echo "user directories and survive upgrades — only the files above need re-patching."
+echo "Done. Theme files, ~/.dsh-tui/theme.json and the profile's cordis.patch.yml"
+echo "live outside node_modules and survive upgrades (0.1.7 dropped ~/.dsh/settings.yaml"
+echo "in favour of that patch file) — only the files above need re-patching."
