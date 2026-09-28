@@ -12,10 +12,9 @@
 #
 # Exit 0 = docs and code agree.
 #
-# Known gap, deliberately NOT checked: README claims a `dsh-patch` shell alias
-# lives in ~/.zshrc / ~/.bashrc, and it does not. Creating the alias was
-# deferred, so this stays a documented-vs-reality difference until that call is
-# made — use the full script path in the meantime.
+# The README's claim that a `dsh-patch` shell alias lives in ~/.zshrc /
+# ~/.bashrc was a documented-vs-reality gap for a while; both files now carry
+# it, so §3 asserts it instead of excusing it.
 
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +23,9 @@ TUI_PKG="$DSH_HOME/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui"
 LIB="$TUI_PKG/lib"
 TOOLS="$DSH_HOME/profiles/node_modules/@deepseek-ai"
 GLOBAL="$(npm root -g 2>/dev/null)"
+BASE_JSON="$DIR/patch-base-versions.json"
+basev() { node -p "require('$BASE_JSON')['$1'] ?? '?'" 2>/dev/null || echo '?'; }
+pkgv()  { node -p "require('$1/package.json').version" 2>/dev/null || echo '?'; }
 
 pass=0; fail=0
 ck() { # ck <description> <shell condition>
@@ -43,10 +45,17 @@ SHELL_PKG="$GLOBAL/@deepseek-harness-tui/dsh-tui"
 # still names the old one.
 ck "shell dsh-tui = $(node -p "require('$SHELL_PKG/package.json').version" 2>/dev/null)" \
    "[ \"\$(node -p \"require('$SHELL_PKG/package.json').version\")\" = \"\$(node -p \"require('$TUI_PKG/package.json').version\")\" ]"
-ck "launcher dsh = 0.1.2-rc.1"   "grep -q '\"version\": \"0.1.2-rc.1\"' '$GLOBAL/@deepseek-ai/dsh/package.json'"
-ck "dsh-tool-fs = 0.1.2-rc.1"    "grep -q '\"version\": \"0.1.2-rc.1\"' '$TOOLS/dsh-tool-fs/package.json'"
-ck "dsh-tool-str-replace-editor = 0.1.2-rc.1" \
-   "grep -q '\"version\": \"0.1.2-rc.1\"' '$TOOLS/dsh-tool-str-replace-editor/package.json'"
+ck "launcher dsh = 0.1.7-rc.2"   "grep -q '\"version\": \"0.1.7-rc.2\"' '$GLOBAL/@deepseek-ai/dsh/package.json'"
+# The tool packages ride the launcher's ecosystem version and are patched
+# separately, so each one is asserted against its own baseline in
+# patch-base-versions.json — the same map apply-diff-patches.sh gates on.
+ck "dsh-tool-fs = $(basev '@deepseek-ai/dsh-tool-fs')" \
+   "[ \"\$(pkgv '$TOOLS/dsh-tool-fs')\" = \"\$(basev '@deepseek-ai/dsh-tool-fs')\" ]"
+ck "dsh-tool-str-replace-editor = $(basev '@deepseek-ai/dsh-tool-str-replace-editor')" \
+   "[ \"\$(pkgv '$TOOLS/dsh-tool-str-replace-editor')\" = \"\$(basev '@deepseek-ai/dsh-tool-str-replace-editor')\" ]"
+ck "patch-base-versions.json parses" "node -e \"require('$BASE_JSON')\""
+ck "patch-base-version == patch-base-versions.json[dsh-tui]" \
+   "[ \"\$(cat '$DIR/patch-base-version')\" = \"\$(basev '@deepseek-harness-tui/dsh-tui')\" ]"
 ck "profile dir is still dsh-tui" "[ -d '$DSH_HOME/profiles/dsh-tui' ]"
 # The version table is the first thing an upgrade invalidates and the last thing
 # anyone remembers to edit: assert the docs actually SAY the baseline this
@@ -58,7 +67,18 @@ ck "README.md source list names dsh-tui@$BASE" \
    "grep -q 'dsh-tui@$BASE' '$DIR/README.md'"
 
 echo "== §1.2 user-level settings =="
-ck "settings.yaml has diffLayout: unified" "grep -q 'diffLayout: unified' '$DSH_HOME/settings.yaml'"
+# dsh 0.1.7 dropped the separate settings document: user settings are patch rows
+# in the profile's own cordis.patch.yml now (what /settings writes). diffLayout
+# is the one F1 depends on — `auto` goes side-by-side on wide terminals and the
+# Claude Code unified rendering never shows.
+PROFILE_PATCH="$DSH_HOME/profiles/dsh-tui/cordis.patch.yml"
+ck "profile patch sets dsh-tui.diffLayout: unified" \
+   "grep -q 'diffLayout: unified' '$PROFILE_PATCH'"
+ck "profile patch still restates the dsh-tui bundle config (it REPLACES it)" \
+   "grep -q 'effort: max' '$PROFILE_PATCH' && grep -q 'provider: deepseek-official' '$PROFILE_PATCH'"
+ck "the removed settings.yaml is gone (not silently unread)" \
+   "[ ! -f '$DSH_HOME/settings.yaml' ]"
+ck "legacy settings kept for reference" "[ -f '$DSH_HOME/settings.yaml.imported' ]"
 ck "theme.json selects claude-code"        "grep -q 'claude-code' '$HOME/.dsh-tui/theme.json'"
 ck "themes/claude-code.json exists"        "[ -f '$HOME/.dsh-tui/themes/claude-code.json' ]"
 ck "themes/claude-code-light.json exists"  "[ -f '$HOME/.dsh-tui/themes/claude-code-light.json' ]"
@@ -68,23 +88,56 @@ A="$LIB/types/components/messages/AssistantToolUseMessage.js"
 ck "DIFF_BODY_MAX_LINES = Infinity"   "grep -q 'DIFF_BODY_MAX_LINES = Infinity' '$A'"
 ck "NEW_FILE_DIFF_MAX_LINES = 11"     "grep -q 'NEW_FILE_DIFF_MAX_LINES = 11' '$A'"
 ck "upstream hoverTint branch deleted" "! grep -q 'hoverTint' '$A'"
+# F1's tool half: without these two packages the renderer still draws a diff,
+# but with no line numbers (numbered=false) and str_replace shows no card at
+# all. They were silently missing between the 0.10.2 upgrade and the
+# 0.1.5-rc.2 re-port, so they get their own anchors.
+TFS="$TOOLS/dsh-tool-fs/lib/index.js"
+TSR="$TOOLS/dsh-tool-str-replace-editor/lib/index.js"
+ck "tool-fs: hunks carry 1-based oldStart/newStart" \
+   "grep -q 'oldStart: hunk.oldStart' '$TFS' && grep -q 'newStart: hunk.newStart' '$TFS'"
+ck "tool-fs: write/edit presentationMeta forwards them" \
+   "grep -q 'map(({ path, oldText, newText, oldStart, newStart })' '$TFS'"
+ck "str-replace: computeHunkDiffs present" "grep -q 'function computeHunkDiffs' '$TSR'"
+ck "str-replace: result diff card present"  "grep -q 'presentResult(args, result)' '$TSR'"
+# The tool patch must be exactly the line-number feature: a stale backup built
+# on 0.1.2-rc.1 would drag removed upstream work (scope-aware prompts, the
+# REMEDIES refactor) back in.
+ck "tool-fs patch carries no upstream rollback" \
+   "! grep -qE '^[-+].*(scope-aware|REMEDIES)' '$DIR/diffs/dsh-tool-fs.index.js.patch'"
 
 echo "== §2 F2 cwd-scoped history =="
 ck "history.js: loadHistory(cwd) filters"  "grep -q 'export function loadHistory(cwd)' '$LIB/types/history.js'"
 ck "history.js: appendHistory(text, cwd)"  "grep -q 'export function appendHistory(text, cwd)' '$LIB/types/history.js'"
+# 0.11.x added loadHistoryOldestFirst() for the composer's walk; the fork scopes
+# BOTH reads through one helper so Ctrl+R and ↑/↓ can never disagree.
+ck "history.js: loadHistoryOldestFirst(cwd) filters"    "grep -q 'export function loadHistoryOldestFirst(cwd)' '$LIB/types/history.js'"
+ck "history.js: one scoping helper serves both reads"    "grep -q 'function scopeToCwd(entries, cwd)' '$LIB/types/history.js'"
 ck "PromptInput.js: historySeedCwd re-seed" "grep -q 'historySeedCwd' '$LIB/types/components/PromptInput.js'"
-ck "PromptInput.js: seeds with channel.cwd" "grep -q 'loadHistory(channel.cwd)' '$LIB/types/components/PromptInput.js'"
+ck "PromptInput.js: seeds with channel.cwd" "grep -q 'loadHistoryOldestFirst(channel.cwd)' '$LIB/types/components/PromptInput.js'"
+ck "PromptInput.js: submits tagged with channel.cwd"    "grep -q 'appendHistory(text, channel.cwd)' '$LIB/types/components/PromptInput.js'"
 ck "Chat.js: Ctrl+R reads channel.cwd"      "grep -q 'loadHistory(channel.cwd)' '$LIB/types/screens/Chat.js'"
 
-echo "== §2 F3 resume browser =="
-S="$LIB/types/screens/SessionBrowser.js"
-ck "SessionBrowser.js: no workspace rail"     "! grep -q 'workspaceRail' '$S'"
-ck "SessionBrowser.js: allProjects pinned false" "grep -q 'allProjects: false' '$S'"
+echo "== §2 F3 resume screen (sessionSupervisor) =="
+# 0.11.x deleted screens/SessionBrowser.js: /resume is the sessionSupervisor
+# screen (workspace rail + session pane). The fork hides the rail and pins the
+# pane to the terminal's own directory, so the anchors moved with it.
+SUP="$LIB/types/screens/sessionSupervisor/useSessionSupervisor.js"
+SS="$LIB/types/screens/SessionSupervisor.js"
+ck "old SessionBrowser target is gone upstream" "[ ! -f '$LIB/types/screens/SessionBrowser.js' ]"
+ck "patch set follows it to sessionSupervisor" \
+   "! grep -E '^  \"[^\"]*SessionBrowser' '$DIR/apply-diff-patches.sh' && grep -q 'sessionSupervisor/useSessionSupervisor.js' '$DIR/apply-diff-patches.sh'"
+ck "hook: rail is never rendered"          "grep -q 'const railVisible = false' '$SUP'"
+ck "hook: rows matched by directory"    "grep -q 'filter(session => samePath(session.cwd, channel.cwd))' '$SUP'"
+ck "hook: the list owns the keyboard"      "grep -q \"useState('list')\" '$SUP'"
+ck "hook: no rail-picked selection state left" \
+   "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
+ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' '$SS'"
 ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$LIB'"
-# The doc says the i18n patch is exactly the three hint keys; a stray hunk here
-# (e.g. resurrecting the old `session-scope-all` wording) is drift, not a fix.
-ck "i18n diff touches only session-hint-list*" \
-   "! grep -E \"^[-+].*'session-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'session-hint-list\""
+# The doc says the i18n patch is exactly the one hint key this screen renders
+# (no rail, so no ←/→ pane switch to advertise). A stray hunk is drift.
+ck "i18n diff touches only supervisor-hint-list" \
+   "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-hint-list\""
 
 echo "== §2 F4 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"
@@ -135,6 +188,28 @@ ck "TARGETS count == diffs/ count" \
 ck "diffs/ names match backup/ names" \
    "diff <(node '$DIR/resolve-patch-targets.mjs' | awk -F'|' '{print \$2}' | sort) <(ls '$DIR/diffs' | sed 's/\.patch\$//' | sort)"
 ck "apply script parses (bash -n)"   "bash -n '$DIR/apply-diff-patches.sh'"
+ck "apply script breaks pnpm hardlinks before writing" \
+   "grep -q 'cp --remove-destination' '$DIR/apply-diff-patches.sh'"
+ck "apply script gates versions per target (NEEDS-REPORT)" \
+   "grep -q 'NEEDS-REPORT' '$DIR/apply-diff-patches.sh'"
+ck "apply script reads the per-package baseline map" \
+   "grep -q 'patch-base-versions.json' '$DIR/apply-diff-patches.sh'"
+# An upgrade that moves the code no longer leaves the set un-applied: the stored
+# unified diff is applied to what is installed (fuzz 3), syntax-gated, stamped.
+ck "apply script applies diffs directly (patch --fuzz=3)" \
+   "grep -q 'patch -p0 --fuzz=3' '$DIR/apply-diff-patches.sh'"
+ck "apply script reports PATCHED-DRIFT for a moved baseline" \
+   "grep -q 'PATCHED-DRIFT' '$DIR/apply-diff-patches.sh'"
+ck "apply script is idempotent on diff-applied files (OK-PATCHED)" \
+   "grep -q 'OK-PATCHED' '$DIR/apply-diff-patches.sh'"
+ck "apply script aborts when a target cannot be written" \
+   "grep -q 'ABORT: cannot write' '$DIR/apply-diff-patches.sh'"
+ck "every target has a stored diff to fall back on" \
+   "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/diffs'/*.patch | wc -l)\" ]"
+# README tells the reader to just run `dsh-patch`; assert the alias really is
+# installed in both shells instead of trusting the doc.
+ck "dsh-patch alias in ~/.zshrc"  "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.zshrc'"
+ck "dsh-patch alias in ~/.bashrc" "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.bashrc'"
 
 echo
 if [ "$fail" -eq 0 ]; then

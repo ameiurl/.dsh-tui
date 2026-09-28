@@ -18,9 +18,9 @@ import { homeDir } from '../utils/paths.js';
 import { cleanRenderText, cleanScalarText } from '../dsh-adapter/sanitize.js';
 import { deriveModelGroups, modelPickerLanding, recentCatalogModels, RECENTS_GROUP_PROVIDER, } from '../modelGroups.js';
 import { readModelRecents, recordModelUse } from '../modelRecents.js';
-import { sessionCwdMatches } from '../dsh-adapter/channel.js';
 import { TuiDialogStore } from '../dsh-adapter/dialogs.js';
 import { TuiStatusStore } from '../dsh-adapter/status.js';
+import { ActivityStore, useActivity } from '../dsh-adapter/activity-store.js';
 import { runProviderWizard } from '../dsh-adapter/providerWizard.js';
 import { ApprovalStore } from '../dsh-adapter/approvals.js';
 import { AskUserQuestionPanel } from '../components/questions/AskUserQuestionPanel.js';
@@ -52,7 +52,7 @@ import { PluginSceneBoundary } from '../components/PluginSceneBoundary.js';
 import { PluginStatusViewBoundary } from '../components/PluginStatusViewBoundary.js';
 import { ImagePreviewOverlay } from '../components/ImagePreviewOverlay.js';
 import { SkillsPicker, SkillsPickerLoading } from '../components/SkillsPicker.js';
-import { SessionBrowser } from './SessionBrowser.js';
+import { SessionSupervisor } from './SessionSupervisor.js';
 import { SessionTree } from './SessionTree.js';
 import { Settings } from './Settings.js';
 import { WorkspacePicker } from '../components/WorkspacePicker.js';
@@ -89,7 +89,8 @@ import instances from '../ink/instances.js';
 import { useAnimationFrame } from '../ink/hooks/use-animation-frame.js';
 import { useExternalVersion } from '../hooks/useExternalVersion.js';
 import { TrajectoryScene } from './TrajectoryScene.js';
-import { AgentView } from './AgentView.js';
+import { resumeFailureText } from '../sessions/resumeFailure.js';
+import { markHomeSeen } from '../homePrefs.js';
 import { extendTrajectory, projectWave } from '../dsh-adapter/trajectory/index.js';
 import { miniWakeWidth } from '../components/trajectory/MiniWake.js';
 import { readTrajectorySeen, writeTrajectorySeen } from '../trajectoryPrefs.js';
@@ -199,12 +200,14 @@ let fallbackApprovalStore;
  */
 let fallbackDialogStore;
 let fallbackStatusStore;
+/** Standalone mounts (tests, bare embeds) without the composition root's store. */
+let fallbackActivityStore;
 /** Identity of one caret-preview dismissal: the token (its title) on the
  *  image, so the same image staged twice is dismissed per token. */
 function peekKey(image, title) {
     return `${title ?? ''} ${image.id}`;
 }
-export function Chat({ channel, questionStore, approvalStore, extensionDialogs, extensionStatus, extensionShortcuts, themeHost, onExit, onUpdate, onRestart, fullscreen = false, trajectorySeen: trajectorySeenProp, injectControllerRef, renderScene, }) {
+export function Chat({ channel, questionStore, approvalStore, extensionDialogs, extensionStatus, activityStore, extensionShortcuts, themeHost, onExit, onUpdate, onRestart, fullscreen = false, trajectorySeen: trajectorySeenProp, injectControllerRef, promptControllerRef: promptControllerRefProp, renderScene, openHomeOnBoot, }) {
     const writeRaw = React.useContext(TerminalWriteContext);
     // Re-render whenever the channel mutates; rows/status are read fresh below.
     // DEFAULT lane on purpose (useExternalVersion): the channel version bumps
@@ -237,6 +240,11 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // Plugin status contributions: text keys join into one line; bounded rich
     // views keep their own rows immediately above the prompt.
     const statusContributions = extensionStatus ?? (fallbackStatusStore ??= new TuiStatusStore());
+    // The working line: the working-activity plugin's published value for THIS
+    // session, read from its session projection. No projection value (plugin
+    // absent, or nothing published yet) simply means the classic spinner below.
+    const activityValues = activityStore ?? (fallbackActivityStore ??= new ActivityStore());
+    const workingActivity = useActivity(activityValues, channel.sessionId);
     const subscribeStatus = React.useCallback((listener) => statusContributions.subscribe(listener), [statusContributions]);
     const statusEntries = React.useSyncExternalStore(subscribeStatus, () => statusContributions.getSnapshot());
     const statusViews = React.useSyncExternalStore(subscribeStatus, () => statusContributions.getViewSnapshot());
@@ -358,18 +366,33 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     };
     /** `/skills` 技能目录（issue #204）：null = 注册表快照在途。 */
     const [skillsList, setSkillsList] = React.useState(null);
-    /** `/resume` opens the session browser, a screen rather than a panel. It
-     *  owns its own selection, filters and keyboard — Chat only opens it. */
-    const [browserOpen, setBrowserOpen] = React.useState(false);
+    /**
+     * The session supervisor — the ONE screen behind `/resume`, `/agentview`,
+     * `/home`, `/bg` and the composer's 🏠 button.
+     *
+     * Those were three screens over one domain (a workspace rail here, a
+     * search surface there, a live-status overview somewhere else), which is why
+     * each new session feature needed patching into all three and why the
+     * three disagreed about what switching a session even does. There is now a
+     * single surface and a single runtime behind every entry point: this
+     * terminal hosts several sessions, leaving one parks it rather than ending
+     * it, and a session another terminal holds is visible but not enterable.
+     *
+     * Seeded from the host's one-shot landing decision (`openHomeOnBoot`): the
+     * first ordinary launch of an installation lands here instead of on a blank
+     * conversation, because that is the launch where "which project am I working
+     * on" has not been answered yet. Every later launch starts on the chat
+     * screen, and the screen stays reachable.
+     */
+    const [supervisorOpen, setSupervisorOpen] = React.useState(openHomeOnBoot === true);
     /** `/tree` opens the session family tree (pi's Session Tree): every rewind
      *  fork stitched back onto the message it diverged from, hover previews,
-     *  and per-node rewind/fork/adopt actions. Like the browser, a screen. */
+     *  and per-node rewind/fork/adopt actions. Like the supervisor, a screen. */
     const [treeOpen, setTreeOpen] = React.useState(false);
-    /** `/agentview` and `/bg` open the agent view — a screen like the browser:
-     *  it owns selection, the dispatch input and every key while up. */
-    const [agentViewOpen, setAgentViewOpen] = React.useState(false);
-    /** The session backgrounded when the view opened via ←/`/bg` (the "Esc
-     *  returns to that conversation" return target), cleared on close. */
+    /**
+     * The session backgrounded when the screen opened via ←/`/bg` (the "Esc
+     *  returns to that conversation" return target), cleared on close.
+     */
     const [agentViewReturnId, setAgentViewReturnId] = React.useState(undefined);
     /** Live agent-view rows: the prompt footer's "← N agents" hint reads the
      *  needs-input count from here (cached snapshot in the channel). The
@@ -378,16 +401,16 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const EMPTY_AGENT_VIEW_ROWS = [];
     const agentViewRows = React.useSyncExternalStore(listener => channel.subscribeAgentView?.(listener) ?? (() => { }), () => channel.agentViewRows?.() ?? EMPTY_AGENT_VIEW_ROWS);
     const backgroundAgentsNeedingInput = agentViewRows.filter(row => row.status === 'needs-input' && !row.current).length;
-    /** Background the attached session and open the agent view
+    /** Background the attached session and open the supervisor
      *  (`/bg`, `/background`, and ← on an empty prompt all land here). The
-     *  backgrounded session becomes the view's return target (final Esc
+     *  backgrounded session becomes the screen's return target (final Esc
      *  attaches back to it). */
     const backgroundToAgentView = React.useCallback(() => {
         void channel.backgroundCurrent().then((result) => {
             if (result.ok) {
                 setAgentViewReturnId(result.backgroundedSessionId);
                 agentViewOpenSessionRef.current = channel.agentId;
-                setAgentViewOpen(true);
+                setSupervisorOpen(true);
             }
         });
     }, [channel]);
@@ -405,6 +428,10 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const [themeName, setTheme] = useTheme();
     const { rows: terminalRows } = useTerminalSize();
     const [showAllMessages, setShowAllMessages] = React.useState(false);
+    /** Scope the fold to this question: an aborted ask can promote its queued
+     *  successor without ever publishing an idle (null) snapshot. */
+    const [minimizedQuestionKey, setMinimizedQuestionKey] = React.useState(null);
+    const questionMinimized = questionSnapshot !== null && minimizedQuestionKey === questionSnapshot.key;
     /** Fold state for the GoalTodoPanel todo section (ctrl/cmd+q or click). */
     const [todoCollapsed, setTodoCollapsed] = React.useState(false);
     const [thinkingVisible, setThinkingVisible] = React.useState(true);
@@ -615,6 +642,34 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         });
         setSceneOpen(true);
     }, []);
+    /**
+     * Leave the session supervisor for the conversation.
+     *
+     * The one-shot landing preference is written here rather than at boot: a
+     * process that dies before the user ever sees the screen (a config error, a
+     * crash during the first render) must not burn the installation's only
+     * first-launch landing. Writing on the way OUT means "the user has seen it".
+     *
+     * Leaving also honours `/bg`'s return target. `/background` moved the
+     * session the user was in to the background and opened this screen; a plain
+     * Esc out of it re-attaches to that session instead of silently leaving them
+     * on the fresh one, which is what "go back to what I was doing" means. Any
+     * explicit mount inside the screen clears the target first, so this can
+     * never undo a choice the user just made.
+     */
+    const closeHome = React.useCallback(() => {
+        suppressLogoIntroRef.current = true;
+        markHomeSeen();
+        const returnTo = agentViewReturnId;
+        setAgentViewReturnId(undefined);
+        setSupervisorOpen(false);
+        if (returnTo !== undefined && returnTo !== channel.agentId) {
+            void channel.resumeTo(returnTo).then((result) => {
+                if (result.ok)
+                    repaintTranscript();
+            }).catch(() => undefined);
+        }
+    }, [agentViewReturnId, channel, repaintTranscript]);
     /** The startup summary gives way to transcript rows after the first local command or message. */
     const loadedContextVisible = channel.rows.length === 0 && channel.loadedContext !== undefined;
     /** Startup context panel: collapsed by default, toggled with Ctrl+P. */
@@ -851,12 +906,121 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const exitTimerRef = React.useRef(null);
     // Live view into the prompt's text for the Ctrl+C rule (clears text when
     // non-empty; the double-press exit only arms on an empty input).
-    const promptControllerRef = React.useRef(null);
+    const ownPromptControllerRef = React.useRef(null);
+    const promptControllerRef = promptControllerRefProp ?? ownPromptControllerRef;
+    /**
+     * Owner of the unsent draft. Every screen this component renders INSTEAD of
+     * the conversation (the session screen, the tree, settings, the jobs and
+     * subagent panels, the trajectory scene) unmounts the composer, and the
+     * composer keeps its text in local state — so without this the half-written
+     * prompt died on the way in. The slot lives here, outlives that unmount, and
+     * is dropped the moment the attached session changes so no draft can follow
+     * the user into a different conversation.
+     */
+    const promptDraftRef = React.useRef({ current: null });
+    /**
+     * Latest channel for the unmount release below: that effect must not re-run
+     * on a channel identity change, yet its cleanup must release against the
+     * channel of the last render.
+     */
+    const channelRef = React.useRef(channel);
+    channelRef.current = channel;
+    /**
+     * Release the staged images a WAITING snapshot alone owns.
+     *
+     * While a draft waits in the slot for the composer to remount, the snapshot
+     * is the only owner of the capabilities behind its `[Image #N]` tokens. If
+     * Chat itself goes away first (leaving an early-return screen by exiting the
+     * TUI), nothing would ever restore or discard them — the session's
+     * 128-entry FIFO would evict live entries instead. The `hasStagedImage`
+     * guard keeps a capability the channel already recycled a no-op; both calls
+     * are idempotent.
+     *
+     * Scope, deliberately narrow (review round 7): a capability a QUEUED message
+     * still references (`channel.pending`) is never revoked here. The real
+     * double-hold path is paste an image → queue the draft with Tab while the
+     * model works → recall that line from input history with ↑ (same stageId
+     * rebound to the draft) → park the composer. Delivery resolves its refs from
+     * the enqueue-time capture, so a late revoke would only bite a host that
+     * re-resolves them afterwards — this keeps the rule identical to
+     * `stageIdIsRetained` instead of relying on that.
+     *
+     * A composer that is still MOUNTED when Chat unmounts is NOT covered: React
+     * runs this parent cleanup BEFORE the child's, so the child then writes its
+     * draft into the now-dead ref and those ids ride the channel's lifetime out
+     * (the #942 review's remaining P2). Neither unmount path loses anything
+     * user-visible — the channel dies with them.
+     */
+    React.useEffect(() => {
+        return () => {
+            const snapshot = promptDraftRef.current.current;
+            promptDraftRef.current.current = null;
+            if (snapshot === null)
+                return;
+            const queued = new Set();
+            for (const item of channelRef.current.pending) {
+                // `?? []`: a foreign/embedded host may hand us a pending entry without
+                // images, and a throw inside an unmount cleanup escapes into the exit
+                // path — every other reader of this field guards it the same way.
+                for (const image of item.images ?? [])
+                    queued.add(image.stageId);
+            }
+            for (const [, stageId] of snapshot.images) {
+                if (queued.has(stageId))
+                    continue;
+                if (channelRef.current.hasStagedImage?.(stageId) === true) {
+                    channelRef.current.discardStagedImage(stageId);
+                }
+            }
+        };
+    }, []);
+    const draftSessionId = channel.agentId;
+    /** Session the effect below last reconciled against; a change is a switch. */
+    const draftSessionRef = React.useRef(draftSessionId);
+    /**
+     * The session a fill Chat itself requested belongs to, if one is in flight.
+     *
+     * A rewind's restored message arrives in the same commit that replaces the
+     * session, and it belongs to the NEW binding — the user picked it. The
+     * composer cannot tell, so Chat says so here, at the two call sites that ask
+     * for a fill.
+     *
+     * Keyed by the session id rather than a bare flag, so it can only ever excuse
+     * the switch it was written for. Do NOT clear it when the composer consumes
+     * the fill: a child's layout effects run before the parent's, so the fill is
+     * consumed in the very commit this effect judges, and clearing it there would
+     * wipe the message the user just got back.
+     */
+    const pendingFillRef = React.useRef(null);
+    /**
+     * Drop the composer's text when the session underneath it is replaced.
+     *
+     * A LAYOUT effect, not a passive one: the clear has to land in the commit
+     * that swaps the session. A passive effect is flushed later, and anything
+     * typed in between (the tree's hand-off, a fast user) would be wiped with the
+     * old conversation's text. Which DRAFT the slot keeps is a separate question,
+     * answered by the snapshot's owner fields.
+     */
+    React.useLayoutEffect(() => {
+        if (draftSessionRef.current === draftSessionId)
+            return;
+        draftSessionRef.current = draftSessionId;
+        // A stored draft can only belong to the conversation being replaced: the
+        // composer is the one that writes it, and it writes it on the way out.
+        promptDraftRef.current.current = null;
+        if (pendingFillRef.current === draftSessionId) {
+            pendingFillRef.current = null;
+            return;
+        }
+        promptControllerRef.current?.clear();
+    }, [draftSessionId]);
     const previewGallery = activePreview === null ? [] : activePreview.peek
         ? promptControllerRef.current?.previewImages?.() ?? [activePreview]
         : overlay.kind === 'image-preview' ? overlay.gallery ?? [activePreview] : [];
+    // Peek entries are rebuilt from the prompt every render: match by
+    // attachment id + token title, not facade identity.
     const previewIndex = activePreview?.peek
-        ? previewGallery.findIndex(entry => entry.image === activePreview.image && entry.title === activePreview.title)
+        ? previewGallery.findIndex(entry => entry.image.id === activePreview.image.id && entry.title === activePreview.title)
         : overlay.kind === 'image-preview' ? overlay.index ?? 0 : -1;
     const stepPreview = (delta) => {
         if (!activePreview?.peek) {
@@ -943,7 +1107,11 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // fullscreen (<AlternateScreen> supplies mouse tracking); a no-op
     // subscription in inline mode, where selection belongs to the terminal.
     // The copy clears the highlight and posts a transient notification.
-    useCopyOnSelect(text => channel.notify(t('copied-chars', { n: text.length }), { timeoutMs: 1500 }));
+    useCopyOnSelect(text => channel.notify(t('copied-chars', { n: text.length }), { timeoutMs: 1500 }), 
+    // Stale-selection refusal: the highlighted rows were replaced in place
+    // (streaming overwrite), so nothing was copied — say why instead of
+    // letting the highlight vanish silently.
+    () => channel.notify(t('copy-refused-stale'), { timeoutMs: 2500 }));
     const { clearSelection: clearMouseSelection, hasSelection: hasMouseSelection } = useSelection();
     React.useEffect(() => {
         if (!channel.working || !terminalFocused)
@@ -1611,27 +1779,31 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                 }
                 return true;
             }
-            case 'resume': {
-                setHelpOpen(false);
-                // The browser opens immediately and loads its own list. Waiting for
-                // the listing here would make `/resume` feel slower the more history
-                // a project has, which is exactly backwards.
-                setBrowserOpen(true);
-                return true;
-            }
+            case 'resume':
+            /**
+             * `/resume`, `/home` and `/agentview` are one screen.
+             *
+             * They were three implementations of one domain and drifted apart: the
+             * same session could be listed by all three, each with its own selection
+             * model and its own idea of what opening one does. Keeping the three
+             * commands is about muscle memory, not about three surfaces — every one
+             * of them lands here, on the same runtime.
+             */
+            case 'home':
             case 'agentview': {
-                // The agent view shows one screen for every session. It opens
-                // immediately; the view reads its own rows (live + persisted).
                 setHelpOpen(false);
+                // The screen opens immediately and loads its own list. Waiting for the
+                // listing here would make it feel slower the more history a project
+                // has, which is exactly backwards.
                 agentViewOpenSessionRef.current = channel.agentId;
-                setAgentViewOpen(true);
+                setSupervisorOpen(true);
                 return true;
             }
             case 'bg':
             case 'background': {
                 // `/background`: the attached session moves to the background
                 // (it keeps running in this process), the terminal lands on a fresh
-                // session, and the agent view opens on top.
+                // session, and the supervisor opens on top.
                 setHelpOpen(false);
                 backgroundToAgentView();
                 return true;
@@ -2256,6 +2428,10 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const performRewind = async (row, mode = null) => {
         const text = await channel.rewindTo(row, mode);
         if (text !== null) {
+            // The restored message belongs to the binding `rewindTo` just created,
+            // not to the one it replaced: it is the user's choice, and the switch
+            // effect must not treat it as the old conversation's leftovers.
+            pendingFillRef.current = String(channel.agentId);
             // Put the restored message back in the prompt for re-editing.
             setHistoryFill(text);
             channel.notify(t('rewind-done'));
@@ -2460,18 +2636,15 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             || overlay.kind === 'tips'
             || (recap !== null && (!recap.auto || recap.expanded)))
             return;
-        // Same for the session browser: it renders instead of the conversation,
-        // so every key belongs to it — including the plain letters that drive its
-        // search box, which Chat would otherwise route into the prompt.
-        if (browserOpen)
-            return;
-        // Same for the session tree: plain letters drive its search, clicks and
-        // Enter drive its action menu.
+        // The session tree owns the whole terminal while it is up: plain letters
+        // drive its search, clicks and Enter drive its action menu.
         if (treeOpen)
             return;
-        // The agent view is another whole-screen surface:
-        // its dispatch input owns every printable key.
-        if (agentViewOpen)
+        // The session supervisor owns the whole terminal while it is up: its rail
+        // and session list bind ↑/↓/Enter/Tab/Esc, its filter box takes the plain
+        // letters that would otherwise reach the prompt, and the directory picker
+        // and menus it opens are its own modal layers.
+        if (supervisorOpen)
             return;
         // Same for the settings screen: plain letters (s save / d discard) and
         // the field draft editor belong to it alone.
@@ -2575,8 +2748,17 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         // keyboard while one is pending (the panel's own useInput handles
         // ↑/↓/Space/Tab/Enter/Esc; the prompt input is suspended, so nothing
         // else should see these keys).
-        if (questionSnapshot !== null || approvalSnapshot !== null || dialogSnapshot !== null)
+        if (approvalSnapshot !== null || dialogSnapshot !== null)
             return;
+        if (questionSnapshot !== null) {
+            // Only transcript navigation belongs here. The mounted questionnaire
+            // owns fold/expand keys, including when it interrupts another screen.
+            if (questionMinimized && !isSticky && (isPlainReturnInput(input, key) || key.end)) {
+                handle?.scrollToBottom();
+                event.stopImmediatePropagation();
+            }
+            return;
+        }
         const returnCandidate = isPlainReturnInput(input, key);
         const returnNow = Date.now();
         const plainReturn = returnCandidate && returnNow - lastModalEnterAtRef.current >= 80;
@@ -3365,9 +3547,9 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     const approvalPanelNode = approvalSnapshot !== null ? (_jsx(ApprovalPanel, { approval: approvalSnapshot, background: approvalSnapshot.agentId !== channel.agentId, onDecide: outcome => approvals.decide(outcome) }, approvalSnapshot.key)) : null;
     const questionPanelNode = questionSnapshot !== null ? (_jsx(AskUserQuestionPanel, { question: questionSnapshot.question, position: questionSnapshot.position, total: questionSnapshot.total, answered: questionSnapshot.answered, initialDraft: questionSnapshot.draft, onAnswer: selection => questionStore.answerCurrent(selection), onCancel: () => questionStore.cancelCurrent(), onBack: questionSnapshot.canGoBack
             ? draft => questionStore.backCurrent(draft)
-            : undefined }, questionSnapshot.key)) : null;
+            : undefined, collapsed: questionMinimized, onExpand: () => setMinimizedQuestionKey(null), onToggleFold: () => setMinimizedQuestionKey(previous => previous === questionSnapshot.key ? null : questionSnapshot.key), fullscreen: fullscreen }, questionSnapshot.key)) : null;
     const interruptPanel = approvalPanelNode ?? questionPanelNode;
-    const screenOpen = channel.pluginScene !== undefined || browserOpen || settingsOpen
+    const screenOpen = channel.pluginScene !== undefined || supervisorOpen || settingsOpen
         || subagentDetailId !== null || subagentDashboardOpen || sceneOpen;
     if (interruptPanel !== null && screenOpen) {
         const node = (_jsx(Box, { flexDirection: "column", width: "100%", paddingX: 1, children: interruptPanel }));
@@ -3394,37 +3576,62 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
             }, children: renderScene ? renderScene(pluginScene.id, channel) : _jsxs(Text, { children: ["Scene unavailable: ", pluginScene.id] }) }));
         return fullscreen ? node : _jsx(AlternateScreen, { children: node });
     }
-    // The agent view is a screen like the browser: it REPLACES the
-    // conversation. Every session keeps running behind it — including the
-    // attached one mid-turn.
-    if (agentViewOpen) {
-        const view = (_jsx(AgentView, { channel: channel, home: homeDir(), approval: approvalSnapshot, onApprove: outcome => approvals.decide(outcome), returnSessionId: agentViewReturnId, onClose: () => {
-                // The transcript tree remounts on close: never replay the whale
-                // intro there, and when the session changed INSIDE the view
-                // (attach / backgrounded dispatch), repaint the fresh transcript
-                // from the top like `/new` does.
+    /**
+     * The session supervisor: a screen in the same sense as the tree — an early
+     * return after every hook above has run, so there is no transcript
+     * underneath to repaint or bled through.
+     *
+     * It sits ABOVE the session tree because it is the surface a launch can
+     * start on (`openHomeOnBoot`): a first launch has no conversation to come
+     * back to, and every action it offers either mounts a session (which closes
+     * it) or starts a new one.
+     *
+     * Behind it, every session this terminal hosts keeps running — that is the
+     * runtime the screen describes, not an implementation detail of it. A turn
+     * that was in flight when the user opened this screen is still in flight
+     * while they read the list, which is why closing the screen only repaints
+     * the transcript when the attached session actually changed.
+     */
+    if (supervisorOpen) {
+        /**
+         * Live state per session, from the channel's own agent-view projection.
+         * Reading the projection rather than a parallel source is what keeps this
+         * screen and the attention hints in the composer footer from disagreeing
+         * about which session is waiting for input.
+         */
+        const agentRowOf = (sessionId) => agentViewRows.find(row => row.id === sessionId);
+        const supervisorNode = (_jsx(SessionSupervisor, { channel: channel, home: homeDir(), onClose: closeHome, approval: approvalSnapshot, onApprove: outcome => approvals.decide(outcome), onOpenSession: async (sessionId) => {
+                const result = await channel.resumeTo(sessionId);
+                if (!result.ok) {
+                    const text = resumeFailureText(result);
+                    if (text !== undefined)
+                        channel.notify(text, { color: 'error', timeoutMs: 8000 });
+                    return false;
+                }
+                channel.notify(t('resume-resumed'));
                 suppressLogoIntroRef.current = true;
-                const switched = agentViewOpenSessionRef.current !== undefined &&
-                    agentViewOpenSessionRef.current !== channel.agentId;
-                if (switched)
-                    repaintTranscript();
                 setAgentViewReturnId(undefined);
-                setAgentViewOpen(false);
-            } }));
-        return fullscreen ? view : _jsx(AlternateScreen, { children: view });
-    }
-    // The browser is a screen, not an overlay: it REPLACES the conversation
-    // rather than floating above it. Rendering it as an early return (after
-    // every hook above has run) is what makes that literal — there is no
-    // transcript underneath to be repainted, scrolled, or bled through.
-    if (browserOpen) {
-        const browser = (_jsx(SessionBrowser, { channel: channel, home: homeDir(), sameProject: sessionCwdMatches, onClose: () => {
-                suppressLogoIntroRef.current = true;
-                setBrowserOpen(false);
+                setSupervisorOpen(false);
+                repaintTranscript();
+                return true;
+            }, onNewSession: async (target) => {
+                const ok = await channel.switchWorkspace(target);
+                if (ok) {
+                    suppressLogoIntroRef.current = true;
+                    setAgentViewReturnId(undefined);
+                    setSupervisorOpen(false);
+                    repaintTranscript();
+                }
+                return ok;
+            }, onStopSession: async (sessionId) => channel.stopBackgroundAgent?.(sessionId) ?? false, liveStateOf: (sessionId) => {
+                const row = agentRowOf(sessionId);
+                return row === undefined
+                    ? undefined
+                    : { status: row.status, live: row.live, current: row.current, summary: row.summary };
             } }));
         // Inline hosts enter the alternate screen for the duration; full-screen
         // hosts are already in it and must not nest a second one.
-        return fullscreen ? browser : _jsx(AlternateScreen, { children: browser });
+        return fullscreen ? supervisorNode : _jsx(AlternateScreen, { children: supervisorNode });
     }
     // The session tree follows the browser's rule exactly: it REPLACES the
     // conversation (an early return after every hook above has run), so there
@@ -3432,6 +3639,10 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // turn's prompt returns through the same fill path a rewind picker uses.
     if (treeOpen) {
         const tree = (_jsx(SessionTree, { channel: channel, currentSessionId: channel.agentId, onClose: () => setTreeOpen(false), onRestoreText: (text) => {
+                // The tree rewound to a node and is handing that turn's prompt back,
+                // exactly like the picker does. It belongs to the binding the tree
+                // action just created.
+                pendingFillRef.current = String(channel.agentId);
                 setHistoryFill(text);
             } }));
         return fullscreen ? tree : _jsx(AlternateScreen, { children: tree });
@@ -3568,7 +3779,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 // sessions keep the full intro; restored ones settle instantly.
                                 // A remount after a whole screen closed also settles instantly
                                 // (see suppressLogoIntroRef).
-                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: setSubagentDetailId, onOpenJobs: openJobsPanel, onOpenFile: openFileActions, onPreviewImage: openImagePreview, suppressImageGraphics: activePreview !== null })] }), (() => {
+                                skipIntro: suppressLogoIntroRef.current || channel.rows.length > 30 }, logoNonce), loadedContextVisible && (_jsx(LoadedContextPanel, { context: channel.loadedContext, open: loadedContextOpen, onToggle: toggleLoadedContext })), _jsx(MessageList, { rows: channel.rows, failureHintRowId: failureHintRowId, failureHint: t('traj-hint-failure', { key: `${modLabel}t` }), expanded: expanded, expandedRows: expandedRows, selectedId: selectionActive ? selectedId : null, onToggleRow: toggleRowExpanded, streamViewToggledRows: streamViewToggledRows, onToggleStreamView: toggleStreamView, model: channel.model, diffLayout: channel.diffLayout, thinkingFold: channel.thinkingFold, toolBackground: channel.toolBackground, foldTerminalCommand: channel.foldTerminalCommand, smoothStreaming: channel.smoothStreaming, activityFrames: channel.activityFrames, showAll: showAllMessages, thinkingVisible: thinkingVisible, historyPaintEnabled: !fullscreen, onToggleAll: () => { setShowAllMessages(previous => !previous); }, onLoadOlder: () => channel.loadOlder(), registerRowRef: registerRowRef, scrollHandle: handle, forceMountRowId: forceMountRowId, newSinceRowId: isSticky ? null : lastSeenRowIdRef.current, onUnseenCount: setUnseenCount, onTimeline: setTimeline, onOpenSubagent: setSubagentDetailId, onOpenJobs: openJobsPanel, onOpenFile: openFileActions, sessionCwd: channel.cwd, onPreviewImage: openImagePreview, suppressImageGraphics: activePreview !== null })] }), (() => {
                         // Gutter mode (settings `dsh-tui.scrollGutter`): the timeline
                         // rail (default), the proportional scrollbar, or nothing. The
                         // slot keeps its 2 columns in both rendered modes (Qwen's
@@ -3584,9 +3795,9 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                     })(), !promptEditorOpen && imagePreviewNode] }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, children: [showPill && (_jsx(NewMessagesPill, { count: unseenCount, onClick: () => handle?.scrollToBottom() })), channel.working &&
                         (channel.activityEnabled &&
                             !channel.minimal &&
-                            channel.workingActivity !== undefined &&
-                            channel.workingActivity.line !== '' &&
-                            channel.workingActivity.phase !== 'idle' ? (_jsx(Box, { marginTop: 1, children: _jsx(ActivityLine, { activity: channel.workingActivity, activityFrames: channel.activityFrames, warnPct: activityWarnPct, warnDanger: activityWarnPct !== undefined && activityWarnPct >= 95, 
+                            workingActivity !== undefined &&
+                            workingActivity.line !== '' &&
+                            workingActivity.phase !== 'idle' ? (_jsx(Box, { marginTop: 1, children: _jsx(ActivityLine, { activity: workingActivity, activityFrames: channel.activityFrames, warnPct: activityWarnPct, warnDanger: activityWarnPct !== undefined && activityWarnPct >= 95, 
                                 // Upload = real tokens of the last request; download =
                                 // the animated chars/4 estimate, matching the classic
                                 // spinner's counter (the suffix used raw chars before,
@@ -3617,7 +3828,16 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                         void setClipboard(btw.answer ?? '').then(raw => { if (raw)
                                             writeRaw?.(raw); });
                                         channel.notify(t('copied-chars', { n: (btw.answer ?? '').length }), { timeoutMs: 1500 });
-                                    } }) })) : questionPanelNode !== null ? (questionPanelNode) : null, _jsx(PromptInput, { channel: channel, suspended: promptReplacementOpen, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => { setHistoryFill(null); }, onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, backgroundAgentsNeedingInput: 
+                                    } }) })) : questionPanelNode !== null ? (questionPanelNode) : null, _jsx(PromptInput, { channel: channel, suspended: promptReplacementOpen, draftCache: promptDraftRef.current, helpOpen: helpOpen, onToggleHelp: () => { setHelpOpen(previous => !previous); }, onRunCommand: runCommand, selectionActive: promptSelectionActive, fillText: historyFill, onFillConsumed: () => setHistoryFill(null), onRewindRequest: openRewind, onBackgroundRequest: backgroundToAgentView, 
+                                // The 🏠 at the head of the input row opens the same session screen
+                                // `/resume` and `/agentview` open — one surface, three doors. It is
+                                // gated on this prop rather than a setting, so hosts that mount the
+                                // prompt without a session screen (and the layout regressions that
+                                // pin the row's column budget) keep the row they had.
+                                onOpenSessions: () => {
+                                    agentViewOpenSessionRef.current = channel.agentId;
+                                    setSupervisorOpen(true);
+                                }, backgroundAgentsNeedingInput: 
                                 // Only the real channel supplies the seam; pre-agent-view test
                                 // stubs must not grow the footer row (layout-dependent
                                 // regressions pin the visible row count). The footer only
@@ -3628,7 +3848,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 // clock and shifting every row-count layout invariant.
                                 channel.agentViewRows !== undefined && backgroundAgentsNeedingInput > 0
                                     ? backgroundAgentsNeedingInput
-                                    : undefined, controllerRef: promptControllerRef, onCaretImage: handleCaretImage, caretPreviewOpen: peekPreview !== null, onDismissCaretPreview: dismissPeek }, "prompt-input"), _jsx(StatusLine, { channel: channel, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
+                                    : undefined, controllerRef: promptControllerRef, onCaretImage: handleCaretImage, caretPreviewOpen: peekPreview !== null, onDismissCaretPreview: dismissPeek }, "prompt-input"), _jsx(StatusLine, { channel: channel, activity: workingActivity, selectionActive: selectionActive, helpOpen: helpOpen, wake: wakeBand === undefined
                                     ? undefined
                                     : {
                                         band: wakeBand,

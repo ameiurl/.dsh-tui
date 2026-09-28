@@ -11,10 +11,16 @@ resume.txt
 
 # ---- 运行时状态 ----
 last-used.json
+agent-view-sessions.json
+session-mounts.json
 
 # ---- 日志 / 账本 ----
 effect-ledger.jsonl
 restart.log
+
+# ---- 补丁脚本的运行时状态(diff 落库指纹)与临时工作区 ----
+patches/state/
+patches/.tmp.*
 
 # ---- 注入(inject)运行时：活动进程注册表 + unix socket ----
 inject/servers.json

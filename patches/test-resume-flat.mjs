@@ -1,21 +1,21 @@
 #!/usr/bin/env node
-// test-resume-flat.mjs — behaviour check for customization F3
-// ("resume / session browser lists every project's history in one flat list,
-// with no workspace rail").
+// test-resume-flat.mjs — behaviour check for customization F3 on dsh-tui 0.11.x
+// ("/resume lists THIS working directory's sessions, flat and rail-free").
 //
 //   node ~/.dsh-tui/patches/test-resume-flat.mjs
 //
-// Renders the real SessionBrowser through the package's own ink runtime with a
-// fake channel and fake streams (nothing is written, no TUI is started) and
-// asserts what the terminal would show:
+// 0.11.x replaced screens/SessionBrowser.js with the sessionSupervisor screen
+// (a workspace rail plus a session pane). The fork hides the rail and pins the
+// pane to the directory the terminal runs in, so this renders the REAL screen
+// through the package's own ink runtime with a fake channel and fake streams
+// (nothing is written, no TUI is started) and asserts what a terminal shows:
 //
-//   * every project's sessions are listed, from three different working dirs;
-//   * no directory rail: no rail rows, no "← choose directory" hint, no
-//     workspace drill-in page;
-//   * no `▣ <path>` project group headers — one flat list;
-//   * the scope row reads as "all projects";
-//   * sub-agent runs stay folded by default;
-//   * the list hint advertises the keys this fork keeps (and not pins/menu).
+//   * the current directory's session is listed;
+//   * two other directories' sessions are not — not by title, not by path;
+//   * no workspace rail: no `工作区` section header, no rail rows, no pane hint;
+//   * the list hint advertises only the keys this fork keeps (no ←/→ switch);
+//   * sub-agent runs stay out of the listing;
+//   * Ctrl+N starts a session in the CURRENT directory, not in a rail row.
 
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
@@ -29,11 +29,13 @@ const TUI = process.env.DSH_TUI_PKG
 
 const requireFromTui = createRequire(join(TUI, 'package.json'));
 const { renderSync } = await import(join(TUI, 'lib/types/ui.js'));
-const { SessionBrowser } = await import(join(TUI, 'lib/types/screens/SessionBrowser.js'));
+const { SessionSupervisor } = await import(join(TUI, 'lib/types/screens/SessionSupervisor.js'));
 const React = requireFromTui('react');
 
 const HOME = '/home/amei';
 const CURRENT = '/home/amei/.dsh-tui';
+const OTHER_A = '/server/www/mallphp';
+const OTHER_B = '/home/amei/.config';
 const session = (id, text, cwd, updatedAt, extra = {}) => ({
   id,
   cwd,
@@ -46,22 +48,27 @@ const session = (id, text, cwd, updatedAt, extra = {}) => ({
 });
 const sessions = [
   session('s1', 'AAA current-dir session', CURRENT, 400),
-  session('s2', 'BBB mallphp session', '/server/www/mallphp', 300),
-  session('s3', 'CCC config session', '/home/amei/.config', 200),
-  session('s4', 'RUN hidden subagent', '/server/www/mallphp', 100, {
+  session('s2', 'BBB mallphp session', OTHER_A, 300),
+  session('s3', 'CCC config session', OTHER_B, 200),
+  session('s4', 'RUN hidden subagent', OTHER_A, 100, {
     kind: { kind: 'subagent', parent: 's2' },
   }),
 ];
 
+const newSessionCalls = [];
 const channel = {
   cwd: CURRENT,
   gitBranch: 'master',
   agentId: undefined,
   listSessions: async () => sessions,
+  // A registry that DOES name the other directories: the fork must ignore it,
+  // not merely have nothing to show.
+  listWorkspaceRegistry: async () => ([
+    { id: 'w1', path: OTHER_A, title: 'mallphp', present: true, sessionCount: 1 },
+    { id: 'w2', path: OTHER_B, title: 'config', present: true, sessionCount: 1 },
+  ]),
+  resolveWorkspace: async path => ({ path }),
   notify: () => {},
-  deleteSession: async () => true,
-  renameSessionTo: async () => true,
-  previewSession: async () => [],
 };
 
 let output = '';
@@ -74,35 +81,47 @@ const sink = () => ({
   cork: () => {}, uncork: () => {},
 });
 const capture = { ...sink(), write: chunk => { output += chunk; return true; } };
+/** Ink pumps input through `readable` + `read()`, so the fake buffers a push. */
 class FakeStdin extends EventEmitter {
   constructor() {
     super();
     this.isTTY = true;
+    this.buffer = null;
     this.setRawMode = () => {};
     this.setEncoding = () => {};
     this.resume = () => {};
     this.pause = () => {};
     this.ref = () => {};
     this.unref = () => {};
-    this.read = () => null;
   }
+  read() { const data = this.buffer; this.buffer = null; return data; }
+  push(text) { this.buffer = Buffer.from(text, 'utf8'); this.emit('readable'); }
   write() { return true; }
 }
 
 // Ink also pokes process.stdout directly (alternate screen, mouse tracking), so
 // mute it for the duration — this script must leave the calling terminal clean.
+const stdin = new FakeStdin();
 const realStdoutWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = () => true;
 const app = renderSync(
-  React.createElement(SessionBrowser, {
+  React.createElement(SessionSupervisor, {
     channel,
     home: HOME,
-    sameProject: (a, b) => a === b,
     onClose: () => {},
+    onOpenSession: async () => true,
+    onNewSession: async (target) => { newSessionCalls.push(target?.path); return true; },
+    onStopSession: async () => true,
+    approval: null,
+    onApprove: () => {},
+    liveStateOf: () => undefined,
   }),
-  { stdout: capture, stdin: new FakeStdin(), stderr: sink() },
+  { stdout: capture, stdin, stderr: sink() },
 );
 await new Promise(r => setTimeout(r, 150));
+// Ctrl+N: the stock screen starts a session in the rail's focused workspace.
+stdin.push('\u000e');
+await new Promise(r => setTimeout(r, 100));
 app.unmount();
 await new Promise(r => setTimeout(r, 30));
 process.stdout.write = realStdoutWrite;
@@ -126,19 +145,20 @@ const check = (cond, msg) => {
 check(plain.includes('AAA'), "the current directory's session is listed");
 check(!plain.includes('BBB') && !plain.includes('CCC'),
   'sessions from other working directories are NOT listed');
+check(!plain.includes(OTHER_A) && !plain.includes(OTHER_B), 'no other directory appears at all');
+check(!plain.includes('RUN hidden subagent'), 'sub-agent runs stay out of the listing');
 check((plain.match(/\u2606/g) ?? []).length === 1, `exactly one session row (${(plain.match(/\u2606/g) ?? []).length})`);
-check(!plain.includes('/server/www/mallphp'), 'no other project appears at all');
-check(!plain.includes('\u25a3'), 'no project group headers \u2014 one flat list');
-check(!plain.includes('\u2190 \u9009\u62e9\u76ee\u5f55'), 'no rail switch hint');
-check(!plain.includes('\u67e5\u770b\u4f1a\u8bdd') && !plain.includes('view sessions'), 'no workspace drill-in page');
-check(plain.includes('.dsh-tui'), 'scope row names the current directory');
-check(!plain.includes('\u5168\u90e8\u9879\u76ee') && !plain.includes('all projects'), 'scope is not "all projects"');
-check(!plain.includes('\u2190 \u5de5\u4f5c\u76ee\u5f55'), 'list hint does not advertise a directory rail');
-check(!plain.includes('\u56fa\u5b9a') && !plain.includes('Ctrl+P'), 'list hint does not advertise the dropped pin key');
-check(plain.includes('\u91cd\u547d\u540d') || plain.includes('rename'), 'list hint advertises rename');
-check(!plain.includes('RUN hidden subagent'), 'sub-agent runs stay folded by default');
+check(!plain.includes('\u5de5\u4f5c\u533a'), 'no workspace rail section header');
+check(!plain.includes('mallphp') && !plain.includes('config'), 'no rail rows for other workspaces');
+check(!plain.includes('\u5207\u6362\u680f\u4f4d') && !plain.includes('switch pane'),
+  'the list hint no longer advertises the <-/-> pane switch');
+check(!plain.includes('\u5168\u90e8\u5de5\u4f5c\u76ee\u5f55') && !plain.includes('All working directories'),
+  'no "all directories" scope is offered');
+check(plain.includes('Ctrl+N') && plain.includes('Ctrl+X'), 'the hint still advertises the keys kept');
 check(plain.includes('Enter'), 'list hint renders');
-report(failures === 0 ? '\nPASS: resume lists the current working directory only, flat and rail-free.' : `\n${failures} check(s) failed.`);
-process.exit(failures === 0 ? 0 : 1);
-
+check(newSessionCalls.length === 1 && newSessionCalls[0] === CURRENT,
+  `Ctrl+N starts a session in the current directory (got ${JSON.stringify(newSessionCalls)})`);
+report(failures === 0
+  ? '\nPASS: /resume shows this working directory only, flat and rail-free.'
+  : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

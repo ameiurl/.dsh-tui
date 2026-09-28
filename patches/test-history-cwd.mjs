@@ -13,6 +13,9 @@
 //   * a scoped read returns that directory's entries only, newest first;
 //   * a directory with no entries of its own falls back to the untagged legacy
 //     pool, and stops falling back as soon as it has entries;
+//   * the composer's own read (`loadHistoryOldestFirst(cwd)`, added upstream in
+//     0.11.x) is scoped the same way and keeps chronological order — Ctrl+R and
+//     ↑/↓ must never disagree about which directory they are showing;
 //   * an unscoped read still returns every entry;
 //   * dedupe is per directory — the same text submitted elsewhere is its own
 //     entry, so a merged one could never carry the wrong directory.
@@ -56,7 +59,7 @@ if (!DATA_DIR.startsWith(tmpHome)) {
   report(`ABORT: refusing to run — DATA_DIR resolved to ${DATA_DIR}, not under ${tmpHome}`);
   process.exit(1);
 }
-const { appendHistory, loadHistory } = await import(join(TUI, 'lib/types/history.js'));
+const { appendHistory, loadHistory, loadHistoryOldestFirst } = await import(join(TUI, 'lib/types/history.js'));
 const HISTORY_FILE = join(DATA_DIR, 'history.jsonl');
 check(true, `isolated run: history lives in ${DATA_DIR}`);
 
@@ -75,6 +78,12 @@ check(texts(loadHistory(B)) === 'beta one',
   `a scoped read returns ${B}'s entries only (${texts(loadHistory(B))})`);
 check(loadHistory(C).length === 0,
   'a directory never used has nothing to show while the legacy pool is empty');
+check(texts(loadHistoryOldestFirst(A)) === 'alpha one | alpha two',
+  `the composer's read is scoped too, oldest first (${texts(loadHistoryOldestFirst(A))})`);
+check(loadHistoryOldestFirst(C).length === 0,
+  "a never-used directory's composer read is empty as well");
+check(texts(loadHistoryOldestFirst()) === 'alpha one | alpha two | beta one',
+  'an unscoped composer read stays chronological');
 check(loadHistory().length === 3, 'an unscoped read still returns every entry');
 check(texts(loadHistory()) === 'beta one | alpha two | alpha one', 'unscoped order stays newest first');
 check(readFileSync(HISTORY_FILE, 'utf8').includes(`"cwd":"${A}"`),
@@ -97,6 +106,8 @@ await appendHistory('gamma one', A);
 
 check(texts(loadHistory(C)) === 'legacy cmd',
   `an unused directory falls back to the untagged legacy pool (${texts(loadHistory(C))})`);
+check(texts(loadHistoryOldestFirst(C)) === 'legacy cmd',
+  'the composer read sees the same fallback pool');
 check(texts(loadHistory(A)) === 'gamma one',
   'a directory with entries of its own does NOT see the legacy pool');
 check(loadHistory().length === 2, 'the unscoped read still sees both');

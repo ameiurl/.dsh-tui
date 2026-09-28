@@ -15,12 +15,13 @@
 ### 1.1 版本
 | 组件 | 位置 | 版本 |
 | --- | --- | --- |
-| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.10.2` |
+| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.11.1` |
 | profile 目录名 | `~/.dsh/profiles/dsh-tui` | （旧版本叫 `tui`） |
-| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.10.2` |
-| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.2-rc.1` |
-| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.2-rc.1` |
-| 补丁构建基线 | `patches/patch-base-version` | `0.10.2` |
+| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.11.1` |
+| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.7-rc.2` |
+| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.7-rc.2` |
+| 补丁构建基线（dsh-tui，文档/检查脚本引用） | `patches/patch-base-version` | `0.11.1` |
+| 补丁构建基线（逐包，apply 脚本据此**分目标**放行） | `patches/patch-base-versions.json` | dsh-tui `0.11.1`／tool 两包 `0.1.7-rc.2` |
 
 **版本关系（重要，别再踩坑）：**
 - dsh-tui `0.10.0-beta` 线与生态 `0.1.1-rc.2` 配套；peer 范围二者相同，可互换 minor。
@@ -32,11 +33,21 @@
   同 minor 的 patch 错位壳只提示不拦（实测可跑），但建议对齐 —— profile 升级后上游会在
   退出提示里给出命令：`npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@<profile>`
   （`--legacy-peer-deps` 绕过 npm 12 的 peer 解析崩溃；壳是瘦壳，跳过 peer 解析是安全的）。
+- **profile 的 pin 才是权威**：`dsh` 每次启动按 `~/.dsh/profiles/dsh-tui/package.json`
+  reconcile 它的 `node_modules`。应用内 update-restart 只换 `node_modules`、**不改 pin**，
+  所以下一次 reconcile 会照 pin 把版本拉回去——2026-09-17 傍晚 profile 就是这样从
+  0.10.2 掉回 0.10.1 的（补丁基线已按 0.10.2 走，于是 `dsh-patch` 全部跳过、9/9 目标
+  一个没打上）。**要让版本持久就必须改 pin**：
+  `env -u https_proxy -u http_proxy -u all_proxy pnpm add -C ~/.dsh/profiles/dsh-tui @deepseek-harness-tui/dsh-tui@<版本>`
+  （本机 `https_proxy=127.0.0.1:7890` 已废，不绕开会 ETARGET / 退回缓存；pnpm 会自动把新版本
+  加进 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`）。
+- **tool 两包不在 profile 里**：它们由全局 launcher 树提供（`dsh` 升级 = 两包跟着换版本，
+  补丁同时被覆盖）。补丁基线因此必须**逐包**记录，见 `patch-base-versions.json`。
 
 ### 1.2 用户级设置（升级后确认仍在）
 | 文件 | 内容 | 作用 |
 | --- | --- | --- |
-| `~/.dsh/settings.yaml` | `dsh-tui: { diffLayout: unified }` | 强制 unified diff 布局（否则 `auto` 宽屏退 split，CC 样式看不到） |
+| `~/.dsh/profiles/dsh-tui/cordis.patch.yml` | `- id: dsh-tui` + `config: { …, diffLayout: unified }` | 强制 unified diff 布局（否则 `auto` 宽屏退 split，CC 样式看不到）。**0.1.7 起 `~/.dsh/settings.yaml` 已不存在**：用户设置改为写进 profile 自己的 patch 行（`/settings` 改的就是它），且该行**整块替换** entry 的 `config` —— 所以行里必须重述 bundle 的全部键（`provider`/`fullscreen`/`terminalImages`/`effort`/`preset`/`workspace`/`sessionId`）。旧文档在 `~/.dsh/settings.yaml.imported` |
 | `~/.dsh-tui/theme.json` | `{ "theme": "claude-code" }` | 激活 CC diff 配色 |
 | `~/.dsh-tui/themes/claude-code.json` / `-light.json` | — | CC diff 调色板（升级不动） |
 
@@ -54,10 +65,16 @@
 > 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 9 个目标文件**（3 个 F1 + 3 个 F2 + 2 个 F3 + 1 个 F4；
-> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.10.2`。
+> **当前补丁集 = 10 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 1 个 F4；
+> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.11.1`，
+> 逐包基线见 `patch-base-versions.json`（dsh-tui `0.11.1`／tool 两包 `0.1.7-rc.2`）。
 >
-> **resume 浏览器不是 stock**（见 F3）：2026-09-11 曾按「恢复全量会话」做了一版**薄补丁**
+> **0.11.1 迁移要点（2026-09-28）**：`/resume` 的浏览器被上游**整屏重写**——
+> `screens/SessionBrowser.js` 已删除，改为 `screens/SessionSupervisor.js`
+> （工作区 rail + 会话面板 + 多会话托管）。F3 因此从「整文件分叉」变成**薄补丁**：
+> rail 不再渲染、面板钉死当前工作目录（见 F3 一节）。
+>
+> **`/resume` 不是 stock**（见 F3；0.11.1 起上游叫 `SessionSupervisor.js`）：2026-09-11 曾按「恢复全量会话」做了一版**薄补丁**
 > （`SessionBrowser.js` + `view.js` + `i18n.js`，默认 `allProjects`、去掉 rail 与目录分组），
 > 用户明确「只列当前工作目录的」→ **那版整版撤回**。随后重做了一版**整文件分叉**
 > （沿用 `23086fc` 的删 rail / 去分组 / 去钻取页，范围固定当前目录），即当前的 F3，
@@ -68,6 +85,12 @@
   - `profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js`
   - `profiles/node_modules/@deepseek-ai/dsh-tool-str-replace-editor/lib/index.js`
   - `…/dsh-tui/lib/types/components/messages/AssistantToolUseMessage.js`
+- **基线版本（2026-09-17 重移植）**：tool 两包补丁是对着 **0.1.5-rc.2** 重做的。
+  0.1.2-rc.1 时代的旧 `backup/` 里带着一段**已过时的上游回退**（去掉 scope-aware 提示语、
+  把 `REMEDIES` 重构倒回内联 if/else），直接盖上去 = 把上游代码降级，**别用**。
+- **三个文件必须成套**：只打 TUI 渲染器、tool 包没打 → 行号消失（渲染器
+  `numbered = typeof diff.oldStart === 'number'` 兜底成纯 `+/-`）且 `str_replace`
+  完全不出 diff 卡；只打 tool 包、渲染器没打 → 白打。
 - **行为**：diff 以 **unified** 呈现——真实行号 gutter、上下文行、`+`/`-` 标记、
   绿/红**整行底色**（`diffAddedDimmed`/`diffRemovedDimmed`）、词级高亮（仅新增词绿底
   `diffAddedWord`）、`+N -M` 变更数汇总行、diff 正文永不折叠。
@@ -88,11 +111,16 @@
 ### F2 — ↑/↓ 跨会话历史（**按当前工作目录过滤**）+ 建议菜单边界落历史
 - **涉及文件（3 个）**：
   - `…/dsh-tui/lib/types/history.js` —— 写入时给条目打上提交目录（`cwd` 字段），
-    读取时 `loadHistory(cwd)` 只返回该目录的条目。`loadHistory` 新增**可选**参数，
+    读取时只返回该目录的条目。**0.11.x 上游新增 `loadHistoryOldestFirst()`**
+    （composer 的 ↑/↓ 走它），所以过滤抽成一个 `scopeToCwd(entries, cwd)` 助手，
+    `loadHistory(cwd)`（Ctrl+R，新→旧）与 `loadHistoryOldestFirst(cwd)`（↑/↓，旧→新）
+    共用它——否则会出现「Ctrl+R 过滤了、↑/↓ 没过滤」的错位。两个函数都新增**可选**参数，
     不传即旧行为（返回全部）。`history.d.ts` **不补**，理由同旧 F7：
     安装后的包不做类型检查，声明只影响 `tsc`。
   - `…/dsh-tui/lib/types/components/PromptInput.js` —— ↑/↓ 播种改走
-    `loadHistory(channel.cwd)`，提交时 `appendHistory(text, channel.cwd)` 打标。
+    `loadHistoryOldestFirst(channel.cwd)`（0.11.x 的播种函数 `seedHistory()` 以
+    `historySeedCwd === channel.cwd` 为守卫，取代上游的 `historySeeded` 布尔：
+    目录变了就重播种），提交时 `appendHistory(text, channel.cwd)` 打标。
   - `…/dsh-tui/lib/types/screens/Chat.js` —— Ctrl+R 历史搜索改读
     `loadHistory(channel.cwd)`，与 ↑/↓ 范围一致。
 - **行为**：
@@ -127,38 +155,55 @@
      node -e "import('$HOME/.dsh/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui/lib/types/history.js').then(m=>console.log(m.loadHistory().length, m.loadHistory(process.cwd()).length))"
      ```
 
-### F3 — resume：只列**当前工作目录**的历史会话（扁平、无左侧目录栏）
-- **涉及文件（2 个）**：
-  - `…/dsh-tui/lib/types/screens/SessionBrowser.js`（**整文件分叉**：删掉 rail / 目录分组 /
-    目录钻取页，列表保持扁平；保留搜索、MRU 排序、预览、重命名、删除、清空壳、子运行折叠）
-  - `…/dsh-tui/lib/types/i18n.js`（**只改** `session-hint-list` / `-mid` / `-short`
-    这三个 key，去掉 rail / 右键菜单 / 范围开关字样）。其余 key 一律保持 stock：
-    `session-scope-all` 是 `allProjects` 三元里的**死分支**（`SessionBrowser.js` 把它
-    钉成 `false` 且从不修改），补丁曾一度把它带成旧文案「全部项目」——2026-09-11 已改回
-    stock 的「全部工作目录」。**别再带回来**：既不可达，又让补丁面变大、与本节描述不符。
-- **行为**：`/resume` 打开即列出**当前工作目录**的历史会话，一列扁平：
-  - 左侧**没有**目录栏、没有 `▣ <path>` 目录分组行、没有目录钻取页（`←` 不生效）；
-  - 范围**固定在 `channel.cwd`**：`{ ...DEFAULT_FILTERS, allProjects: false }`；
-    `mod+a` 已改为**空操作**（rail 没了，没有可见入口能切回"全部"，留个能切出去的键
-    只会让人卡在全量列表里），提示文案里也不再出现 `{{mod}}a 全部项目`；
-  - scope 行读作 `▣ 工作目录 <当前目录>`（不再是"全部项目"）。
-  - **代价（与 stock 的差异，用户已接受）**：这个分叉没有 pin（`mod+p`）与右键菜单；
-    也没有"看全部目录"的入口 —— 想看别的目录请在那个目录下启动 dsh-tui。
-- **历史**：曾把默认设成 `allProjects: true`（列全部），用户最终确认**要按当前目录过滤**，
-  于是改回 `false` 并把 `mod+a` 置空。**别再翻回去**。
-- **重移植注意**：这是**整文件分叉**（约 510 行 vs stock 911 行），不是小补丁。升级时按 §3
-  走 3-way：`base` = 旧 stock、`theirs` = 本目录 `backup/SessionBrowser.js`、
-  `ours` = 新 stock。实测 0.10.0 → 0.10.1 上游两文件**字节未变**，因此合并 0 冲突、
-  结果等于旧分叉原样；真遇到上游大改时优先保住「无 rail + 固定当前目录 + 扁平列表」三条。
+### F3 — resume：只列**当前工作目录**的历史会话（无左侧工作区 rail）
+- **涉及文件（3 个）**：
+  - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（**主补丁**：rail
+    不再渲染、键盘一开始就归会话列表、面板钉死 `channel.cwd`、行按目录匹配）
+  - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（**1 处**：Ctrl+N 从「rail 光标所在
+    工作区」改为「钉死的当前目录」）
+  - `…/dsh-tui/lib/types/i18n.js`（**只改** `supervisor-hint-list` 一个 key：去掉
+    `**←/→** 切换栏位`，因为面板已经不可切换）。其余 key 一律保持 stock。
+- **0.11.x 上游变化（重移植前必读）**：`screens/SessionBrowser.js`（911 行 stock，旧 F3 的
+  整文件分叉对象）**已被删除**。`/resume`、`/home`、`/agentview` 现在是同一个
+  **`screens/SessionSupervisor.js`** 屏：左侧工作区 rail（`HomeWorkspaceRow`）+ 右侧会话面板
+  + 多会话托管（Ctrl+N 新建 / Ctrl+X 停止，切换不中断）。上游 stock 已经默认选中
+  「当前 cwd 所属工作区」（`channel.cwd` 命中 registry 时），但 **rail 还在、还能切到别的目录**，
+  且 cwd 未注册时会退回 `railEntries[0]`（另一个项目）。F3 因此从「整文件分叉」变成
+  3 处薄改动。
+- **行为**（与旧 F3 的三条底线一一对应）：
+  - **无 rail**：`railVisible = false`，两侧 rail JSX 都不渲染，会话面板占满宽度；
+    `activePane` 初始即 `list`，`activateRail()` 置空（`←` 不再抢走键盘），
+    栏位切换的 `←/→` 文案同步从 hint 里去掉。
+  - **范围固定当前工作目录**：`selected` 不再来自 rail 行，而是由 `channel.cwd` 合成
+    （cwd 若已注册则取其 registry 拼写，否则用原路径），`visibleSessions` 直接对
+    `listedSessions` 按 `samePath(session.cwd, channel.cwd)` 过滤 —— 比 stock 的
+    「rail 分组 key 精确相等」更稳：日志里带尾斜杠 / 大小写不同的同一目录仍算本目录。
+    别的目录**没有任何入口**（registry 里那些工作区不再出现在屏幕上）。
+  - **没有「全部目录」开关**：旧屏的 `mod+a`、`allProjects` 三元随 `SessionBrowser.js`
+    一起消失；新屏本来就没有范围开关，所以不需要再置空任何键。
+  - **保留**（与 stock 一致）：搜索 `/`、实时状态与占用、重命名、删除、固定 pin、
+    Ctrl+N 新建、Ctrl+X 停止、Esc 返回；子 agent 运行仍不进列表。
+  - **代价（与 stock 的差异，用户已接受）**：没有「切到别的工作区」的能力 ——
+    想看别的目录的会话，请在那个目录下启动 dsh-tui。
+- **历史**：0.10.1→0.10.2 时代 F3 是整文件分叉；0.11.1 上游整屏重写后，用户明确选择
+  **等价移植（隐藏 rail + 锁死当前目录）**，而不是退回 stock 的 rail。**别再退回 rail**，
+  也**不要**把范围改成「全部工作目录」。
+- **重移植注意**：薄补丁，锚点是三个词——`railVisible`（钉 false）、`selected`
+  （由 cwd 合成）、`visibleSessions`（按 `samePath` 过滤）。上游若再动这一屏，
+  先保住「无 rail + 范围=当前目录 + 列表扁平」三条；`useSessionSupervisor.js` 里被删掉的
+  `selectedPath` / `selectedUnregistered` / `selectionManual` 与「自动选中」effect
+  是 stock 的 rail 选择状态，新结构里没有它们的位置。
 - **验证**：
-  1. `/resume` 只应看到**当前目录**的历史会话（别的目录的会话不出现），左侧无目录栏；
-  2. `mod+a` 按下去不应把范围切成"全部"；
+  1. `/resume` 只应看到**当前目录**的会话（别的目录的会话与 rail 都不出现）；
+  2. `←` 不改变光标归属（`❯` 始终在会话面板），Ctrl+N 新建落在**当前目录**；
   3. 命令行无头渲染快检（不启动 TUI、不写文件）：
      ```bash
      node ~/.dsh-tui/patches/test-resume-flat.mjs
      ```
-     它断言：当前目录的会话列出、其他目录的会话**不**列出、恰好一行会话、无分组头 /
-     无 rail / 无钻取页、scope 不是"全部项目"、子运行仍折叠。
+     12 条断言：当前目录会话列出 / 其他两个目录的会话与其路径都不出现 / 子运行不进列表 /
+     恰好一行会话 / 无「工作区」分区头与 rail 行 / hint 不再出现「切换栏位」/
+     没有「全部工作目录」范围 / hint 仍广告 Ctrl+N、Ctrl+X、Enter /
+     **Ctrl+N 的 `onNewSession` 收到当前目录**（stock 上这条会收到 rail 行的工作区）。
 
 ### F4 — `/resume` 的标题按 Claude Code 的取名链，且文件地址永不当标题
 - **涉及文件（1 个）**：
@@ -247,13 +292,25 @@
 ```bash
 dsh-tui version                     # 壳 + profile 版本
 node -p "require('$HOME/.dsh/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui/package.json').version"
-cat ~/.dsh-tui/patches/patch-base-version
+grep dsh-tui ~/.dsh/profiles/dsh-tui/package.json   # pin —— reconcile 会照它装
+cat ~/.dsh-tui/patches/patch-base-version           # dsh-tui 补丁基线
+cat ~/.dsh-tui/patches/patch-base-versions.json     # 逐包基线（含 tool 两包）
+node -p "require('$HOME/.dsh/profiles/node_modules/@deepseek-ai/dsh-tool-fs/package.json').version"
 ```
+> **壳、profile、补丁基线三者对不上时先对齐版本再谈补丁**：0.10.1 与 0.10.2 混着的树上，
+> 归档里的 `backup/` 只对其中一个版本成立（见 §1.1 的 pin 说明）。
 
 ### Step 1 — 检查缺失
 ```bash
 dsh-patch check        # = bash ~/.dsh-tui/patches/apply-diff-patches.sh check
 ```
+输出逐目标 `OK` / `DIFFERS` / `MISSING` / `NEEDS-REPORT`，并**按包比版本**
+（`patch-base-versions.json`）。**0.11.1 起，版本漂移不再等于「打不上」**：脚本会拿
+`diffs/<name>.patch` 直接往**已装文件**上打（`patch --fuzz=3`），全部 hunk 落地且
+`node --check` 通过才写入，报 `PATCHED-DRIFT` 并在 `state/<name>.sha1` 记账
+（下次重跑报 `OK-PATCHED`，不会二次打补丁）。只有「diff 也打不上 / 语法不过」的目标
+才报 `NEEDS-REPORT`，那几条才必须先重移植。`dsh-patch apply` 仍是显式强推（拿 backup
+整文件覆盖，可能在漂移版本上降级），只在确认上游没变时用。
 
 ### Step 2 — profile 目录 / 路径是否变
 - profile 目录历史上 `tui` → `dsh-tui`。变了就把
@@ -275,7 +332,10 @@ done < <(node resolve-patch-targets.mjs)
 （`node resolve-patch-targets.mjs` 直接打印 `TARGETS` 解析后的 `绝对路径|备份名`；
 加 `--paths` 只打印路径。tool 两包与 TUI 文件一视同仁。）
 
-### Step 4 — 3-way 重移植（核心）
+### Step 4 — 重移植（核心）
+**先试快路**：`dsh-patch patch` 会用 `diffs/*.patch` + fuzz 3 自动落到新上游上，落得干净
+的目标就不用动（报 `PATCHED`/`PATCHED-DRIFT`）。剩下的用 3-way 手工重移植：
+
 把**旧补丁相对旧原版的改动**合并进**新上游文件**：
 - `base`   = 旧 `patches/original/<备份名>`（旧原版）
 - `theirs` = 旧 `patches/backup/<备份名>`（旧已补丁）
@@ -289,7 +349,7 @@ done < <(node resolve-patch-targets.mjs)
 cd ~/.dsh-tui/patches
 P=~/.dsh-tui/patches        # 备份库
 T=/tmp/port                 # 临时工作区
-name=SessionBrowser.js      # ← 换成 §3 报 RE-PORT 的那个备份名
+name=useSessionSupervisor.js  # ← 换成 §3 报 RE-PORT 的那个备份名
 target=$(node resolve-patch-targets.mjs | awk -F'|' -v n="$name" '$2==n{print $1}')
 
 rm -rf "$T/$name" && mkdir -p "$T/$name" && cd "$T/$name"
@@ -314,20 +374,35 @@ grep -nE '^(<<<<<<<|=======|>>>>>>>)' merged.js   # 有冲突则按 §2 意图�
 ### Step 5 — 落库 + 应用
 ```bash
 cd ~/.dsh-tui/patches
-name=SessionBrowser.js                       # 逐个 RE-PORT 的文件重复
+name=useSessionSupervisor.js                 # 逐个 RE-PORT 的文件重复（备份名以
+                                             # resolve-patch-targets.mjs 第二列为准）
 cp /tmp/port/$name/ours.js   original/$name  # 新版原版入库
 cp /tmp/port/$name/merged.js backup/$name    # 新版已补丁入库
 diff -u original/$name backup/$name > diffs/$name.patch || true   # diff 非 0 是正常的
 
 # 全部处理完后：
 bash apply-diff-patches.sh apply     # 写入 + 语法门禁
+rm -f state/*.sha1                   # 重移植后旧指纹作废（见下方注）
 bash apply-diff-patches.sh check     # 期望全 OK
 node resolve-patch-targets.mjs | wc -l   # 目标数应等于 original/ 里的文件数
 echo "<新版 dsh-tui 版本>" > patch-base-version   # 上面两步都过了再写
+# 逐包基线一起更新（脚本按它放行/拦每个目标）：
+node -e "const f='patch-base-versions.json',j=require('./'+f);j['@deepseek-harness-tui/dsh-tui']='<新版>';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+# tool 两包换版本时同理改 j['@deepseek-ai/dsh-tool-fs'] / j['@deepseek-ai/dsh-tool-str-replace-editor']
 ```
+
+> apply 脚本写文件用 `cp --remove-destination`：pnpm 的 `node_modules` 是到
+> content-addressable store 的**硬链接**，普通 `cp` 会**写穿 store**（同一个 inode），
+> 于是"重装同版本又把补丁带回来"、升级还原反而看不出来（2026-09-17 之前就是这样，
+> 9 个目标里 5 个 `OK` 其实是 store 被写脏的假象）。断链后 store 保持纯净。
 
 > **为何最后才写 `patch-base-version`**：它是自动重打的信任锚。先写的话，中途失败会留下
 > "版本已对齐、文件其实没落库"的状态，下次升级 `dsh-patch` 会拿旧 backup 覆盖新上游。
+
+> **`state/*.sha1` 什么时候要清**：它是「这套 diff 已经打在这些字节上」的指纹。重移植
+> 之后 `diffs/` 变了，指纹里的 patch 哈希对不上会自动失效重打；但若你手工改过目标文件、
+> 又想让它重新按 diff 走一遍，`rm -f state/*.sha1` 最直接。（该目录已在 `.gitignore` 里，
+> 不入库。）
 
 ### Step 5.5 — 提交快照（`patches/` 是 git 仓库的一部分）
 ```bash
@@ -338,7 +413,8 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 
 
 ### Step 6 — 确认用户级设置还在（§1.2）
-`~/.dsh/settings.yaml` 有 `dsh-tui: { diffLayout: unified }`；`theme.json` 是
+`~/.dsh/profiles/dsh-tui/cordis.patch.yml` 里有 `diffLayout: unified`（并重述了 bundle 的
+其余键）；`theme.json` 是
 `claude-code`。缺失则补回。
 
 ### Step 7 — 重启验证
@@ -348,12 +424,12 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 - **F2**：↑/↓ 只翻到**当前目录**输过的命令（别的目录不出现；旧的**无**标记条目仍作兜底，
   所以刚改完看起来和以前一样）；菜单在第 0 项按 ↑ 进历史。命令行侧：
   `node ~/.dsh-tui/patches/test-history-cwd.mjs`。
-- **F3**：`/resume` 应只列**当前目录**的会话（别的目录不出现）、左侧**无目录栏**、
-  无 `▣ 目录` 分组行；`mod+a` 不再切换范围；命令行侧：
+- **F3**：`/resume` 应只列**当前目录**的会话（别的目录不出现），左侧**无工作区 rail**、
+  无「工作区」分区头；`←` 不改变光标归属；Ctrl+N 新建落在**当前目录**；命令行侧：
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`。
 
 并顺手确认仍是 stock 的部分：会话标题按宽度截断；vim 默认关且 `/vim` 后指示仍在输入框内、
-状态栏不再出现 `-- INSERT --`。**resume 浏览器已不是 stock**（F3 分叉：无 rail、扁平列表，但范围仍是当前目录）。
+状态栏不再出现 `-- INSERT --`。**`/resume` 已不是 stock**（F3：无 rail、范围=当前目录）。
 
 ### Step 8 — 文档一致性核对
 本文档是下次重移植的依据，所以**文档里过时的一句 = 一条错误指令**（每次升级都可能悄悄
@@ -364,12 +440,21 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 ```
 
-覆盖面：§1.1 版本表 / §1.2 用户级设置 / F1 的 `DIFF_BODY_MAX_LINES` 与
-`NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 / F2 的 `loadHistory(cwd)` 与
-`historySeedCwd` 与 Ctrl+R 走 `channel.cwd` / F3 的无 rail 与 `allProjects: false` 与
-i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
+覆盖面：§1.1 版本表（壳 / 生态 / tool 两包都按各自基线断言，含
+`patch-base-versions.json` 可解析且与 `patch-base-version` 一致）/ §1.2 用户级设置 /
+F1 的 `DIFF_BODY_MAX_LINES` 与 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 **与 tool 侧
+4 个锚点（`oldStart`/`newStart` 产出、`presentationMeta` 转发、`computeHunkDiffs`、
+`presentResult`）与「tool 补丁不含上游回退」** / F2 的 `loadHistory(cwd)`、
+`loadHistoryOldestFirst(cwd)`、共用的 `scopeToCwd`、`historySeedCwd`、
+`appendHistory(text, channel.cwd)` 与 Ctrl+R 走 `channel.cwd` /
+F3 的 `railVisible = false`、按目录过滤的 `samePath(session.cwd, channel.cwd)`、
+`useState('list')`、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 补丁只动
+`supervisor-hint-list` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 仍取自非过滤候选 /
 仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
+apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径（`patch -p0 --fuzz=3`、
+`PATCHED-DRIFT`、`OK-PATCHED` 指纹、写不进就 `ABORT`）**、分目标守卫（`NEEDS-REPORT`）
+与逐包基线读取 / `dsh-patch` 别名在 `~/.zshrc` 与 `~/.bashrc` 里都在 /
 目标数 = `original/` = `diffs/` 且命名一致 / 三个行为测试通过。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
 
@@ -392,6 +477,9 @@ i18n 补丁只动 `session-hint-list*` / F4 的 `isFileAddress`、`lastPromptOf`
 | （非升级）**F4：/resume 标题 = Claude 取名链 + 地址过滤** | 只动 `digest.js` 一个文件（新增 `LAST_PROMPT_TITLE_CHARS` / `isFileAddress` / `normalizeLastPrompt` / `lastPromptOf`，`digestSession()` 的标题选择与 `recoverFirstPrompt()` 各改几行），UI 一行未碰 | 三版迭代：① 纯地址过滤器 → ② 只照 Claude 链条、读取层不过滤 → ③ **当前版**：Claude 的顺序（标题事件 → **最近一条** prompt → 首条 prompt → 目录名，`normalizeLastPrompt` 折行/trim/200 字符截断）+ 两层 prompt 都跳过文件地址。`hasPrompt` 与标题候选解耦（`digestSession` 用未过滤的 `prompt`，`recoverFirstPrompt` 返回 `hasPrompt`），否则地址型首句的会话会被当成空会话进 `mod+x` 的破坏性清理。回归：161 条真实日志改动前后逐条相同 → 未动 `store.js` 的 `SCHEMA_VERSION`。补丁集 8 → 9 个目标；新增 `test-resume-title-chain.mjs`。`patch-base-version` 仍 0.10.1 |
 | **0.10.1 → 0.10.2**（2026-09-17，profile 由应用内 update-restart 升级） | 升级把 **7/9** 个 TUI 目标文件恢复成 stock；上游**真正变化**的只有 2 个：`Chat.js`（63 行：`/jobs` 面板自己接管 Esc/`k`（否则关面板的 Esc 会顺手取消进行中的回合）、`openJobsPanel` 用 `useCallback` 稳定 handler 身份、`LoadedContextPanel` 的折叠 reanchor 移进 `useLayoutEffect`）与 `digest.js`（149 行：`humanPrompt()` 改返回 `{ text }`、`completeHead` 取代 `head.whole` 且要求首行是 `session`、`hasPrompt = hasHumanMessage \|\| !completeHead`、`recoverFirstPrompt()` 开始回报 `hasPrompt`）；其余 7 个（`AssistantToolUseMessage`/`history`/`PromptInput`/`SessionBrowser`/`i18n` 等）**字节未变** → 直接 `cp backup/` 恢复；tool 两包仍 0.1.2-rc.1 且补丁未被覆盖 → 免移植 | `Chat.js` 0 冲突（就那 1 行 Ctrl+R）；`digest.js` 5 处冲突按 §2 F4 解：候选判断全部改走 `.text`（`lastPromptOf`/`opening`），`opening` 只收"有文本且非地址"的候选，而"任何人类消息都算有对话"交给上游的 `hasHumanMessage`，`recoverFirstPrompt()` 继续在 `.text` 上跳过地址并单独回报 `hasPrompt`。**上游收紧暴露的两个坑（已一并修）**：①0.10.2 会校验日志**首行 `type === 'session'`** 才算读完，而 `test-resume-title-chain.mjs` 的夹具从写下那天起就用 `session/header`（真实日志 171 条全是 `session`；0.10.1 不校验所以没暴露）→ 夹具改成真实首行，否则空会话会被误判成"有对话/没读完"，进而骗过 `mod+x` 的空会话清理；②`check-doc-consistency.sh` 里 3 条断言引用的是旧代码形状（`prompt !== undefined \|\| !head.whole` 等），随代码一起上新，并补 5 条锚点（`{ text }` 形状、recovery 跳地址、夹具首行、两份文档的版本号）。回归：**171 条真实会话日志上 patched vs pristine 0.10.2 的 `digestSession()` 逐条相同**（title/source/hasPrompt 全等；无异常、无地址标题）→ 缓存不作废，未动 `SCHEMA_VERSION`。补丁集仍 **9** 个目标，`patch-base-version` = `0.10.2` |
 | （非升级）**全局壳 0.10.0 → 0.10.2 对齐** | 壳是瘦壳（`bin/dsh-tui.js` + `package.json`，逻辑永远来自 profile 副本），所以只按上游提示跑 `npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@0.10.2`；结果 `dsh-tui version` 显示 launcher/profile 双双 0.10.2 | 踩到一个与包无关的坑：**本机 `https_proxy=127.0.0.1:7890` 已不可用**，npm 拿不到新 packument 就退回本地缓存 → 报 `ETARGET No matching version found for …@0.10.2`（而 0.10.2 其实 11:45 就发布了，profile 也是 14:26 用 pnpm 装上的）。直连（`curl --noproxy '*'`）正常，于是用 `env -u https_proxy -u http_proxy -u all_proxy npm install -g …` 绕开代理安装成功。**下次装包报 notarget 先怀疑代理+缓存，别怀疑版本号**。壳升级不动 profile 与 `~/.dsh/profiles/node_modules/@deepseek-ai/*`（tool 两包仍带补丁、9/9 目标 check 通过） |
+| **profile 掉回 0.10.1 → 整套补丁打不上**（2026-09-17 晚） | `dsh` 启动按 profile 的 pin（`~/.dsh/profiles/dsh-tui/package.json` = `0.10.1`）reconcile `node_modules`，把当天上午应用内 update 装上的 0.10.2 **拉回 0.10.1**；而补丁基线已是 0.10.2 → 脚本的**全局**版本闸门直接 `Skipping auto re-apply`，**9/9 目标一个都没打**。同时生态升到 `dsh 0.1.5-rc.2` 把 tool 两包带到 **0.1.5-rc.2**，而 `original/` 还是 `0.1.2-rc.1` 的形状 → 那两条就算闸门放行也不能用。附带查出的隐患：pnpm 的 `node_modules` 是 store 硬链接，旧脚本 `cp "$backup" "$target"` **写穿 store**，于是「重装同版本又把补丁带回来」，`OK` 5/9 是假象 | ①先修版本关系：`env -u https_proxy -u http_proxy -u all_proxy pnpm add -C ~/.dsh/profiles/dsh-tui @deepseek-harness-tui/dsh-tui@0.10.2`（**改 pin 才持久**，pnpm 自动补 `minimumReleaseAgeExclude`）+ 全局壳同版本 `npm install -g --legacy-peer-deps …@0.10.2`；②**tool 两包按 0.1.5-rc.2 重做** `original/backup/diffs`——旧 hunk 能干净落上（`patch` 报 offset −6），同时把旧 backup 夹带的上游回退（去掉 scope-aware 提示语、`REMEDIES` 倒回内联）一并清掉；③`apply-diff-patches.sh` 改为**逐包基线 + 分目标守卫**（新增 `patch-base-versions.json`：dsh-tui/tool 两包各记版本，漂移的目标报 `NEEDS-REPORT` 只跳过自己，其余照打）+ `cp --remove-destination` 断链，`resolve-patch-targets.mjs` 补 `$TOOLS` 替换；④复验：7 个 TUI 目标逐个「`diff -u` 补丁打在 0.10.2 stock 上 == `backup/`」，2 个 tool 目标同法复验，脚本 9/9 `applied` 后 `check` 全 `OK` exit 0；⑤`check-doc-consistency.sh` 补 12 条断言（F1 tool 侧 5 条、基线一致 2 条、脚本守卫 3 条、`dsh-patch` 别名 2 条——顺带把"别名并不存在"的旧注释改成真断言）→ **58/58 通过**，三个行为测试通过。**结论：补丁基线必须等于 pin 指向的版本，壳/生态/tool 包各记各的。** |
+
+| **0.11.1 迁移**（2026-09-28，生态 `dsh`/tool 两包 → `0.1.7-rc.2`，profile & 壳 → `0.11.1`） | 升级把 **9/9 旧目标全部还原成 stock**；`dsh-patch` 因逐包基线漂移把它们全报 `NEEDS-REPORT`（用户看到的「补丁没补」）。更根本的变化：**`/resume` 被上游整屏重写** —— `screens/SessionBrowser.js`（旧 F3 的整文件分叉对象）被删除，改为 `screens/SessionSupervisor.js`（工作区 rail + 会话面板 + 多会话托管）。其余上游变化：`tool-fs` 118 行（write 结果多了 `operation` 字段）、`str-replace` 仅 3 行、`PromptInput` 321 行（新增 `loadHistoryOldestFirst`，播种重构成 `seedHistory()`+`historySeeded` 布尔）、`AssistantToolUseMessage` 56 行、`i18n` 218 行（`session-hint-list*` 全部消失）、`Chat` 372 行；`digest.js` **字节未变** | ①逐目标 3-way（`base`=旧 original、`theirs`=旧 backup、`ours`=新 stock）：`history`/`Chat`/`digest`/`str-replace` 0 冲突；冲突 4 处按 §2 意图解——`tool-fs` 保留上游新的 `operation` 形状并补 `oldStart/newStart`、`AssistantToolUseMessage` 只留 hover 文案（`hoverTint` 分支仍不恢复）、`PromptInput` 的 import 走 `loadHistoryOldestFirst`、i18n 的旧 key 已死（改打 `supervisor-hint-list`）。②**F2 适配上游新 API**：过滤抽成 `scopeToCwd`，`loadHistory(cwd)` 与 `loadHistoryOldestFirst(cwd)` 共用，`seedHistory()` 的守卫由布尔改成 `historySeedCwd`。③**F3 改为薄补丁**（用户选定「等价移植」）：`railVisible = false`、`activePane` 起手 `list`、`activateRail` 置空、`selected` 由 `channel.cwd` 合成、`visibleSessions` 按 `samePath(session.cwd, channel.cwd)` 过滤并删掉 stock 的 rail 选择状态（`selectedPath`/`selectedUnregistered`/`selectionManual` 与自动选中 effect），`SessionSupervisor.js` 的 Ctrl+N 改用钉死目录，i18n 只改 `supervisor-hint-list`。④**`apply-diff-patches.sh` 升级为「能直接打补丁」**：漂移目标不再跳过，改用 `diffs/<name>.patch` + `patch --fuzz=3` 打在**已装文件**上，全部 hunk 落地且 `node --check` 通过才写入（`PATCHED-DRIFT`），并把结果指纹写进 `state/<name>.sha1` 使重跑幂等（`OK-PATCHED`）；写不进目标时 `ABORT`（旧的 `cp` 失败仍打印 applied 是假成功）。⑤复验：10/10 目标 `check` 全 `OK`、三个行为测试通过（`test-resume-flat.mjs` **重写**成新屏的 12 条断言，并在 stock 上验证过会失败 7 条）、`check-doc-consistency.sh` 全过。补丁集 9 → **10** 个目标，`patch-base-version` = `0.11.1` |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 

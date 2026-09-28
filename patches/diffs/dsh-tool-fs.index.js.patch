@@ -1,6 +1,6 @@
---- original/dsh-tool-fs.index.js	2026-09-09 10:51:37.375738666 +0800
-+++ backup/dsh-tool-fs.index.js	2026-09-09 10:51:37.378322421 +0800
-@@ -500,7 +500,11 @@
+--- original/dsh-tool-fs.index.js	2026-09-28 20:28:44.030550090 +0800
++++ backup/dsh-tool-fs.index.js	2026-09-28 20:28:44.031618839 +0800
+@@ -430,7 +430,11 @@
  		diffs.push({
  			path,
  			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
@@ -13,22 +13,22 @@
  		});
  	}
  	return diffs;
-@@ -643,10 +647,12 @@
- 				type: "text",
- 				text: formatWriteOutput(value.path, value)
+@@ -569,10 +573,12 @@
  			}],
--			presentationMeta: (args, value) => ({ diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
-+			presentationMeta: (args, value) => ({ diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
- 				path,
- 				oldText,
--				newText
-+				newText,
-+				oldStart,
-+				newStart
- 			})) })
+ 			presentationMeta: (args, value) => ({
+ 				operation: value.operation,
+-				diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
++				diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
+ 					path,
+ 					oldText,
+-					newText
++					newText,
++					oldStart,
++					newStart
+ 				}))
+ 			})
  		},
- 		async execute(args, exec) {
-@@ -792,10 +798,12 @@
+@@ -719,10 +725,12 @@
  				type: "text",
  				text: formatEditOutput(value.path, args.replace_all ?? false)
  			}],

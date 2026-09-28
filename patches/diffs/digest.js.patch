@@ -1,5 +1,5 @@
---- original/digest.js	2026-09-17 14:33:43.607539414 +0800
-+++ backup/digest.js	2026-09-17 14:33:43.610297942 +0800
+--- original/digest.js	2026-09-28 20:28:44.028613946 +0800
++++ backup/digest.js	2026-09-28 20:28:44.029632976 +0800
 @@ -19,6 +19,14 @@
   * is the evidence behind {@link SessionTitle.source}, which is why the picker
   * can dim a fallback and explain a name instead of merely displaying one.

@@ -1,0 +1,199 @@
+--- original/useSessionSupervisor.js	2026-09-28 20:28:44.045767938 +0800
++++ backup/useSessionSupervisor.js	2026-09-28 20:28:44.046591499 +0800
+@@ -142,16 +142,6 @@
+     const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
+     const [railFocus, setRailFocus] = useState(0);
+     /**
+-     * A rail entry the user picked by hand that is NOT registered — the fallback
+-     * group for unregistered sessions. It exists only for this screen's lifetime:
+-     * selecting a group is a way to SEE those sessions, never a way to register a
+-     * directory, so it must not create a ledger record.
+-     */
+-    const [selectedUnregistered, setSelectedUnregistered] = useState(false);
+-    const [selectedPath, setSelectedPath] = useState(undefined);
+-    /** True once the user picked a rail row by hand; see the selection effect. */
+-    const [selectionManual, setSelectionManual] = useState(false);
+-    /**
+      * The session column's cursor, as ONE fact.
+      *
+      * It used to be three: a `sessionFocus` index, a `sessionFocusRef` mirror and
+@@ -177,8 +167,12 @@
+      * Which column owns the keyboard, and therefore which column draws the `❯`
+      * cursor. Exactly one at a time: two cursors mean "where does Enter go?" has
+      * no answer, and ←/→ is how this screen answers it.
++     *
++     * F3 fork: the rail is not rendered at all, so the session list owns the
++     * keyboard from the first frame and nothing moves ownership away
++     * (`activateRail` is inert).
+      */
+-    const [activePane, setActivePane] = useState('rail');
++    const [activePane, setActivePane] = useState('list');
+     const [pins, setPins] = useState(() => readSessionPins());
+     const [menu, setMenu] = useState(undefined);
+     const [rename, setRename] = useState(undefined);
+@@ -253,80 +247,53 @@
+     React.useEffect(() => {
+         void reload();
+     }, [reload]);
+-    // Selection follows the terminal's own directory, then the ledger: the rail
+-    // must open on the workspace this terminal is IN, not on whichever record
+-    // sorts first — otherwise launching in a workspace you have never opened
+-    // lands the marker on some unrelated project.
+-    //
+-    // It deliberately does NOT latch the first default it computes. The listing
+-    // arrives asynchronously, so the very first pass runs against an EMPTY ledger;
+-    // latching there would pin the rail to whatever record arrives first and never
+-    // reconsider. While the selection is still ours to make, every ledger update
+-    // re-derives it (`entries[0]` remains the fallback when the terminal's own
+-    // directory is not registered); once the user picks a row by hand, that choice
+-    // wins until its entry disappears.
+-    //
+-    // `channel.cwd` is a dependency, not just a first read: resuming a session
+-    // from another workspace moves this terminal to that workspace, and the rail
+-    // follows the session the pane is showing rather than the launch directory.
+-    React.useEffect(() => {
+-        if (railEntries.length === 0) {
+-            if (selectedPath !== undefined && !selectionManual)
+-                setSelectedPath(undefined);
+-            return;
+-        }
+-        if (selectionManual
+-            && selectedPath !== undefined
+-            && railEntries.some(entry => entry.from === 'registry' && samePath(entry.path, selectedPath)))
+-            return;
+-        // A hand-picked fallback group stays picked while it is still on the rail.
+-        // Without this the group would be dropped on the very next listing pass and
+-        // the sessions it was showing would vanish again.
+-        if (selectionManual && selectedUnregistered
+-            && railEntries.some(entry => entry.from === 'unregistered'))
+-            return;
+-        const here = railEntries.find(entry => entry.from === 'registry' && samePath(entry.path, channel.cwd));
+-        const next = here ?? railEntries[0];
+-        setSelectedPath(next.from === 'registry' ? next.path : undefined);
+-        setSelectedUnregistered(next.from === 'unregistered');
+-        // The cursor travels with an automatic selection. It starts at 0, so
+-        // leaving it there while the selection lands elsewhere paints two green
+-        // rows — `❯` on the first record and the marker on the selected one — until
+-        // some input moves it. The two are one position on this screen, and the
+-        // very first frame has to render that way. A pick the user made by hand is
+-        // left alone (it already moved the cursor itself).
+-        setRailFocus(current => {
+-            const index = railEntries.findIndex(entry => entry.id === next.id);
+-            return index < 0 || current === index ? current : index;
+-        });
+-    }, [railEntries, selectedPath, selectedUnregistered, selectionManual, channel.cwd]);
+     // The cursor indexes the entry list directly (there is no `+` row in front of
+     // it), so a shrinking ledger has to pull it back inside or the last row would
+     // highlight nothing.
+     React.useEffect(() => {
+         setRailFocus(current => Math.min(current, Math.max(0, railEntries.length - 1)));
+     }, [railEntries.length]);
+-    /** The rail row whose sessions the pane is showing (or the fallback group). */
++    /**
++     * F3 fork: the pane shows THIS terminal's working directory, always.
++     *
++     * The stock screen derives this from the rail's selection (the terminal's
++     * directory, else the first ledger record, unless the user picked a row by
++     * hand). With the rail gone there is nothing to pick and nothing to fall
++     * back to: the directory the terminal is in is the scope, and a directory
++     * with no sessions shows an empty list rather than another project's.
++     *
++     * The entry is synthesized because the screen's call sites expect one
++     * (`path` for `newSessionIn`, `title` for the headers). `path` takes the
++     * registry's spelling of the directory when it is registered, so a new
++     * session opens the same workspace record the rail would have offered.
++     */
+     const selected = useMemo(() => {
+-        const registered = railEntries.find(entry => entry.from === 'registry' && selectedPath !== undefined && samePath(entry.path, selectedPath));
+-        if (registered !== undefined)
+-            return registered;
+-        if (selectedUnregistered)
+-            return railEntries.find(entry => entry.from === 'unregistered');
+-        return railEntries[0];
+-    }, [railEntries, selectedPath, selectedUnregistered]);
+-    /**
+-     * Sessions whose recorded cwd is the selected workspace, minus the search
+-     * filter. Live sessions in this workspace sort above stopped ones, then by
+-     * recency: what this terminal is currently running is what the user is
+-     * most likely switching between.
++        const registered = railEntries.find(entry => entry.from === 'registry' && samePath(entry.path, channel.cwd))?.path;
++        const path = registered ?? (channel.cwd === '' ? UNREGISTERED_RAIL_ID : channel.cwd);
++        return {
++            id: `cwd:${path}`,
++            path,
++            title: basename(channel.cwd) || t('supervisor-unregistered'),
++            present: true,
++            sessionCount: (groupedEntries.get(path) ?? []).length,
++            from: 'cwd',
++        };
++    }, [railEntries, groupedEntries, channel.cwd]);
++    /**
++     * Sessions recorded in this terminal's directory, minus the search filter.
++     * Live sessions in the directory sort above stopped ones, then by recency:
++     * what this terminal is currently running is what the user is most likely
++     * switching between.
++     *
++     * F3 fork: the rows are matched by DIRECTORY (`samePath`), not by the rail
++     * group's exact key, so a session logged under a trailing slash or another
++     * case still belongs to the directory the terminal is in.
+      */
+     const visibleSessions = useMemo(() => {
+-        if (selected === undefined)
+-            return [];
+         const needle = query.trim().toLowerCase();
+         void pulse;
+-        return (groupedEntries.get(selected.path) ?? [])
++        return listedSessions
++            .filter(session => samePath(session.cwd, channel.cwd))
+             .filter(session => sessionMatchesQuery(session, needle))
+             .slice()
+             .sort((left, right) => {
+@@ -334,7 +301,7 @@
+             const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0;
+             return rightLive - leftLive || right.updatedAt - left.updatedAt;
+         });
+-    }, [groupedEntries, selected, query, liveStateOf, pulse]);
++    }, [listedSessions, channel.cwd, query, liveStateOf, pulse]);
+     /**
+      * Cursor identity: rows reorder on every reload and filter, so the cursor
+      * follows an ID rather than an index — and the cursor space includes the
+@@ -372,14 +339,18 @@
+         const current = visibleSessions.find(session => liveStateOf(session.id)?.current === true);
+         setFocusSessionId(current?.id);
+     }, [liveStateOf, visibleSessions]);
+-    /** Enter the workspace column. */
++    /**
++     * F3 fork: ← used to hand the keyboard to the workspace rail. There is no
++     * rail any more, so the key is deliberately inert — the list keeps the
++     * keyboard and `❯` never leaves the rows the user can act on.
++     */
+     const activateRail = useCallback(() => {
+-        setActivePane('rail');
+     }, []);
+     const railWidth = columns >= RAIL_MIN_TOTAL_COLUMNS
+         ? Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, Math.floor(columns * 0.3)))
+         : columns;
+-    const railVisible = columns >= RAIL_MIN_TOTAL_COLUMNS;
++    /** F3 fork: the rail is never rendered; the list takes the whole width. */
++    const railVisible = false;
+     const sessionWidth = Math.max(20, columns - (railVisible ? railWidth + 1 : 0));
+     const railListHeight = Math.max(1, rows - RAIL_CHROME_ROWS);
+     /**
+@@ -402,10 +373,13 @@
+         }
+         setPins(result.pins);
+     }, [report]);
+-    const selectEntry = useCallback((entry) => {
+-        setSelectedPath(entry.from === 'registry' ? entry.path : undefined);
+-        setSelectedUnregistered(entry.from === 'unregistered');
+-        setSelectionManual(true);
++    /**
++     * F3 fork: the stock screen selects a rail row here. The pane is pinned to
++     * this terminal's directory, so the call sites that remain (a rail click,
++     * the workspace action menu) have no other scope to select; they only reset
++     * the session cursor.
++     */
++    const selectEntry = useCallback(() => {
+         setFocusSessionId(undefined);
+     }, []);
+     /**

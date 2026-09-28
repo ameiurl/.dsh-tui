@@ -1,0 +1,15 @@
+--- original/SessionSupervisor.js	2026-09-28 20:28:44.043168613 +0800
++++ backup/SessionSupervisor.js	2026-09-28 20:28:44.044367117 +0800
+@@ -176,9 +176,9 @@
+             return;
+         }
+         if (isMod(key) && input === 'n') {
+-            const entry = railEntries[railRef.current];
+-            if (entry !== undefined)
+-                newSessionIn(entry);
++            // F3 fork: the rail used to name the workspace; the pinned selection
++            // IS this terminal's directory, so Ctrl+N opens a session there.
++            newSessionIn(selected);
+             return;
+         }
+         if (isMod(key) && input === 'l') {

@@ -1,10 +1,11 @@
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { FsError } from "@deepseek-ai/dsh-fs";
-import { ESCALATION_TARGETS, approveEscalation, canonicalPath, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from "@deepseek-ai/dsh-sandbox";
+import { readLangHintForPath as langFromPath } from "@deepseek-ai/dsh-util-code-language";
 import { structuredPatch } from "diff";
 import { basename, extname } from "node:path";
 import { AttachmentError, AttachmentId } from "@deepseek-ai/dsh-attachment";
+import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, sandboxPermissionsDescription, validateEscalationArgs } from "@deepseek-ai/dsh-sandbox";
 //#region lib/types/read-render.js
 /**
 * Pure read presentation: turn provider-decoded text into a bounded, line-numbered window and
@@ -110,71 +111,6 @@ ${outcome.lines.length > 0 ? `${outcome.lines.map((line) => `${line.number}: ${l
 </content>`;
 }
 /**
-* Lowercased file-extension to syntax-highlighting language hint. Keys are the
-* extension without its dot; a UI treats an absent key as plain text. The map is
-* intentionally small — common source, config, and markup extensions a
-* line-numbered code view benefits from highlighting — not an exhaustive registry.
-*/
-const LANG_BY_EXTENSION = {
-	ts: "ts",
-	tsx: "tsx",
-	mts: "ts",
-	cts: "ts",
-	js: "js",
-	jsx: "jsx",
-	mjs: "js",
-	cjs: "js",
-	json: "json",
-	jsonc: "json",
-	py: "py",
-	rb: "rb",
-	go: "go",
-	rs: "rs",
-	java: "java",
-	c: "c",
-	h: "c",
-	cc: "cpp",
-	cpp: "cpp",
-	hpp: "cpp",
-	cxx: "cpp",
-	cs: "cs",
-	kt: "kotlin",
-	swift: "swift",
-	php: "php",
-	sh: "sh",
-	bash: "sh",
-	zsh: "sh",
-	yaml: "yaml",
-	yml: "yaml",
-	toml: "toml",
-	ini: "ini",
-	md: "md",
-	markdown: "md",
-	mdx: "mdx",
-	html: "html",
-	htm: "html",
-	css: "css",
-	scss: "scss",
-	less: "less",
-	sql: "sql",
-	xml: "xml",
-	lua: "lua"
-};
-/**
-* Derive a syntax-highlighting language hint from a read path's file extension.
-* Pure and case-insensitive on the extension; a dotfile with no extension
-* (`.gitignore`) and an unknown extension both yield `undefined`.
-* @param path - the model-facing path the read reported.
-* @returns the language hint for {@link LANG_BY_EXTENSION}, or `undefined` when the extension maps to none.
-*/
-function langFromPath(path) {
-	const base = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
-	const dot = base.lastIndexOf(".");
-	if (dot <= 0) return void 0;
-	const ext = base.slice(dot + 1).toLowerCase();
-	return Object.hasOwn(LANG_BY_EXTENSION, ext) ? LANG_BY_EXTENSION[ext] : void 0;
-}
-/**
 * Whether `value` is a valid {@link FileTextLine} (defensive narrowing from
 * opaque `meta`). `number` must be a 1-based integer line number, since a card
 * rendered from a zero, fractional, or non-finite line number would violate the
@@ -229,28 +165,22 @@ function readMetaFromMeta(meta) {
 * `process.cwd()` at the tool boundary.
 * @module @deepseek-ai/dsh-tool-fs/session-cwd
 */
-const PARENT_PATH_SEGMENT = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
 /**
 * The session workspace cwd for this call, or `undefined` when none applies.
 * @param exec - the tool-execution context; only its optional `agent` is read.
-* @param requestedPath - the path the provider will resolve; parent traversal
-*   makes a symlinked cwd's filesystem identity observable.
 * @returns the calling agent's session cwd, or undefined for a non-agent caller (the backend then applies its own default).
 */
-function sessionCwd(exec, requestedPath) {
-	const cwd = exec.agent?.session.header.cwd;
-	if (cwd === void 0 || !PARENT_PATH_SEGMENT.test(cwd) && !PARENT_PATH_SEGMENT.test(requestedPath)) return cwd;
-	return canonicalPath(cwd);
+function sessionCwd(exec) {
+	return exec.agent?.session.header.cwd;
 }
 /**
 * Resolution options shared by all model-facing filesystem tools.
 * @param exec - the tool-execution context supplying session cwd and cancellation.
-* @param requestedPath - the path the provider will resolve.
 * @param policyWorkspaceRoot - resolved per-call root, when a mutation carries sandbox policy.
 * @returns provider resolution options for the current tool call.
 */
-function sessionResolveOptions(exec, requestedPath, policyWorkspaceRoot) {
-	const cwd = policyWorkspaceRoot ?? sessionCwd(exec, requestedPath);
+function sessionResolveOptions(exec, policyWorkspaceRoot) {
+	const cwd = policyWorkspaceRoot ?? sessionCwd(exec);
 	return {
 		...cwd !== void 0 ? { cwd } : {},
 		signal: exec.signal
@@ -270,7 +200,7 @@ function sessionResolveOptions(exec, requestedPath, policyWorkspaceRoot) {
 * @returns the resolved target and its single stat result.
 */
 async function resolveRegularReadTarget(ctx, exec, requestedPath) {
-	const target = await ctx.fs.resolve(requestedPath, sessionResolveOptions(exec, requestedPath));
+	const target = await ctx.fs.resolve(requestedPath, sessionResolveOptions(exec));
 	const info = await ctx.fs.stat(target, exec.signal);
 	if (info === void 0) {
 		ctx.emit("fs/observed", target, { kind: "absent" }, exec);
@@ -318,7 +248,7 @@ function parseReadArgs(args, maxLimit) {
 	};
 }
 /**
-* Register the `read` tool and its system-prompt guidance.
+* Register the `read` tool and its scope-aware system-prompt guidance.
 * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
 * @param caps - the deployment's resolved read caps (plugin config after defaulting).
 */
@@ -326,7 +256,7 @@ function applyReadTool(ctx, caps) {
 	ctx.systemPrompt.section({
 		name: "tool:read",
 		order: ctx.systemPrompt.getSectionOrder("TOOL_READ"),
-		text: "Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files."
+		text: ({ scope }) => ctx.tools.get("read", scope) === void 0 ? "" : "Use the read tool — not shell commands like cat — to inspect text files. Use offset and limit to continue reading large files."
 	});
 	ctx.tools.register(defineTool({
 		name: "read",
@@ -526,33 +456,27 @@ function diffsFromMeta(meta) {
 //#endregion
 //#region lib/types/error.js
 /**
-* Model-facing remediation for guarded-mutation failures. The provider's
-* `FS_STALE_VERSION` and `FS_NOT_OBSERVED` messages state the condition but
-* not the only correct recovery (re-read / read the file), so this package
-* appends the remedy at the model boundary; provider messages stay
-* machine-oriented and unchanged.
+* Model-facing diagnostics for guarded-mutation failures. Providers and
+* policies retain operation-specific causes, while this package owns the
+* stable message shown to the model.
 * @module @deepseek-ai/dsh-tool-fs/src/error
 */
-/** The remedy appended to each remediable failure code's message. */
-const REMEDIES = {
-	FS_STALE_VERSION: "re-read the file, then retry",
-	FS_NOT_OBSERVED: "read the file, then retry"
-};
 /**
-* Append the correct recovery instruction to a guarded-mutation failure's
-* message. `FS_STALE_VERSION` (the file changed since this session's last
-* observation, including a missing target) recovers only by re-reading;
-* `FS_NOT_OBSERVED` (no prior read by this session) by reading. The `FsError`
-* code is preserved so retry/permission/UI layers keep routing on it, and the
-* original error chains as `cause`. Anything else passes through untouched.
+* Render the stable model-facing diagnostic for a guarded-mutation failure.
+* `FS_STALE_VERSION` keeps the provider's reason and appends its re-read
+* remedy. `FS_NOT_OBSERVED` replaces operation-specific policy/provider text
+* with one path-aware reason and read remedy. The original error remains the
+* cause, and both diagnostics preserve its code for machine routing. Anything
+* else passes through untouched.
 * @param error - the caught value from a write/edit execution.
+* @param displayPath - the resolved target path shown to the model.
 * @returns a remediated `FsError` for the two guarded-mutation codes, else the original value.
 */
-function remediateFsError(error) {
+function remediateFsError(error, displayPath) {
 	if (!(error instanceof FsError)) return error;
-	const remedy = REMEDIES[error.code];
-	if (!remedy) return error;
-	return new FsError(`${error.message} — ${remedy}`, error.code, { cause: error });
+	if (error.code === "FS_NOT_OBSERVED") return new FsError(`cannot modify "${displayPath}": file has not been read — read the file, then retry`, error.code, { cause: error });
+	if (error.code === "FS_STALE_VERSION") return new FsError(`${error.message} — re-read the file, then retry`, error.code, { cause: error });
+	return error;
 }
 //#endregion
 //#region lib/types/write.js
@@ -589,7 +513,7 @@ ${outcome.operation === "create" ? "Created" : "Updated"} file
 </content>`;
 }
 /**
-* Register the `write` tool and its system-prompt guidance.
+* Register the `write` tool and its scope-aware system-prompt guidance.
 * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
 * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
 */
@@ -597,7 +521,7 @@ function applyWriteTool(ctx, sandbox) {
 	ctx.systemPrompt.section({
 		name: "tool:write",
 		order: ctx.systemPrompt.getSectionOrder("TOOL_WRITE"),
-		text: "Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes."
+		text: ({ scope }) => ctx.tools.get("write", scope) === void 0 ? "" : "Read an existing file before overwriting it with write (the default fs-observation-policy requires it)" + (ctx.tools.get("edit", scope) === void 0 ? "" : " and prefer edit for targeted changes") + "."
 	});
 	ctx.tools.register(defineTool({
 		name: "write",
@@ -643,22 +567,25 @@ function applyWriteTool(ctx, sandbox) {
 				type: "text",
 				text: formatWriteOutput(value.path, value)
 			}],
-			presentationMeta: (args, value) => ({ diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
-				path,
-				oldText,
-				newText
-			})) })
+			presentationMeta: (args, value) => ({
+				operation: value.operation,
+				diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
+					path,
+					oldText,
+					newText
+				}))
+			})
 		},
 		async execute(args, exec) {
 			const input = parseWriteArgs(args);
 			const sandboxPolicy = await sandbox.resolvePolicy("write", args, exec);
-			const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, input.filePath, sandboxPolicy?.workspaceRoot));
+			const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, sandboxPolicy?.workspaceRoot));
 			const intent = await ctx.waterfall("fs/write-intent", target, exec, () => void 0);
 			let outcome;
 			try {
 				outcome = await ctx.fs.writeText(target, input.content, intent, exec.signal, sandboxPolicy);
 			} catch (error) {
-				throw remediateFsError(sandbox.mapError(error, sandboxPolicy));
+				throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath);
 			}
 			ctx.emit("fs/observed", target, {
 				kind: "present",
@@ -734,7 +661,7 @@ function formatEditOutput(displayPath, replaceAll) {
 	return replaceAll ? `The file ${displayPath} has been updated. All occurrences were successfully replaced.` : `The file ${displayPath} has been updated successfully.`;
 }
 /**
-* Register the `edit` tool and its system-prompt guidance.
+* Register the `edit` tool and its scope-aware system-prompt guidance.
 * @param ctx - the plugin context; registrations are effects scoped to it, and execution uses its `fs` service.
 * @param sandbox - the shared sandbox-escalation API (advertisement, mode stamping, denial mapping).
 */
@@ -742,7 +669,7 @@ function applyEditTool(ctx, sandbox) {
 	ctx.systemPrompt.section({
 		name: "tool:edit",
 		order: ctx.systemPrompt.getSectionOrder("TOOL_EDIT"),
-		text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."
+		text: ({ scope }) => ctx.tools.get("edit", scope) === void 0 ? "" : "Read a file before editing it (the default fs-observation-policy requires it), unless you just created or edited it in this session."
 	});
 	ctx.tools.register(defineTool({
 		name: "edit",
@@ -756,7 +683,7 @@ function applyEditTool(ctx, sandbox) {
 			old_string: {
 				type: "string",
 				required: true,
-				description: "Literal text to replace. Must match exactly."
+				description: "Literal text to replace."
 			},
 			new_string: {
 				type: "string",
@@ -801,7 +728,7 @@ function applyEditTool(ctx, sandbox) {
 		async execute(args, exec) {
 			const input = parseEditArgs(args);
 			const sandboxPolicy = await sandbox.resolvePolicy("edit", args, exec);
-			const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, input.filePath, sandboxPolicy?.workspaceRoot));
+			const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, sandboxPolicy?.workspaceRoot));
 			let outcome;
 			try {
 				const intent = await ctx.waterfall("fs/edit-intent", target, exec, () => void 0);
@@ -811,7 +738,7 @@ function applyEditTool(ctx, sandbox) {
 					replaceAll: input.replaceAll
 				}, intent, exec.signal, sandboxPolicy);
 			} catch (error) {
-				throw remediateFsError(sandbox.mapError(error, sandboxPolicy));
+				throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath);
 			}
 			ctx.emit("fs/observed", target, {
 				kind: "present",
@@ -1046,7 +973,7 @@ function imageReadContent(value) {
 function applyReadImageTool(ctx) {
 	ctx.tools.register(defineTool({
 		name: "read_image",
-		description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without a file extension is accepted; the format is detected from the file content, so normalized attachment paths can be passed directly without copying or renaming. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input.",
+		description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. Large images are downscaled automatically; do not install image libraries or create thumbnails to inspect an image.",
 		parameters: { file_path: {
 			type: "string",
 			required: true,
@@ -1064,7 +991,8 @@ function applyReadImageTool(ctx) {
 					image: IMAGE_VALUE_SCHEMA
 				}
 			},
-			render: (_args, value) => imageReadContent(value)
+			render: (_args, value) => imageReadContent(value),
+			presentationMeta: (_args, value) => ({ path: value.path })
 		},
 		isConcurrencySafe: () => true,
 		async execute(args, exec) {
@@ -1170,18 +1098,19 @@ var FsSandboxController = class {
 			sandbox_permissions: {
 				type: "string",
 				enum: [...this.escalationModes],
-				description: "The wider sandbox mode this file operation needs. Only valid as a one-shot retry of an operation the sandbox just denied; requires justification and user approval."
+				description: sandboxPermissionsDescription("operation")
 			},
 			justification: {
 				type: "string",
-				description: "Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access."
+				description: "Required with sandbox_permissions: one sentence for the user explaining why this exact file operation needs the wider access. Use the language of the user’s current request."
 			}
 		};
 	}
 	/**
 	* The policy to stamp onto this mutation: an approved escalation grant (a
 	* strictly wider retry resolved through `ctx.approval` before anything
-	* executes), else the session's standing mode. The calling session's cwd is
+	* executes), else the session's standing mode. Repeating the standing mode
+	* requires no approval. The calling session's cwd is
 	* always carried as the workspace root. Validates the escalation argument
 	* pairing first.
 	* @param toolName - the mutating tool's name, for the approval audit trail.

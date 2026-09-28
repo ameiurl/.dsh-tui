@@ -22,9 +22,11 @@ const pathsOnly = process.argv.includes('--paths');
 // Resolve $DSH_HOME / $HOME the way the shell script does by default.
 const dshHome = process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh');
 const tuiPkg = join(dshHome, 'profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui');
+const tools = join(dshHome, 'profiles/node_modules/@deepseek-ai');
 
-// `TARGETS` is a bash array of "$VAR/lib/...|backup-name" quoted entries; pull
-// each quoted entry and substitute the two shell variables it may use.
+// `TARGETS` is a bash array of "$VAR/lib/...|backup-name|pkg-dir|pkg-name"
+// quoted entries; pull each quoted entry, keep the target→backup pair the
+// runbook iterates, and substitute every shell variable the script may use.
 const block = applyScript.match(/declare -a TARGETS=\(([\s\S]*?)\n\)/);
 if (!block) {
   console.error('cannot find the TARGETS array in apply-diff-patches.sh');
@@ -38,7 +40,9 @@ for (const entry of entries) {
     .replaceAll('$DSH_HOME', dshHome)
     .replaceAll('$HOME', process.env.HOME ?? '')
     .replaceAll('$TUI_PKG', tuiPkg)
+    .replaceAll('$TOOLS', tools)
     .replaceAll('${DSH_HOME}', dshHome)
-    .replaceAll('${TUI_PKG}', tuiPkg);
+    .replaceAll('${TUI_PKG}', tuiPkg)
+    .replaceAll('${TOOLS}', tools);
   console.log(pathsOnly ? target : `${target}|${backup}`);
 }

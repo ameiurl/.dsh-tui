@@ -1,46 +1,56 @@
---- original/PromptInput.js	2026-09-11 09:42:48.482543513 +0800
-+++ backup/PromptInput.js	2026-09-11 14:31:43.167792821 +0800
-@@ -24,7 +24,7 @@
- import { editInExternalEditor } from '../utils/externalEditor.js';
- import { setPromptEditorNode, EditorButton } from './PromptEditor.js';
- import { isHiddenCommandName, parseCommandName } from '../commands.js';
--import { appendHistory } from '../history.js';
-+import { appendHistory, loadHistory } from '../history.js';
- import { mentionAtCaret } from '../utils/mentions.js';
- import { preserveSelection } from '../utils/fileSuggestions.js';
- import { isMod } from '../utils/modifiers.js';
-@@ -454,6 +454,30 @@
+--- original/PromptInput.js	2026-09-28 20:28:44.037211610 +0800
++++ backup/PromptInput.js	2026-09-28 20:28:44.037863675 +0800
+@@ -534,8 +534,15 @@
      const history = React.useRef([]);
      const historyIndex = React.useRef(-1);
      const historyDraft = React.useRef({ text: '', images: [] });
-+    // ↑/↓ history walk: seeded from the persisted history file (oldest first,
-+    // newest last — `loadHistory()` returns newest-first), so the arrows
-+    // recall inputs from earlier sessions, not just this mount. Bash-style:
-+    // in-session submissions append on top of the seed. Persisted entries
-+    // carry no image bindings, so the seed adapts them to the in-memory shape.
-+    //
-+    // The seed is scoped to the working directory and re-runs whenever that
-+    // directory changes (the workspace picker can move the channel mid-session),
-+    // so ↑/↓ never offer another directory's commands. Guarding on the directory
-+    // instead of re-seeding on every render also stops a re-render that lands
-+    // before a fresh write is durable from clobbering in-session submissions.
+-    /** The persisted history is read lazily, once per mount (see seedHistory). */
+-    const historySeeded = React.useRef(false);
++    /**
++     * The directory the persisted history was seeded for — `undefined` until the
++     * first seed. Seeding is once per DIRECTORY, not once per mount: the
++     * workspace picker can move the channel mid-session, and ↑/↓ must never
++     * offer another directory's commands. Guarding on the directory (instead of
++     * re-seeding on every render) also stops a re-render that lands before a
++     * fresh write is durable from clobbering in-session submissions.
++     */
 +    const historySeedCwd = React.useRef(undefined);
-+    if (historySeedCwd.current !== channel.cwd) {
-+        historySeedCwd.current = channel.cwd;
-+        historyIndex.current = -1;
-+        try {
-+            history.current = loadHistory(channel.cwd)
-+                .map(entry => ({ text: entry.text, images: [] }))
-+                .reverse();
-+        }
-+        catch {
-+            // Best-effort: an unreadable history file just leaves ↑/↓ empty.
-+        }
-+    }
      /** Visible `[Image #N]` labels are presentation only; this sidecar carries
       * the non-reusable capability for the current draft. History/rewind text
       * restored without this map can never bind to a later image by accident. */
-@@ -968,7 +992,7 @@
+@@ -1098,19 +1105,25 @@
+         }
+     };
+     /**
+-     * Seed the walk with the persisted history (issue #986). `↑`/`↓` used to
+-     * see only what this process submitted, so a restart lost every earlier
+-     * entry. Seeding before the first push keeps ONE chronological list —
++     * Seed the walk with the persisted history (issue #986), scoped to this
++     * working directory. `↑`/`↓` used to see only what this process submitted,
++     * so a restart lost every earlier entry. Seeding before the first push keeps ONE chronological list —
+      * persisted entries first, this run's submits behind them — instead of two
+      * lists to merge at recall time. Restored text carries no image capability
+      * (the file stores text only), which is also what keeps a recalled entry
+      * from binding to a later staged image by accident.
+      */
+     const seedHistory = () => {
+-        if (historySeeded.current)
++        if (historySeedCwd.current === channel.cwd)
+             return;
+-        historySeeded.current = true;
+-        history.current = loadHistoryOldestFirst().map(entry => ({ text: entry.text, images: [] }));
++        historySeedCwd.current = channel.cwd;
++        try {
++            history.current = loadHistoryOldestFirst(channel.cwd).map(entry => ({ text: entry.text, images: [] }));
++        }
++        catch {
++            // Best-effort: an unreadable history file just leaves ↑/↓ empty.
++            history.current = [];
++        }
+         historyIndex.current = -1;
+     };
+     const rememberHistory = (text, images) => {
+@@ -1124,7 +1137,7 @@
          if (history.current.length > HISTORY_LIMIT)
              history.current.shift();
          historyIndex.current = -1;
@@ -49,7 +59,7 @@
      };
      const clearDeliveredDraft = () => {
          syncImageGeneration();
-@@ -1913,8 +1937,13 @@
+@@ -2127,8 +2140,13 @@
                  return;
              }
              if (overlayOpen && historyIndex.current < 0) {
@@ -63,9 +73,9 @@
 +                    return;
 +                }
              }
+             seedHistory();
              if (history.current.length === 0)
-                 return;
-@@ -1982,8 +2011,12 @@
+@@ -2198,8 +2216,12 @@
                  return;
              }
              if (overlayOpen && historyIndex.current < 0) {

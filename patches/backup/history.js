@@ -7,7 +7,11 @@ import { DATA_DIR } from './utils/paths.js';
 const HISTORY_DIR = DATA_DIR;
 const HISTORY_FILE = join(HISTORY_DIR, 'history.jsonl');
 const HISTORY_LOCK = `${HISTORY_FILE}.lock`;
-const HISTORY_LIMIT = 200;
+/**
+ * Entry cap for the persisted history. `↑`/`↓` and the Ctrl+R overlay read
+ * the same file, so both depths come from this one number.
+ */
+export const HISTORY_LIMIT = 200;
 const LOCK_RETRY_LIMIT = 500;
 const LOCK_RETRY_DELAY_MS = 5;
 const STALE_LOCK_MS = 30_000;
@@ -138,7 +142,7 @@ async function persistEntry(trimmed, cwd) {
 let appendChain = Promise.resolve();
 /**
  * Append an input to the persisted history, deduping the immediately
- * previous entry and capping the file at 200 entries.
+ * previous entry and capping the file at `HISTORY_LIMIT` entries.
  * @param text - Input to persist; blank inputs are ignored.
  * @param cwd - Directory the input was submitted in; tags the entry so reads
  * can scope to it. Entries appended without one stay untagged (legacy/global).
@@ -156,7 +160,7 @@ export function appendHistory(text, cwd) {
     return queued;
 }
 /**
- * Read the persisted history, newest first, scoped to one working directory.
+ * Narrow a parsed history list to one working directory.
  *
  * Entries are tagged with the directory they were submitted in, and a scoped
  * read returns that directory's entries only — the same isolation the resume
@@ -166,17 +170,43 @@ export function appendHistory(text, cwd) {
  * empty list. Once the directory has entries of its own the fallback pool drops
  * out, so another directory's commands can never leak in permanently.
  *
+ * Filtering preserves the order it was handed, so every caller keeps the
+ * chronology it asked for.
+ *
+ * @param entries - Parsed entries in whatever order the caller wants them.
  * @param cwd - Directory to scope to; omit to read every entry unscoped.
- * @returns The matching entries in reverse-chronological order.
+ * @returns The matching entries in the caller's order.
  */
-export function loadHistory(cwd) {
-    const entries = loadRaw().reverse();
+function scopeToCwd(entries, cwd) {
     if (!cwd)
         return entries;
     const scoped = entries.filter(entry => entry.cwd === cwd);
     if (scoped.length > 0)
         return scoped;
     return entries.filter(entry => entry.cwd === undefined);
+}
+/**
+ * Read the persisted history, newest first, scoped to one working directory.
+ *
+ * Scoped through {@link scopeToCwd} when a directory is given.
+ *
+ * @param cwd - Directory to scope to; omit to read every entry unscoped.
+ * @returns The matching entries in reverse-chronological order.
+ */
+export function loadHistory(cwd) {
+    return scopeToCwd(loadRaw().reverse(), cwd);
+}
+/**
+ * Read the persisted history in the order the composer walks it: oldest
+ * first, so `↑` reaches the newest entry first (the list tail) exactly as it
+ * does for the entries this process pushed itself. Scoped like
+ * {@link loadHistory} when a directory is given, so the composer walks exactly
+ * what the Ctrl+R search shows.
+ * @param cwd - Directory to scope to; omit to read every entry unscoped.
+ * @returns The persisted entries in chronological order.
+ */
+export function loadHistoryOldestFirst(cwd) {
+    return scopeToCwd(loadRaw(), cwd);
 }
 /**
  * Stable id for a history entry (keeps React keys distinct across identical texts).

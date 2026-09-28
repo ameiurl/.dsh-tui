@@ -7,7 +7,11 @@ import { DATA_DIR } from './utils/paths.js';
 const HISTORY_DIR = DATA_DIR;
 const HISTORY_FILE = join(HISTORY_DIR, 'history.jsonl');
 const HISTORY_LOCK = `${HISTORY_FILE}.lock`;
-const HISTORY_LIMIT = 200;
+/**
+ * Entry cap for the persisted history. `↑`/`↓` and the Ctrl+R overlay read
+ * the same file, so both depths come from this one number.
+ */
+export const HISTORY_LIMIT = 200;
 const LOCK_RETRY_LIMIT = 500;
 const LOCK_RETRY_DELAY_MS = 5;
 const STALE_LOCK_MS = 30_000;
@@ -131,7 +135,7 @@ async function persistEntry(trimmed) {
 let appendChain = Promise.resolve();
 /**
  * Append an input to the persisted history, deduping the immediately
- * previous entry and capping the file at 200 entries.
+ * previous entry and capping the file at `HISTORY_LIMIT` entries.
  * @param text - Input to persist; blank inputs are ignored.
  * @returns Resolves once this entry is persisted; callers on the input path
  * intentionally discard it because persistence is best-effort.
@@ -152,6 +156,15 @@ export function appendHistory(text) {
  */
 export function loadHistory() {
     return loadRaw().reverse();
+}
+/**
+ * Read the persisted history in the order the composer walks it: oldest
+ * first, so `↑` reaches the newest entry first (the list tail) exactly as it
+ * does for the entries this process pushed itself.
+ * @returns The persisted entries in chronological order.
+ */
+export function loadHistoryOldestFirst() {
+    return loadRaw();
 }
 /**
  * Stable id for a history entry (keeps React keys distinct across identical texts).
