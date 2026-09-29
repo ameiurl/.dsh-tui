@@ -93,7 +93,7 @@ it belongs at the end of every one.
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.1.7-rc.2`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.1.7-rc.2`,
-`@deepseek-harness-tui/dsh-tui@0.11.1`.
+`@deepseek-harness-tui/dsh-tui@0.11.2`.
 
 | file | change |
 | --- | --- |

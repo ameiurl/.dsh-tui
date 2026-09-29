@@ -1,5 +1,5 @@
---- original/digest.js	2026-09-28 20:28:44.028613946 +0800
-+++ backup/digest.js	2026-09-28 20:28:44.029632976 +0800
+--- original/digest.js	2026-09-29 15:01:26.339872300 +0800
++++ backup/digest.js	2026-09-29 15:01:26.342780175 +0800
 @@ -19,6 +19,14 @@
   * is the evidence behind {@link SessionTitle.source}, which is why the picker
   * can dim a fallback and explain a name instead of merely displaying one.
@@ -157,7 +157,7 @@
          hasPrompt,
          model,
          label,
-@@ -344,7 +440,15 @@
+@@ -351,7 +447,15 @@
          await handle.close().catch(() => { });
      }
  }
@@ -174,7 +174,7 @@
  async function recoverFirstPrompt(path, bytes, signal) {
      signal?.throwIfAborted();
      let handle;
-@@ -353,7 +457,7 @@
+@@ -360,7 +464,7 @@
      }
      catch {
          signal?.throwIfAborted();
@@ -183,7 +183,7 @@
      }
      try {
          let position = 0;
-@@ -362,24 +466,29 @@
+@@ -369,24 +473,29 @@
              signal?.throwIfAborted();
              const page = await forwardPage(handle, position, bytes, signal);
              if (page === undefined)

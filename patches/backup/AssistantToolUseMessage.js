@@ -15,6 +15,7 @@ import { foldLongLines } from '../../utils/fold-long-lines.js';
 import { getLang, t } from '../../i18n.js';
 import { revealLinesOf, snapReveal } from '../smoothReveal.js';
 import { useRevealVersion } from '../../hooks/useRevealVersion.js';
+import { primaryComboString } from '../../utils/keymap.js';
 /** Tool display names localize through the `tool-name-*` dictionary family
  *  (i18n.ts): DSH emits lowercase tool ids (`bash`), display names resolve
  *  per language — proper nouns (Bash, PowerShell) stay identical in zh.
@@ -344,7 +345,7 @@ function capLines(lines, max, verbose) {
         return lines;
     return [
         ...lines.slice(0, max),
-        { ...dim(t('lines-folded-expand', { n: lines.length - max })), revealOnHover: true },
+        { ...dim(t('lines-folded-expand', { n: lines.length - max, key: primaryComboString('transcript') })), revealOnHover: true },
     ];
 }
 /** Long-line clip for the body rows (utils/fold-long-lines.ts): the line cap
@@ -483,7 +484,7 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
         return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), displayArgs !== '' && (_jsxs(Box, { flexWrap: "nowrap", ...headerTooltip, children: [_jsx(Text, { children: "(" }), _jsx(SyntaxText, { text: clipHeaderArgs(displayArgs), sourceText: displayArgs, language: argsLanguage }), _jsx(Text, { children: ")" })] }))] }));
     }
     if (isTerminal) {
-        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), folded.hiddenLines > 0 && (_jsx(Text, { dimColor: true, children: ` ${t('lines-folded-expand', { n: folded.hiddenLines })}` }))] })) })] }));
+        return (_jsxs(_Fragment, { children: [_jsx(Box, { flexShrink: 0, children: _jsx(Text, { bold: true, color: nameColor, wrap: "truncate-end", children: name }) }), _jsx(Box, { flexWrap: "nowrap", ...headerTooltip, children: folded === undefined ? (_jsxs(Text, { children: ["(", title, ")"] })) : (_jsxs(_Fragment, { children: [_jsxs(Text, { children: ["(", folded.first, ")"] }), folded.hiddenLines > 0 && (_jsx(Text, { dimColor: true, children: ` ${t('lines-folded-expand', { n: folded.hiddenLines, key: primaryComboString('transcript') })}` }))] })) })] }));
     }
     const trimmed = title.trim();
     if (trimmed === '') {

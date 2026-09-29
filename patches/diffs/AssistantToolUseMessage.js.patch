@@ -1,5 +1,5 @@
---- original/AssistantToolUseMessage.js	2026-09-28 20:28:44.024149570 +0800
-+++ backup/AssistantToolUseMessage.js	2026-09-28 20:28:44.025145414 +0800
+--- original/AssistantToolUseMessage.js	2026-09-29 15:01:26.157277213 +0800
++++ backup/AssistantToolUseMessage.js	2026-09-29 15:01:26.161792984 +0800
 @@ -1,5 +1,6 @@
  import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
  import React from 'react';
@@ -7,7 +7,7 @@
  import { extname } from 'node:path';
  import { Box, Text, useTerminalSize } from '../../ui.js';
  import { stringWidth } from '../../ink/stringWidth.js';
-@@ -70,9 +71,14 @@
+@@ -71,9 +72,14 @@
  }
  /** The collapsed text body keeps three lines. */
  const TEXT_BODY_MAX_LINES = 3;
@@ -25,7 +25,7 @@
  /** Minimum terminal width for the two-pane diff: below this the panes
   *  would squeeze under ~50 columns each and the unified view reads better. */
  const SPLIT_DIFF_MIN_COLS = 110;
-@@ -107,9 +113,119 @@
+@@ -108,9 +114,119 @@
          lines.pop();
      return lines;
  }
@@ -148,7 +148,7 @@
  function diffLines(diffs) {
      const out = [];
      let prevPath;
-@@ -121,15 +237,52 @@
+@@ -122,15 +238,52 @@
                  out.push(dim('⋯'));
          }
          prevPath = diff.path;
@@ -206,7 +206,7 @@
  /** Join the text blocks of a view's content payload (read/generic cards). */
  function contentLines(content) {
      const text = (content ?? []).map(block => (block.type === 'text' ? block.text ?? '' : '')).join('').trimEnd();
-@@ -446,7 +599,10 @@
+@@ -447,7 +600,10 @@
              body = [dim(t('tool-running-elapsed', { duration: formatDuration(Math.max(0, Date.now() - (tool.startedAt ?? Date.now()))) }))];
          }
      }
@@ -218,7 +218,7 @@
      // Long-line clip before anything downstream reads the body: the syntax
      // highlighter walks `bodySource` by line index, so the folded text must be
      // the single source of truth for both.
-@@ -480,38 +636,27 @@
+@@ -481,38 +637,27 @@
          : ordinaryToolBackground === 'strong'
              ? 'toolCardBackground'
              : undefined;

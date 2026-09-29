@@ -7,8 +7,8 @@
  *   opening prompt. Measured across a real corpus, the first user prompt lands
  *   within 8,107 bytes of the start (524 in its `agent/inbox/spliced` form),
  *   so a 64 KB window is the cheap path. A larger modern context prefix can
- *   exceed it; listSummaries detects that inconclusive fallback and invokes the
- *   progressive opening scan below instead of caching a cwd basename forever.
+ *   exceed it; listSummaries schedules the progressive opening scan below
+ *   after returning the immediately usable session list.
  * - The TAIL holds whatever was appended most recently: the current title
  *   (titles are re-emitted, and the last one wins), the model of the last
  *   request, and the last exchanges for the preview.
@@ -44,7 +44,7 @@ export const TAIL_WINDOW_BYTES = 128 * 1024;
 const TITLE_SCAN_PAGE_BYTES = 128 * 1024;
 /** Largest compressed frame the fallback scanner will materialize. */
 const TITLE_SCAN_MAX_FRAME_BYTES = 16 * 1024 * 1024;
-/** Prefix suffix hashed to verify append-only growth across revisions. */
+/** Old EOF neighborhood hashed for the JSONL backend's append-only contract. */
 const TITLE_ANCHOR_BYTES = 256;
 /** Longest preview excerpt kept per message, in characters. */
 const PREVIEW_CHARS = 400;
@@ -401,8 +401,8 @@ async function recoverLatestTitle(path, bytes, signal) {
         await handle.close().catch(() => { });
     }
 }
-/** Scan from a known frame boundary through an append-only suffix. */
-export async function recoverAppendedTitle(path, start, end, signal) {
+/** Scan all newly appended frames from the previous EOF frame boundary. */
+export async function digestAppendedSuffix(path, start, end, signal) {
     signal?.throwIfAborted();
     let handle;
     try {
@@ -410,31 +410,38 @@ export async function recoverAppendedTitle(path, start, end, signal) {
     }
     catch {
         signal?.throwIfAborted();
-        return { title: undefined, complete: false };
+        return { title: undefined, model: undefined, label: undefined, hasHumanPrompt: false, complete: false };
     }
-    let latest;
+    let title;
+    let model;
+    let label;
+    let hasHumanPrompt = false;
+    const result = (complete) => ({ title, model, label, hasHumanPrompt, complete });
     try {
         let position = start;
         while (position < end) {
             signal?.throwIfAborted();
             const page = await forwardPage(handle, position, end, signal);
             if (page === undefined)
-                return { title: latest, complete: false };
+                return result(false);
             for (const frame of page.frames) {
                 const lines = decodeFrame(page.buffer, frame);
                 if (lines === undefined)
-                    return { title: latest, complete: false };
+                    return result(false);
                 for (const line of lines) {
-                    latest = titleOf(line) ?? latest;
+                    title = titleOf(line) ?? title;
+                    model = modelOf(line) ?? model;
+                    label = labelOf(line) ?? label;
+                    hasHumanPrompt ||= humanPrompt(line) !== undefined;
                 }
             }
             const consumed = page.frames[page.frames.length - 1].end;
             if (consumed <= 0)
-                return { title: latest, complete: false };
+                return result(false);
             position += consumed;
             await scheduler.yield();
         }
-        return { title: latest, complete: true };
+        return result(true);
     }
     finally {
         await handle.close().catch(() => { });
@@ -514,7 +521,7 @@ export async function recoverSessionTitle(path, bytes, signal) {
         ...(opening.hasPrompt === undefined ? {} : { hasPrompt: opening.hasPrompt }),
     };
 }
-/** Hash the previous EOF neighborhood before carrying title evidence forward. */
+/** Hash the previous EOF neighborhood; this detects replacement near the old tail. */
 export async function sessionTitleAnchor(path, bytes, signal) {
     signal?.throwIfAborted();
     let handle;

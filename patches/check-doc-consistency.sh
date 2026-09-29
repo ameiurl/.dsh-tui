@@ -175,6 +175,14 @@ ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPro
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"
 ck "ToolFileDiff .d.ts has no oldStart" "! grep -q 'oldStart' '$LIB/types/components/messages/ToolFileDiff.d.ts'"
+# F5 (`recapOnOpen`) was a patch target until 0.11.2, which declares the field
+# and makes it volatile on its own; the patch was retired, so the file must stay
+# out of TARGETS and the stock contract (key + volatility + writability) is
+# asserted by the test instead of by a diff.
+ck "F5 recapOnOpen stays stock (dsh-adapter/index.js not a target)" \
+   "! node '$DIR/resolve-patch-targets.mjs' | grep -q 'dsh-adapter.index.js'"
+ck "test-recap-setting.mjs passes (F5 stock contract)" \
+   "node '$DIR/test-recap-setting.mjs'"
 
 echo "== §2/§3 scripts and tests referenced by the docs =="
 ck "resolve-patch-targets.mjs runs"  "node '$DIR/resolve-patch-targets.mjs'"
@@ -212,6 +220,30 @@ ck "every target has a stored diff to fall back on" \
 # installed in both shells instead of trusting the doc.
 ck "dsh-patch alias in ~/.zshrc"  "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.zshrc'"
 ck "dsh-patch alias in ~/.bashrc" "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.bashrc'"
+
+echo "== §3 stored diffs are exact against the documented baseline =="
+# A re-ported baseline is exact: each diffs/<name>.patch applies to its
+# original/ at fuzz 0 and reproduces backup/ byte-for-byte. Fuzz is the apply
+# script's fallback for an upgrade that moved the code; a baseline that already
+# needs it is drift, not a port (see §4's 0.11.2 row).
+RT="$(mktemp -d)"
+rt_bad=0
+while IFS='|' read -r target name; do
+  [ -f "$DIR/original/$name" ] && [ -f "$DIR/diffs/$name.patch" ] || continue
+  if patch -p0 --fuzz=0 --no-backup-if-mismatch -s -o "$RT/$name" "$DIR/original/$name" \
+       < "$DIR/diffs/$name.patch" 2>/dev/null && cmp -s "$RT/$name" "$DIR/backup/$name"; then
+    :
+  else
+    printf '  FAIL diff is not exact (fuzz 0 / == backup): %s\n' "$name"
+    rt_bad=$((rt_bad + 1))
+  fi
+done < <(node "$DIR/resolve-patch-targets.mjs")
+rm -rf "$RT"
+if [ "$rt_bad" -eq 0 ]; then
+  printf '  ok   every stored diff applies at fuzz 0 and equals backup/\n'; pass=$((pass + 1))
+else
+  fail=$((fail + rt_bad))
+fi
 
 echo
 if [ "$fail" -eq 0 ]; then

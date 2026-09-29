@@ -1,6 +1,6 @@
---- original/useSessionSupervisor.js	2026-09-28 20:28:44.045767938 +0800
-+++ backup/useSessionSupervisor.js	2026-09-28 20:28:44.046591499 +0800
-@@ -142,16 +142,6 @@
+--- original/useSessionSupervisor.js	2026-09-29 15:01:26.262987223 +0800
++++ backup/useSessionSupervisor.js	2026-09-29 15:01:26.265637741 +0800
+@@ -175,16 +175,6 @@
      const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
      const [railFocus, setRailFocus] = useState(0);
      /**
@@ -17,7 +17,7 @@
       * The session column's cursor, as ONE fact.
       *
       * It used to be three: a `sessionFocus` index, a `sessionFocusRef` mirror and
-@@ -177,8 +167,12 @@
+@@ -210,8 +200,12 @@
       * Which column owns the keyboard, and therefore which column draws the `❯`
       * cursor. Exactly one at a time: two cursors mean "where does Enter go?" has
       * no answer, and ←/→ is how this screen answers it.
@@ -31,10 +31,10 @@
      const [pins, setPins] = useState(() => readSessionPins());
      const [menu, setMenu] = useState(undefined);
      const [rename, setRename] = useState(undefined);
-@@ -253,80 +247,53 @@
-     React.useEffect(() => {
-         void reload();
-     }, [reload]);
+@@ -323,80 +317,53 @@
+     React.useEffect(() => () => {
+         snapshotSlot(channel).requestGeneration++;
+     }, [channel]);
 -    // Selection follows the terminal's own directory, then the ledger: the rail
 -    // must open on the workspace this terminal is IN, not on whichever record
 -    // sorts first — otherwise launching in a workspace you have never opened
@@ -148,7 +148,7 @@
              .filter(session => sessionMatchesQuery(session, needle))
              .slice()
              .sort((left, right) => {
-@@ -334,7 +301,7 @@
+@@ -404,7 +371,7 @@
              const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0;
              return rightLive - leftLive || right.updatedAt - left.updatedAt;
          });
@@ -157,7 +157,7 @@
      /**
       * Cursor identity: rows reorder on every reload and filter, so the cursor
       * follows an ID rather than an index — and the cursor space includes the
-@@ -372,14 +339,18 @@
+@@ -442,14 +409,18 @@
          const current = visibleSessions.find(session => liveStateOf(session.id)?.current === true);
          setFocusSessionId(current?.id);
      }, [liveStateOf, visibleSessions]);
@@ -179,7 +179,7 @@
      const sessionWidth = Math.max(20, columns - (railVisible ? railWidth + 1 : 0));
      const railListHeight = Math.max(1, rows - RAIL_CHROME_ROWS);
      /**
-@@ -402,10 +373,13 @@
+@@ -481,10 +452,13 @@
          }
          setPins(result.pins);
      }, [report]);

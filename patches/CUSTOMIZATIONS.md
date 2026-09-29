@@ -15,13 +15,13 @@
 ### 1.1 版本
 | 组件 | 位置 | 版本 |
 | --- | --- | --- |
-| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.11.1` |
+| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.11.2` |
 | profile 目录名 | `~/.dsh/profiles/dsh-tui` | （旧版本叫 `tui`） |
-| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.11.1` |
+| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.11.2` |
 | launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.7-rc.2` |
 | tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.7-rc.2` |
-| 补丁构建基线（dsh-tui，文档/检查脚本引用） | `patches/patch-base-version` | `0.11.1` |
-| 补丁构建基线（逐包，apply 脚本据此**分目标**放行） | `patches/patch-base-versions.json` | dsh-tui `0.11.1`／tool 两包 `0.1.7-rc.2` |
+| 补丁构建基线（dsh-tui，文档/检查脚本引用） | `patches/patch-base-version` | `0.11.2` |
+| 补丁构建基线（逐包，apply 脚本据此**分目标**放行） | `patches/patch-base-versions.json` | dsh-tui `0.11.2`／tool 两包 `0.1.7-rc.2` |
 
 **版本关系（重要，别再踩坑）：**
 - dsh-tui `0.10.0-beta` 线与生态 `0.1.1-rc.2` 配套；peer 范围二者相同，可互换 minor。
@@ -66,8 +66,21 @@
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
 > **当前补丁集 = 10 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 1 个 F4；
-> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.11.1`，
-> 逐包基线见 `patch-base-versions.json`（dsh-tui `0.11.1`／tool 两包 `0.1.7-rc.2`）。
+> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.11.2`，
+> 逐包基线见 `patch-base-versions.json`（dsh-tui `0.11.2`／tool 两包 `0.1.7-rc.2`）。
+> F5（`recapOnOpen`）**不在**这 10 个里：0.11.2 上游自己把它做成了 stock，补丁已退役
+> （见下方「退役」与 §4 的状态表），别再把它加回 `TARGETS`。
+>
+> **0.11.2 迁移要点（2026-09-29）**：上游改动不大，`dsh-patch` 用 `diffs/*.patch` +
+> `fuzz 3` 直接把 8 个 TUI 目标贴了回去，其中 7 个的落点经 3-way 复核与正规重移植
+> **逐字节相同**（`git merge-file` 结果 == 已装文件，只差 `merge-file` 不写尾换行），
+> 只有 `useSessionSupervisor.js` 有 1 处真冲突：上游给 rail 新增了「按 cwd 选目录」的
+> 自动选中 effect，而 F3 的 fork 本来就把那个 effect 连同 `selectedPath` 状态整块替换成
+> 自己的 `channel.cwd` 合成——**保留**上游新的 `snapshotSlot` 清理 effect、**删掉** rail
+> 选择 effect 即正确解（已按此复核）。同时 **F5 退役**：上游自己声明了 `recapOnOpen`，
+> volatility 改由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供。`TARGETS`
+> 因此从 11 条减到 **10** 条——F5 此前没登记进这份清单，§2 一直写「10 个目标文件」，
+> 现在两边才对上。
 >
 > **0.11.1 迁移要点（2026-09-28）**：`/resume` 的浏览器被上游**整屏重写**——
 > `screens/SessionBrowser.js` 已删除，改为 `screens/SessionSupervisor.js`
@@ -451,11 +464,14 @@ F3 的 `railVisible = false`、按目录过滤的 `samePath(session.cwd, channel
 `useState('list')`、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 补丁只动
 `supervisor-hint-list` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 仍取自非过滤候选 /
-仍应 stock 的 vim 与 `ToolFileDiff.d.ts` /
+仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 **F5 的 `recapOnOpen`**（`dsh-adapter/index.js`
+不在目标里 + `test-recap-setting.mjs` 的上游契约通过）/
 apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径（`patch -p0 --fuzz=3`、
 `PATCHED-DRIFT`、`OK-PATCHED` 指纹、写不进就 `ABORT`）**、分目标守卫（`NEEDS-REPORT`）
 与逐包基线读取 / `dsh-patch` 别名在 `~/.zshrc` 与 `~/.bashrc` 里都在 /
-目标数 = `original/` = `diffs/` 且命名一致 / 三个行为测试通过。
+目标数 = `original/` = `diffs/` 且命名一致 / **每个 `diffs/*.patch` 都能在它自己的
+`original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**（只有真正重移植过的基线做得到；
+要靠 fuzz 才贴得上就是漂移）/ 三个行为测试通过。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
 
 ---
@@ -481,6 +497,8 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 
 | **0.11.1 迁移**（2026-09-28，生态 `dsh`/tool 两包 → `0.1.7-rc.2`，profile & 壳 → `0.11.1`） | 升级把 **9/9 旧目标全部还原成 stock**；`dsh-patch` 因逐包基线漂移把它们全报 `NEEDS-REPORT`（用户看到的「补丁没补」）。更根本的变化：**`/resume` 被上游整屏重写** —— `screens/SessionBrowser.js`（旧 F3 的整文件分叉对象）被删除，改为 `screens/SessionSupervisor.js`（工作区 rail + 会话面板 + 多会话托管）。其余上游变化：`tool-fs` 118 行（write 结果多了 `operation` 字段）、`str-replace` 仅 3 行、`PromptInput` 321 行（新增 `loadHistoryOldestFirst`，播种重构成 `seedHistory()`+`historySeeded` 布尔）、`AssistantToolUseMessage` 56 行、`i18n` 218 行（`session-hint-list*` 全部消失）、`Chat` 372 行；`digest.js` **字节未变** | ①逐目标 3-way（`base`=旧 original、`theirs`=旧 backup、`ours`=新 stock）：`history`/`Chat`/`digest`/`str-replace` 0 冲突；冲突 4 处按 §2 意图解——`tool-fs` 保留上游新的 `operation` 形状并补 `oldStart/newStart`、`AssistantToolUseMessage` 只留 hover 文案（`hoverTint` 分支仍不恢复）、`PromptInput` 的 import 走 `loadHistoryOldestFirst`、i18n 的旧 key 已死（改打 `supervisor-hint-list`）。②**F2 适配上游新 API**：过滤抽成 `scopeToCwd`，`loadHistory(cwd)` 与 `loadHistoryOldestFirst(cwd)` 共用，`seedHistory()` 的守卫由布尔改成 `historySeedCwd`。③**F3 改为薄补丁**（用户选定「等价移植」）：`railVisible = false`、`activePane` 起手 `list`、`activateRail` 置空、`selected` 由 `channel.cwd` 合成、`visibleSessions` 按 `samePath(session.cwd, channel.cwd)` 过滤并删掉 stock 的 rail 选择状态（`selectedPath`/`selectedUnregistered`/`selectionManual` 与自动选中 effect），`SessionSupervisor.js` 的 Ctrl+N 改用钉死目录，i18n 只改 `supervisor-hint-list`。④**`apply-diff-patches.sh` 升级为「能直接打补丁」**：漂移目标不再跳过，改用 `diffs/<name>.patch` + `patch --fuzz=3` 打在**已装文件**上，全部 hunk 落地且 `node --check` 通过才写入（`PATCHED-DRIFT`），并把结果指纹写进 `state/<name>.sha1` 使重跑幂等（`OK-PATCHED`）；写不进目标时 `ABORT`（旧的 `cp` 失败仍打印 applied 是假成功）。⑤复验：10/10 目标 `check` 全 `OK`、三个行为测试通过（`test-resume-flat.mjs` **重写**成新屏的 12 条断言，并在 stock 上验证过会失败 7 条）、`check-doc-consistency.sh` 全过。补丁集 9 → **10** 个目标，`patch-base-version` = `0.11.1` |
 
+| **0.11.2 迁移**（2026-09-29，profile & 壳 → `0.11.2`；生态/tool 两包不变） | `dsh-patch check` 只报 **1 个 `NEEDS-REPORT`**：`dsh-adapter/index.js`（F5）——第 2 个 hunk 在 0.11.2 上失败（硬编码的可编辑键数组已被 `EDITABLE_CONFIG_KEYS` 取代）；其余 8 个 TUI 目标由 `diffs/*.patch` + `fuzz 3` 自动贴回（`history.js` 字节相同，7 个 `PATCHED-DRIFT`）。注意 F5 的**第 1 个 hunk 虽报 `succeeded with fuzz 3`，却是假落地**：它插在 `mathRendering` 之前，与上游自己后面那句 `recapOnOpen: Schema.boolean()` 重复，对象字面量里后者生效 → hunk 2 就算过了也等于白打，所以**不能**用 `dsh-patch apply` 强推 | ①先判 F5 留不留：上游 0.11.2 已自己修好（声明 `recapOnOpen`，volatility 由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供），`test-recap-setting.mjs` 实测键在 / volatile / 显式 `false` 存得下 / `/settings` 行与读点都在 → **退役**（删三件套、`TARGETS` 11 → 10、测试改成守 stock 契约）。②其余 8 个目标按 §3 复核：`git merge-file`（`base`=0.11.1 `original`、`theirs`=0.11.1 `backup`、`ours`=0.11.2 stock）结果与已装文件**逐字节相同**（7 个 0 冲突，`merge-file` 只差不写尾换行）；`useSessionSupervisor.js` 1 处冲突＝上游新增的「rail 按 cwd 自动选目录」effect 撞上 F3 的整体替换——**保留**上游新的 `snapshotSlot` 清理 effect、**删掉** rail 选择 effect（fork 里 `selectedPath`/`selectionManual`/`selectedUnregistered` 已不存在），F3 行为测试通过。③`original/` 换成 npm 取回的 0.11.2 原版（tool 两包 `original/` 亦与 0.1.7-rc.2 上游逐字节核对通过），`backup/` 换成复核后的已补丁件，`diffs/` 重新生成（**每个都在 0.11.2 stock 上 `--fuzz=0` 干净贴上且结果 == `backup/`**），`state/` 清空。④基线 `patch-base-version` 与 `patch-base-versions.json` → `0.11.2`；`check` 10/10 `OK` exit 0，四个测试通过，`check-doc-consistency.sh` 仅剩 `dsh-patch` 别名那两条 FAIL（别名确实不在 `~/.zshrc`/`~/.bashrc`，与本次升级无关，用绝对路径仍可跑） |
+
 **定制状态备忘（含已恢复 / 已去掉）**
 
 > 编号复用提醒：下表是**旧编号**，其中「旧 F4 / 旧 F5」指 vim；2026-09-11 新增的
@@ -494,6 +512,7 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 | 旧 F5 | `INSERT/NORMAL` 指示从输入框移到 `StatusLine` | stock：指示在输入框内；`Chat`/`StatusLine` 接线已移除 |
 | 旧 F7 | `ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号；0.10.1 迁移时曾短暂编号为 F4） | 不再打补丁；字段由 tool 包（JS）产出、渲染器（JS）动态读取，`.d.ts` 只影响 `tsc`，安装后的包不做类型检查，因此零运行时影响。需要类型时在自己工程里 `declare module` 增强 |
 | （无编号） | ↑/↓ 历史按 `cwd` 过滤（`history.js` + `history.d.ts` + 回填脚本） | **已恢复为 F2 的一部分**：0.10.1 迁移时曾整版撤回（当时代价是 ↑/↓ 立刻变空），2026-09-11 F3 定为「只看当前目录」后按用户要求恢复，并加了**旧条目兜底**解决空窗。`history.d.ts` 仍不打补丁（同旧 F7 的理由） |
+| 新 F5 | `recapOnOpen` 写回 adapter 的 Config schema（`dsh-adapter/index.js`），让 `/settings` 的 "Auto recap on open" 存得下去 | **已退役（0.11.2 起回归 stock）**：0.11.1 保留了 `/settings` 行与读取却把键从 schema 里删了，保存报 `Config field "recapOnOpen" is not volatile`，自动 recap 关不掉——当时的补丁声明该键并标 volatile。0.11.2 上游自己声明了 `recapOnOpen: Schema.boolean()`（**故意不给 `.default()`**：volatile 包装会吞掉默认值，而读点 `channel.js` 用 `!== false` 把 `undefined` 当开），volatility 改由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供 → 补丁三件套（`backup`/`original`/`diffs`）已删，`TARGETS` 里也不再列它。`test-recap-setting.mjs` 保留但**改成守上游契约**（键在、volatile、显式 `false` 存得下、未设置不读成 `false`、行与读点仍在）——下次上游再把这键弄丢，它会响。 |
 
 备份目录语义：`original/`=纯净上游；`backup/`=已补丁（apply 恢复源）；
 `diffs/*.patch`=original→backup 差异（供查看）。git 历史（`~/.dsh-tui` 仓库）保留每代
