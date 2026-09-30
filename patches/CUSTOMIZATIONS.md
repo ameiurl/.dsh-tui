@@ -15,13 +15,13 @@
 ### 1.1 版本
 | 组件 | 位置 | 版本 |
 | --- | --- | --- |
-| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.11.2` |
+| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.12.0` |
 | profile 目录名 | `~/.dsh/profiles/dsh-tui` | （旧版本叫 `tui`） |
-| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.11.2` |
-| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.1.7-rc.2` |
-| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.1.7-rc.2` |
-| 补丁构建基线（dsh-tui，文档/检查脚本引用） | `patches/patch-base-version` | `0.11.2` |
-| 补丁构建基线（逐包，apply 脚本据此**分目标**放行） | `patches/patch-base-versions.json` | dsh-tui `0.11.2`／tool 两包 `0.1.7-rc.2` |
+| delegating 壳（`dsh-tui` 命令） | 全局 `@deepseek-harness-tui/dsh-tui` | `0.12.0` |
+| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.2.0-rc.2` |
+| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…` | `0.2.0-rc.2` |
+| 补丁构建基线（dsh-tui，文档/检查脚本引用） | `patches/patch-base-version` | `0.12.0` |
+| 补丁构建基线（逐包，apply 脚本据此**分目标**放行） | `patches/patch-base-versions.json` | dsh-tui `0.12.0`／tool 两包 `0.2.0-rc.2` |
 
 **版本关系（重要，别再踩坑）：**
 - dsh-tui `0.10.0-beta` 线与生态 `0.1.1-rc.2` 配套；peer 范围二者相同，可互换 minor。
@@ -29,7 +29,7 @@
   `tuiThemes` 缺失而 boot 失败。
 - delegating 壳只拦「profile 的 major/minor 比壳更旧」；同 minor 的 patch 错位只提示不拦。
   所以 `beta.3`（同 `0.10`）能跑，`0.9.3`（minor 9 < 10）会被拦。
-- 壳与 profile 现均为 `0.10.2`（2026-09-17 对齐）。此前是壳 `0.10.0` + profile `0.10.2`：
+- 壳与 profile 应保持同一版本（现均为 `0.12.0`）。曾有壳 `0.10.0` + profile `0.10.2` 的错位：
   同 minor 的 patch 错位壳只提示不拦（实测可跑），但建议对齐 —— profile 升级后上游会在
   退出提示里给出命令：`npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@<profile>`
   （`--legacy-peer-deps` 绕过 npm 12 的 peer 解析崩溃；壳是瘦壳，跳过 peer 解析是安全的）。
@@ -66,10 +66,24 @@
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
 > **当前补丁集 = 10 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 1 个 F4；
-> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.11.2`，
-> 逐包基线见 `patch-base-versions.json`（dsh-tui `0.11.2`／tool 两包 `0.1.7-rc.2`）。
+> `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.12.0`，
+> 逐包基线见 `patch-base-versions.json`（dsh-tui `0.12.0`／tool 两包 `0.2.0-rc.2`）。
 > F5（`recapOnOpen`）**不在**这 10 个里：0.11.2 上游自己把它做成了 stock，补丁已退役
 > （见下方「退役」与 §4 的状态表），别再把它加回 `TARGETS`。
+>
+> **0.12.0 迁移要点（2026-09-30）**：上游只动了 **3 个**目标文件（`Chat.js`、`PromptInput.js`、
+> `i18n.js`），另外 **7 个（含 tool 两包）字节未变 → 免移植**；动过的 3 个按 §3 三方合并
+> **0 冲突**（定制点原样还在：`loadHistory(channel.cwd)`、`historySeedCwd` 那一套、
+> `supervisor-hint-list` 文案），上游新代码全部保留（鲸鱼券弹窗 `WhaleCouponPrompt`/`bonusNotices`、
+> `channel.minimal` → `minimalUi` 改名、`cycleMode()` 补了 catch、`/resume` 一批新 key）。
+> tool 两包虽从 `0.1.7-rc.2` 跳到 `0.2.0-rc.2`，`lib/index.js` **逐字节不变**。
+>
+> **0.12.0 起 apply 脚本能分辨「偏移」和「fuzz」**：GNU patch 的 hunk 报告走 **stdout**
+> （stderr 只放硬错误），旧脚本只重定向 stderr、又带 `-s`，于是失败时 `NEEDS-REPORT`
+> 下面**一行证据都打不出来**，成功时 patch 的啰嗦话反倒漏在报告里。现在两路都抓，落盘时
+> 分开报：纯行号偏移 = `PATCHED`/`PATCHED-DRIFT`，**靠 fuzz 才贴上的 = `PATCHED-FUZZ`**（置 drift，
+> 因为 fuzz 是上下文模糊匹配，hunk 可能贴到别的地方）；`--read-only=ignore` 顺手去掉
+> `-o` 下毫无意义的 "file is read-only; trying to patch anyway" 警告。
 >
 > **0.11.2 迁移要点（2026-09-29）**：上游改动不大，`dsh-patch` 用 `diffs/*.patch` +
 > `fuzz 3` 直接把 8 个 TUI 目标贴了回去，其中 7 个的落点经 3-way 复核与正规重移植
@@ -322,8 +336,11 @@ dsh-patch check        # = bash ~/.dsh-tui/patches/apply-diff-patches.sh check
 `diffs/<name>.patch` 直接往**已装文件**上打（`patch --fuzz=3`），全部 hunk 落地且
 `node --check` 通过才写入，报 `PATCHED-DRIFT` 并在 `state/<name>.sha1` 记账
 （下次重跑报 `OK-PATCHED`，不会二次打补丁）。只有「diff 也打不上 / 语法不过」的目标
-才报 `NEEDS-REPORT`，那几条才必须先重移植。`dsh-patch apply` 仍是显式强推（拿 backup
-整文件覆盖，可能在漂移版本上降级），只在确认上游没变时用。
+才报 `NEEDS-REPORT`，那几条才必须先重移植。**0.12.0 起 hunk 是「偏移」还是「fuzz」分开报**：
+行号漂移（offset）说明 diff 仍然严丝合缝，报 `PATCHED`/`PATCHED-DRIFT`；只有靠
+**fuzz**（上下文模糊匹配）才贴上的报 **`PATCHED-FUZZ`** 并置 drift —— 那种落地可能把 hunk
+贴到别的函数上，必须先读 diff 再按 §3 重移植，别当成已补好。`dsh-patch apply` 仍是显式强推
+（拿 backup 整文件覆盖，可能在漂移版本上降级），只在确认上游没变时用。
 
 ### Step 2 — profile 目录 / 路径是否变
 - profile 目录历史上 `tui` → `dsh-tui`。变了就把
@@ -467,7 +484,9 @@ F3 的 `railVisible = false`、按目录过滤的 `samePath(session.cwd, channel
 仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 **F5 的 `recapOnOpen`**（`dsh-adapter/index.js`
 不在目标里 + `test-recap-setting.mjs` 的上游契约通过）/
 apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径（`patch -p0 --fuzz=3`、
-`PATCHED-DRIFT`、`OK-PATCHED` 指纹、写不进就 `ABORT`）**、分目标守卫（`NEEDS-REPORT`）
+`PATCHED-DRIFT`、`OK-PATCHED` 指纹、写不进就 `ABORT`）**、**hunk 报告取自 stdout 且
+「偏移 ≠ fuzz」（`patch.out`、`patch_was_fuzzy`、`PATCHED-FUZZ`、`--read-only=ignore`）**、
+分目标守卫（`NEEDS-REPORT`）
 与逐包基线读取 / `dsh-patch` 别名在 `~/.zshrc` 与 `~/.bashrc` 里都在 /
 目标数 = `original/` = `diffs/` 且命名一致 / **每个 `diffs/*.patch` 都能在它自己的
 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**（只有真正重移植过的基线做得到；
@@ -498,6 +517,8 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 | **0.11.1 迁移**（2026-09-28，生态 `dsh`/tool 两包 → `0.1.7-rc.2`，profile & 壳 → `0.11.1`） | 升级把 **9/9 旧目标全部还原成 stock**；`dsh-patch` 因逐包基线漂移把它们全报 `NEEDS-REPORT`（用户看到的「补丁没补」）。更根本的变化：**`/resume` 被上游整屏重写** —— `screens/SessionBrowser.js`（旧 F3 的整文件分叉对象）被删除，改为 `screens/SessionSupervisor.js`（工作区 rail + 会话面板 + 多会话托管）。其余上游变化：`tool-fs` 118 行（write 结果多了 `operation` 字段）、`str-replace` 仅 3 行、`PromptInput` 321 行（新增 `loadHistoryOldestFirst`，播种重构成 `seedHistory()`+`historySeeded` 布尔）、`AssistantToolUseMessage` 56 行、`i18n` 218 行（`session-hint-list*` 全部消失）、`Chat` 372 行；`digest.js` **字节未变** | ①逐目标 3-way（`base`=旧 original、`theirs`=旧 backup、`ours`=新 stock）：`history`/`Chat`/`digest`/`str-replace` 0 冲突；冲突 4 处按 §2 意图解——`tool-fs` 保留上游新的 `operation` 形状并补 `oldStart/newStart`、`AssistantToolUseMessage` 只留 hover 文案（`hoverTint` 分支仍不恢复）、`PromptInput` 的 import 走 `loadHistoryOldestFirst`、i18n 的旧 key 已死（改打 `supervisor-hint-list`）。②**F2 适配上游新 API**：过滤抽成 `scopeToCwd`，`loadHistory(cwd)` 与 `loadHistoryOldestFirst(cwd)` 共用，`seedHistory()` 的守卫由布尔改成 `historySeedCwd`。③**F3 改为薄补丁**（用户选定「等价移植」）：`railVisible = false`、`activePane` 起手 `list`、`activateRail` 置空、`selected` 由 `channel.cwd` 合成、`visibleSessions` 按 `samePath(session.cwd, channel.cwd)` 过滤并删掉 stock 的 rail 选择状态（`selectedPath`/`selectedUnregistered`/`selectionManual` 与自动选中 effect），`SessionSupervisor.js` 的 Ctrl+N 改用钉死目录，i18n 只改 `supervisor-hint-list`。④**`apply-diff-patches.sh` 升级为「能直接打补丁」**：漂移目标不再跳过，改用 `diffs/<name>.patch` + `patch --fuzz=3` 打在**已装文件**上，全部 hunk 落地且 `node --check` 通过才写入（`PATCHED-DRIFT`），并把结果指纹写进 `state/<name>.sha1` 使重跑幂等（`OK-PATCHED`）；写不进目标时 `ABORT`（旧的 `cp` 失败仍打印 applied 是假成功）。⑤复验：10/10 目标 `check` 全 `OK`、三个行为测试通过（`test-resume-flat.mjs` **重写**成新屏的 12 条断言，并在 stock 上验证过会失败 7 条）、`check-doc-consistency.sh` 全过。补丁集 9 → **10** 个目标，`patch-base-version` = `0.11.1` |
 
 | **0.11.2 迁移**（2026-09-29，profile & 壳 → `0.11.2`；生态/tool 两包不变） | `dsh-patch check` 只报 **1 个 `NEEDS-REPORT`**：`dsh-adapter/index.js`（F5）——第 2 个 hunk 在 0.11.2 上失败（硬编码的可编辑键数组已被 `EDITABLE_CONFIG_KEYS` 取代）；其余 8 个 TUI 目标由 `diffs/*.patch` + `fuzz 3` 自动贴回（`history.js` 字节相同，7 个 `PATCHED-DRIFT`）。注意 F5 的**第 1 个 hunk 虽报 `succeeded with fuzz 3`，却是假落地**：它插在 `mathRendering` 之前，与上游自己后面那句 `recapOnOpen: Schema.boolean()` 重复，对象字面量里后者生效 → hunk 2 就算过了也等于白打，所以**不能**用 `dsh-patch apply` 强推 | ①先判 F5 留不留：上游 0.11.2 已自己修好（声明 `recapOnOpen`，volatility 由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供），`test-recap-setting.mjs` 实测键在 / volatile / 显式 `false` 存得下 / `/settings` 行与读点都在 → **退役**（删三件套、`TARGETS` 11 → 10、测试改成守 stock 契约）。②其余 8 个目标按 §3 复核：`git merge-file`（`base`=0.11.1 `original`、`theirs`=0.11.1 `backup`、`ours`=0.11.2 stock）结果与已装文件**逐字节相同**（7 个 0 冲突，`merge-file` 只差不写尾换行）；`useSessionSupervisor.js` 1 处冲突＝上游新增的「rail 按 cwd 自动选目录」effect 撞上 F3 的整体替换——**保留**上游新的 `snapshotSlot` 清理 effect、**删掉** rail 选择 effect（fork 里 `selectedPath`/`selectionManual`/`selectedUnregistered` 已不存在），F3 行为测试通过。③`original/` 换成 npm 取回的 0.11.2 原版（tool 两包 `original/` 亦与 0.1.7-rc.2 上游逐字节核对通过），`backup/` 换成复核后的已补丁件，`diffs/` 重新生成（**每个都在 0.11.2 stock 上 `--fuzz=0` 干净贴上且结果 == `backup/`**），`state/` 清空。④基线 `patch-base-version` 与 `patch-base-versions.json` → `0.11.2`；`check` 10/10 `OK` exit 0，四个测试通过，`check-doc-consistency.sh` 仅剩 `dsh-patch` 别名那两条 FAIL（别名确实不在 `~/.zshrc`/`~/.bashrc`，与本次升级无关，用绝对路径仍可跑） |
+
+| **0.12.0 迁移**（2026-09-30，profile & 壳 → `0.12.0`；生态 `dsh`/tool 两包 → `0.2.0-rc.2`） | `dsh-patch check` 报 **10/10 `DIFFERS`**（补丁全被升级还原），但**没有一条 `NEEDS-REPORT`**：其中 7 个目标（`AssistantToolUseMessage`/`history`/`useSessionSupervisor`/`SessionSupervisor`/`digest` 加 tool 两包）的新 stock 与 `original/` **逐字节相同** → 整文件恢复即可；上游真正动过的只有 `Chat.js`、`PromptInput.js`、`i18n.js`（鲸鱼券弹窗 `WhaleCouponPrompt`/`bonusNotices`、`channel.minimal` → `minimalUi`、`cycleMode()` 补 catch、`/resume` 一批新 key 等） | ①按 §3 对那 3 个做三方合并（`base`=0.11.2 `original`、`theirs`=0.11.2 `backup`、`ours`=0.12.0 stock）：**3/3 零冲突**，且结果与「旧 diff 直接贴在 0.12.0 上（`--fuzz=0`）」**逐字节相同** → 定制点一处没挪窝，上游改动全部保留（F2 的 `historySeedCwd` 三处、Ctrl+R 的 `loadHistory(channel.cwd)`、F3 的 `supervisor-hint-list` 文案）。②`original/` 换成 0.12.0 stock（= 已装原版）、`backup/` 换成合并结果、`diffs/` 重新生成，**10/10 都能在各自的 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**；`state/` 保持空。③基线 `patch-base-version` = `0.12.0`、`patch-base-versions.json` = dsh-tui `0.12.0` + tool 两包 `0.2.0-rc.2`（两包 `lib/index.js` 与 0.1.7-rc.2 **逐字节相同**，所以旧补丁原样有效，只换版本号）。④**顺手修掉 `apply-diff-patches.sh` 的两个真 bug**：GNU patch 的 hunk 报告（含 `with fuzz N`）走 **stdout**，旧脚本只重定向 stderr、又带 `-s` → 失败时 `NEEDS-REPORT` 下一行证据都打不出来、成功时 patch 的啰嗦话反倒漏进报告（列 0 那些 `File … is read-only` 就是它）；现在 stdout/stderr 两路都抓，并把 **fuzz 与 offset 分开报**（`PATCHED-FUZZ` 置 drift：fuzz 是上下文模糊匹配，可能贴到错的函数上），另加 `--read-only=ignore` 去掉 `-o` 下毫无意义的只读警告。⑤`check-doc-consistency.sh` 的 launcher 断言由硬编码 `0.1.7-rc.2` 改成**从已装树读版本 + 断言文档记的就是它**（生态每次升级不必再手改这一条，且断言更强），并补 3 条脚本锚点。⑥复验：`apply` 10/10 `applied` → `check` 10/10 `OK` exit 0，四个行为测试全过。补丁集仍 **10** 个目标，`patch-base-version` = `0.12.0` |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 

@@ -45,7 +45,18 @@ SHELL_PKG="$GLOBAL/@deepseek-harness-tui/dsh-tui"
 # still names the old one.
 ck "shell dsh-tui = $(node -p "require('$SHELL_PKG/package.json').version" 2>/dev/null)" \
    "[ \"\$(node -p \"require('$SHELL_PKG/package.json').version\")\" = \"\$(node -p \"require('$TUI_PKG/package.json').version\")\" ]"
-ck "launcher dsh = 0.1.7-rc.2"   "grep -q '\"version\": \"0.1.7-rc.2\"' '$GLOBAL/@deepseek-ai/dsh/package.json'"
+LAUNCHER="$(pkgv "$GLOBAL/@deepseek-ai/dsh")"
+TOOL_BASE="$(basev '@deepseek-ai/dsh-tool-fs')"
+ck "launcher dsh = $LAUNCHER (read from the installed tree)" \
+   "[ -n '$LAUNCHER' ] && [ '$LAUNCHER' != '?' ]"
+# The launcher rides its own release train (dsh-tui 0.12.0 ↔ ecosystem
+# 0.2.0-rc.2). Assert the DOC names the installed one instead of pinning a
+# constant here: an ecosystem upgrade then fails on a stale §1.1 row rather than
+# on this line, which nobody remembers to edit.
+ck "CUSTOMIZATIONS.md §1.1 records launcher $LAUNCHER" \
+   "grep -qE 'launcher / 生态.*$LAUNCHER' '$DIR/CUSTOMIZATIONS.md'"
+ck "CUSTOMIZATIONS.md §1.1 records the tool baseline $TOOL_BASE" \
+   "grep -qE 'tool 包 .*$TOOL_BASE' '$DIR/CUSTOMIZATIONS.md'"
 # The tool packages ride the launcher's ecosystem version and are patched
 # separately, so each one is asserted against its own baseline in
 # patch-base-versions.json — the same map apply-diff-patches.sh gates on.
@@ -210,6 +221,18 @@ ck "apply script reports PATCHED-DRIFT for a moved baseline" \
    "grep -q 'PATCHED-DRIFT' '$DIR/apply-diff-patches.sh'"
 ck "apply script is idempotent on diff-applied files (OK-PATCHED)" \
    "grep -q 'OK-PATCHED' '$DIR/apply-diff-patches.sh'"
+# 0.12.0: GNU patch reports the hunk outcomes — including "with fuzz N" — on
+# STDOUT. Capturing stderr alone (with -s) left NEEDS-REPORT quoting an empty
+# file and leaked patch's chatter into the report; the fix greps the captured
+# stdout and reports fuzz apart from a mere line-number offset.
+ck "apply script captures patch's stdout (the hunk/fuzz report)" \
+   "grep -q 'patch.out' '$DIR/apply-diff-patches.sh'"
+ck "apply script tells fuzz apart from a line-number offset" \
+   "grep -q 'patch_was_fuzzy' '$DIR/apply-diff-patches.sh' && grep -q 'PATCHED-FUZZ' '$DIR/apply-diff-patches.sh'"
+ck "apply script quotes the failing hunks on NEEDS-REPORT" \
+   "grep -q 'fail_note' '$DIR/apply-diff-patches.sh'"
+ck "apply script silences the read-only warning -o makes meaningless" \
+   "grep -q -- '--read-only=ignore' '$DIR/apply-diff-patches.sh'"
 ck "apply script aborts when a target cannot be written" \
    "grep -q 'ABORT: cannot write' '$DIR/apply-diff-patches.sh'"
 ck "apply script's closing note names the profile patch (not the dropped settings.yaml)" \

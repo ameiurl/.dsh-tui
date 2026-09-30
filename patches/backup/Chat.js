@@ -43,7 +43,7 @@ import { useSelection } from '../ink/hooks/use-selection.js';
 import { NoSelect } from '../ink/components/NoSelect.js';
 import { LogoHeader, MessageList } from '../components/MessageList.js';
 import { splashFontIdOf } from '../components/splashFonts.js';
-import { StarPrompt } from '../components/StarPrompt.js';
+import { StarPrompt, WhaleCouponPrompt } from '../components/StarPrompt.js';
 import { dueStarModal, markStarAsked, STAR_MILESTONES } from '../usageStats.js';
 import { TimelineRail } from '../components/TimelineRail.js';
 import { ScrollbarGutter } from '../components/ScrollbarGutter.js';
@@ -223,12 +223,14 @@ let fallbackDialogStore;
 let fallbackStatusStore;
 /** Standalone mounts (tests, bare embeds) without the composition root's store. */
 let fallbackActivityStore;
+const noCouponSubscription = () => () => undefined;
+const noCouponSnapshot = () => null;
 /** Identity of one caret-preview dismissal: the token (its title) on the
  *  image, so the same image staged twice is dismissed per token. */
 function peekKey(image, title) {
     return `${title ?? ''} ${image.id}`;
 }
-export function Chat({ channel, questionStore, approvalStore, extensionDialogs, extensionStatus, activityStore, extensionShortcuts, themeHost, onExit, onUpdate, onRestart, fullscreen = false, trajectorySeen: trajectorySeenProp, injectControllerRef, promptControllerRef: promptControllerRefProp, renderScene, openHomeOnBoot, starPrompt, }) {
+export function Chat({ channel, questionStore, approvalStore, extensionDialogs, bonusNotices, extensionStatus, activityStore, extensionShortcuts, themeHost, onExit, onUpdate, onRestart, fullscreen = false, trajectorySeen: trajectorySeenProp, injectControllerRef, promptControllerRef: promptControllerRefProp, renderScene, openHomeOnBoot, starPrompt, }) {
     const writeRaw = React.useContext(TerminalWriteContext);
     // Re-render whenever the channel mutates; rows/status are read fresh below.
     // DEFAULT lane on purpose (useExternalVersion): the channel version bumps
@@ -258,6 +260,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // extensions row share one inert store that never holds a dialog.
     const dialogs = extensionDialogs ?? (fallbackDialogStore ??= new TuiDialogStore());
     const dialogSnapshot = React.useSyncExternalStore(listener => dialogs.subscribe(listener), () => dialogs.getSnapshot());
+    const coupon = React.useSyncExternalStore(bonusNotices?.subscribe ?? noCouponSubscription, bonusNotices?.getSnapshot ?? noCouponSnapshot);
     // Plugin status contributions: text keys join into one line; bounded rich
     // views keep their own rows immediately above the prompt.
     const statusContributions = extensionStatus ?? (fallbackStatusStore ??= new TuiStatusStore());
@@ -2415,7 +2418,9 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                 ...oauth.map(row => t('login-oauth-row', {
                                     provider: row.provider,
                                     state: row.signedIn
-                                        ? t('login-oauth-in', { time: new Date(row.expiresAt ?? 0).toISOString() })
+                                        ? row.expiresAt === undefined
+                                            ? t('login-oauth-in-no-expiry')
+                                            : t('login-oauth-in', { time: new Date(row.expiresAt).toISOString() })
                                         : row.expired
                                             ? t('login-oauth-expired')
                                             : t('login-oauth-signed-out'),
@@ -3014,11 +3019,23 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     }, []);
     /** Deduplicate terminals that report one Enter as parsed Return then raw CR/LF. */
     const lastModalEnterAtRef = React.useRef(0);
+    const couponVisible = coupon !== null && starModal === null
+        && approvalSnapshot === null && dialogSnapshot === null && questionSnapshot === null
+        && overlay.kind === 'none' && btw === null && recap === null
+        && !supervisorOpen && !treeOpen && !settingsOpen && !jobsPanelOpen
+        && !sceneOpen && !subagentDashboardOpen && subagentDetailId === null;
+    const markCouponShown = React.useCallback((orderId) => {
+        bonusNotices?.shown(orderId);
+    }, [bonusNotices]);
+    const closeCoupon = React.useCallback(() => {
+        if (coupon !== null)
+            bonusNotices?.dismiss(coupon.orderId);
+    }, [bonusNotices, coupon]);
     useInput((input, key, event) => {
         // 开屏"求 star"弹窗开着时键盘全归它（↑/↓/Enter/Esc 由它自己的
         // useInput 处理），滚轮也不许滚动它身后的转录——和下面的整屏界面
         // 同一套让位规则。
-        if (starModal !== null)
+        if (starModal !== null || couponVisible)
             return;
         // Prompt-slot panels own the keyboard while visible. Their own useInput
         // handles the relevant keys; Chat registered first, so yielding here
@@ -4032,7 +4049,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
     // Who owns the spinner slot: with the working-activity line on, that slot
     // draws the user's `/activity` preset, so the compaction row borrows the same
     // indicator instead of answering with the classic dot.
-    const activitySlot = channel.activityEnabled && !channel.minimal;
+    const activitySlot = channel.activityEnabled && !channel.minimalUi;
     // An automatic compaction runs INSIDE the turn, so it rides whichever spinner
     // the slot shows as a badge instead of a second row (the spinner's timer is
     // the turn's, not the compaction's).
@@ -4237,7 +4254,8 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
         || (recap !== null && (!recap.auto || recap.expanded))
         || btw !== null
         || questionPanelNode !== null
-        || starModal !== null;
+        || starModal !== null
+        || couponVisible;
     // The trajectory scene replaces the conversation for as long as it is open.
     // Rendering it INSTEAD of (not above) the transcript is what makes it a
     // screen rather than an overlay: it owns the full viewport, and the
@@ -4394,6 +4412,8 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                         band: wakeBand,
                                         hint: trajectorySeen ? undefined : primaryComboString('trajectory'),
                                         tick: Math.floor(wakeTime / 120),
+                                        onOpen: openScene,
+                                        hoverHint: primaryComboString('trajectory'),
                                     } }), dialogOverlayOpen && (_jsxs(OverlayAbove, { maxHeight: Math.max(terminalRows - 8, 1), children: [overlay.kind === 'thinking' && (_jsx(ThinkingToggle, { currentValue: thinkingVisible, focusIndex: overlay.focus, onPick: (index) => {
                                             // 点击行 = 设焦点 + 应用（与 Enter 同一条路径）
                                             const visible = index === 0;
@@ -4536,7 +4556,7 @@ export function Chat({ channel, questionStore, approvalStore, extensionDialogs, 
                                                 const path = overlay.path;
                                                 dispatchOverlay({ type: 'close' });
                                                 runFileAction(index, path);
-                                            } }) })), overlay.kind === 'search' && _jsx(TranscriptSearch, { query: searchQuery, cursorOffset: searchCursor, count: searchCount, current: searchCurrent })] }))] })] }), _jsx(TooltipLayer, { invalidationKey: `${overlay.kind}:${dialogOverlayOpen}:${btw !== null}`, subscribeInvalidation: subscribeTooltipInvalidation }), _jsx(PromptEditorLayer, {}), promptEditorOpen && imagePreviewNode, starModal !== null && STAR_MILESTONES[starModal.index] !== undefined && (_jsx(StarPrompt, { milestone: STAR_MILESTONES[starModal.index], actions: starModalActions, onClose: closeStarModal, initialPhase: starModal.phase }))] }));
+                                            } }) })), overlay.kind === 'search' && _jsx(TranscriptSearch, { query: searchQuery, cursorOffset: searchCursor, count: searchCount, current: searchCurrent })] }))] })] }), _jsx(TooltipLayer, { invalidationKey: `${overlay.kind}:${dialogOverlayOpen}:${btw !== null}`, subscribeInvalidation: subscribeTooltipInvalidation }), _jsx(PromptEditorLayer, {}), promptEditorOpen && imagePreviewNode, starModal !== null && STAR_MILESTONES[starModal.index] !== undefined && (_jsx(StarPrompt, { milestone: STAR_MILESTONES[starModal.index], actions: starModalActions, onClose: closeStarModal, initialPhase: starModal.phase })), couponVisible && coupon !== null && (_jsx(WhaleCouponPrompt, { notice: coupon, onShown: markCouponShown, onClose: closeCoupon }))] }));
 }
 /**
  * The pinned prompt header shown above the ScrollBox while the user has

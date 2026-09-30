@@ -1,5 +1,5 @@
---- original/PromptInput.js	2026-09-29 15:01:26.223137253 +0800
-+++ backup/PromptInput.js	2026-09-29 15:01:26.227031327 +0800
+--- original/PromptInput.js	2026-09-30 11:37:11.090942649 +0800
++++ backup/PromptInput.js	2026-09-30 11:37:11.092997795 +0800
 @@ -575,8 +575,15 @@
      const history = React.useRef([]);
      const historyIndex = React.useRef(-1);
@@ -59,7 +59,7 @@
      };
      const clearDeliveredDraft = () => {
          syncImageGeneration();
-@@ -2168,8 +2181,13 @@
+@@ -2179,8 +2192,13 @@
                  return;
              }
              if (overlayOpen && historyIndex.current < 0) {
@@ -75,7 +75,7 @@
              }
              seedHistory();
              if (history.current.length === 0)
-@@ -2239,8 +2257,12 @@
+@@ -2250,8 +2268,12 @@
                  return;
              }
              if (overlayOpen && historyIndex.current < 0) {
