@@ -9,7 +9,7 @@ Three customizations live here:
    `+`/`-` markers** (instead of the default side-by-side panes), plus a Claude
    Code diff palette.
 2. **Resume & input history** — `/resume` lists the **current working
-   directory's** sessions with **no workspace rail** (0.11.x's session screen
+   directory's** sessions with **no workspace rail** (the session screen
    keeps its search, rename, delete, live-status and session-hosting keys, but
    the rail and every other directory are out of reach), and ↑/↓ (plus Ctrl+R)
    recall the persisted `history.jsonl` **scoped to the current working
@@ -59,9 +59,12 @@ dsh-patch apply    # force-copy all backups
 When an upgrade moves the code a patch was built against, the script no longer
 refuses: it applies `diffs/<name>.patch` **to the installed file** with
 `patch --fuzz=3`, installs the result only when every hunk landed and
-`node --check` passes, and reports `PATCHED-DRIFT` (plus a stamp in `state/` so
-a second run says `OK-PATCHED` instead of patching a patched file). A clean
-application is not a re-port — fuzz can match loosely — so the runbook below
+`node --check` passes, and reports how it landed — `PATCHED-DRIFT` when the
+hunks matched their context exactly and only the line numbers moved (the diff
+still fits; re-port to re-anchor it), `PATCHED-FUZZ` when the context matched
+loosely (the hunks may have attached to the wrong lines — read the diff before
+trusting it; a stamp in `state/` still makes a second run say `OK-PATCHED`
+instead of patching a patched file). Neither is a re-port, so the runbook below
 still applies.
 
 The alias lives in `~/.zshrc` / `~/.bashrc` and points at
@@ -97,9 +100,9 @@ it belongs at the end of every one.
 | `diffs/*.patch` | unified diffs original→patched, named after the backup file — **view what was changed**: `cat ~/.dsh-tui/patches/diffs/AssistantToolUseMessage.js.patch`, and the source `dsh-patch patch` applies |
 | `state/*.sha1` | fingerprint of what a diff run installed (git-ignored), so re-runs are idempotent |
 
-Sources: `@deepseek-ai/dsh-tool-fs@0.1.7-rc.2`,
-`@deepseek-ai/dsh-tool-str-replace-editor@0.1.7-rc.2`,
-`@deepseek-harness-tui/dsh-tui@0.11.2`.
+Sources: `@deepseek-ai/dsh-tool-fs@0.2.0-rc.2`,
+`@deepseek-ai/dsh-tool-str-replace-editor@0.2.0-rc.2`,
+`@deepseek-harness-tui/dsh-tui@0.12.0`.
 
 | file | change |
 | --- | --- |

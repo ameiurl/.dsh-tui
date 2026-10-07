@@ -8,7 +8,8 @@
 #   dsh-patch check     report only, never modify (exit 1 when a target differs,
 #                       is missing, or has drifted off its baseline)
 #   dsh-patch patch     apply diffs/<name>.patch onto whatever is installed
-#                       (`patch --fuzz=3`), install only clean applications
+#                       (`patch --fuzz=3`); install only when every hunk landed
+#                       and `node --check` passes, and say whether it needed fuzz
 #   dsh-patch apply     force-copy all backups over their targets (the explicit
 #                       downgrade path — re-port before using it on drift)
 #   dsh-patch diff      print the unified diff between each installed file and
@@ -25,8 +26,13 @@
 #      installed only when every hunk landed and `node --check` passes. This is
 #      what keeps a version bump from leaving the customizations un-applied:
 #      the diff rides along with upstream's line shifts instead of refusing.
-#      A clean application is not a re-port — fuzz can match loosely — so the
-#      target is reported PATCHED-DRIFT and CUSTOMIZATIONS.md §3 still applies.
+#      The two ways a hunk can land are not equally trustworthy, so they are
+#      reported apart: an OFFSET (line numbers moved, context matched exactly)
+#      means the diff still fits — PATCHED, or PATCHED-DRIFT when the baseline
+#      also moved — while FUZZ (context matched loosely) means the hunk may
+#      have attached to the wrong lines: PATCHED-FUZZ, re-port before trusting
+#      it. Either way a clean application is not a re-port, so CUSTOMIZATIONS.md
+#      §3 still applies.
 #
 # Copies use `cp --remove-destination` so the write never follows pnpm's
 # hardlink into the content-addressable store: a plain `cp` rewrites the store
@@ -125,11 +131,24 @@ stamp_of() {
   [[ -f "$STATE/$1.sha1" ]] && cat "$STATE/$1.sha1" || echo ''
 }
 # Apply ./diffs/<name>.patch TO <installed>, writing the result to <out>.
-# Returns 0 only when every hunk landed; stderr is captured for the report.
+# Returns 0 only when every hunk landed. Both streams are captured because GNU
+# patch reports the hunk outcomes — including "with fuzz N", the ONLY tell that
+# a hunk matched loosely — on STDOUT; stderr only carries hard errors. (Before
+# the 0.12.0 re-port this captured stderr alone and ran patch with `-s`: the
+# failure report quoted an empty file, and patch's chatter leaked into the
+# report at column 0.)
+# `--read-only=ignore` drops the "file ... is read-only; trying to patch anyway"
+# warning, which is meaningless here: `-o` never writes the installed file.
 apply_udiff() {
   local installed="$1" patchfile="$2" out="$3"
-  patch -p0 --fuzz=3 --no-backup-if-mismatch -s -o "$out" "$installed" \
-    < "$patchfile" 2>"$WORK/patch.err"
+  patch -p0 --fuzz=3 --read-only=ignore --no-backup-if-mismatch -o "$out" "$installed" \
+    < "$patchfile" >"$WORK/patch.out" 2>"$WORK/patch.err"
+}
+# Did the application above need fuzz? patch writes "(offset N lines)" for a
+# pure shift and "with fuzz N" only when it had to loosen the context match —
+# an offset is the diff still fitting, fuzz is the diff guessing.
+patch_was_fuzzy() {
+  grep -q 'with fuzz' "$WORK/patch.out" 2>/dev/null
 }
 
 needs_apply=0
@@ -200,13 +219,27 @@ for entry in "${TARGETS[@]}"; do
   fi
   if apply_udiff "$target" "$patchfile" "$WORK/$file"; then
     if node --check "$WORK/$file" >/dev/null 2>&1; then
+      fuzzy=0
+      patch_was_fuzzy && fuzzy=1
       if [[ "$MODE" == "check" ]]; then
-        echo "DIFFERS: ${target#$DSH_HOME/}  (restorable: unified diff, fuzz 3)"
-        [[ "$drifted" -eq 1 ]] && drift=1
+        if [[ "$fuzzy" -eq 1 ]]; then
+          echo "DIFFERS: ${target#$DSH_HOME/}  (restorable: unified diff ONLY WITH FUZZ — re-port this file)"
+          drift=1
+        else
+          echo "DIFFERS: ${target#$DSH_HOME/}  (restorable: unified diff, context matched exactly)"
+          [[ "$drifted" -eq 1 ]] && drift=1
+        fi
       elif cp --remove-destination "$WORK/$file" "$target"; then
-        if [[ "$drifted" -eq 1 ]]; then
+        if [[ "$fuzzy" -eq 1 ]]; then
+          # Fuzz = the context matched loosely, so the hunks may sit on the
+          # wrong lines. Still worth installing (it is our change and node
+          # --check gates it), but never worth trusting without reading.
+          echo "PATCHED-FUZZ: ${target#$DSH_HOME/}"
+          echo "         hunks matched WITH FUZZ — read the diff, then re-port (CUSTOMIZATIONS.md §3)"
+          drift=1
+        elif [[ "$drifted" -eq 1 ]]; then
           echo "PATCHED-DRIFT: ${target#$DSH_HOME/}"
-          echo "         $pkgname installed $cur | patch built for $want — diff applied with fuzz; re-port to be sure"
+          echo "         $pkgname installed $cur | patch built for $want — diff applied at offset only; re-port to be sure"
           drift=1
         else
           echo "PATCHED: ${target#$DSH_HOME/}  (unified diff applied)"
@@ -225,17 +258,23 @@ for entry in "${TARGETS[@]}"; do
   fi
   echo "NEEDS-REPORT: ${target#$DSH_HOME/}"
   echo "         $pkgname installed $cur | patch built for $want — diffs/$file.patch does not apply cleanly"
-  sed -n '1,4p' "$WORK/patch.err" | sed 's/^/         /'
+  # The failing hunks are on stdout ("N out of M hunks FAILED"); stderr only
+  # speaks for hard errors (missing file, malformed patch). Quote whichever
+  # stream has something to say — the hunk list is the useful half.
+  fail_note="$(grep -hE 'FAILED|malformed|No such|does not exist' "$WORK/patch.out" "$WORK/patch.err" 2>/dev/null | head -4)"
+  [[ -z "$fail_note" ]] && fail_note="$(sed -n '1,4p' "$WORK/patch.err")"
+  [[ -n "$fail_note" ]] && printf '%s\n' "$fail_note" | sed 's/^/         /'
   drift=1
 done
 
 echo "dsh-tui installed: $(installed_version "$TUI_PKG") | patch built against: $(cat "$DIR/patch-base-version" 2>/dev/null || echo '?')"
 echo "tool packages:     dsh-tool-fs $(installed_version "$TOOLS/dsh-tool-fs") | dsh-tool-str-replace-editor $(installed_version "$TOOLS/dsh-tool-str-replace-editor")"
 if [[ "$drift" -eq 1 ]]; then
-  echo "⚠  version drift / unusable targets above. Drifted targets are restored"
-  echo "   through diffs/*.patch (fuzz 3) and stamped OK-PATCHED; the ones reported"
-  echo "   NEEDS-REPORT must be re-ported onto what is installed, then bump"
-  echo "   patch-base-versions.json (and patch-base-version for the profile)."
+  echo "⚠  drift / unusable targets above. A drifted target is restored through"
+  echo "   diffs/*.patch and stamped OK-PATCHED; PATCHED-FUZZ means the hunks"
+  echo "   matched loosely (read them), NEEDS-REPORT means re-port that file onto"
+  echo "   what is installed, then bump patch-base-versions.json (and"
+  echo "   patch-base-version for the profile)."
 fi
 
 if [[ "$MODE" == "check" ]]; then

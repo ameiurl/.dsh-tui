@@ -1,6 +1,6 @@
---- original/i18n.js	2026-09-29 15:01:26.322419651 +0800
-+++ backup/i18n.js	2026-09-29 15:01:26.325756487 +0800
-@@ -437,7 +437,7 @@
+--- original/i18n.js	2026-09-30 11:37:11.150685207 +0800
++++ backup/i18n.js	2026-09-30 11:37:11.154302453 +0800
+@@ -440,7 +440,7 @@
      'supervisor-no-matches': { zh: '没有匹配的会话 · Esc 清空筛选', en: 'No sessions match · Esc clears the filter' },
      'supervisor-subtitle': { zh: '本终端托管多个会话 · 切换不中断', en: 'This terminal hosts several sessions · switching does not stop them' },
      'supervisor-filter-placeholder': { zh: '输入以搜索会话…', en: 'Type to search sessions…' },
