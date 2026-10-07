@@ -363,6 +363,37 @@ node -p "require('$HOME/.dsh/profiles/node_modules/@deepseek-ai/dsh-tool-fs/pack
 > **壳、profile、补丁基线三者对不上时先对齐版本再谈补丁**：0.10.1 与 0.10.2 混着的树上，
 > 归档里的 `backup/` 只对其中一个版本成立（见 §1.1 的 pin 说明）。
 
+### Step 0.5 — 升级 launcher / 生态本身（0.12.0 迁移时踩的两个坑）
+```bash
+# 1) 全局 launcher —— 注意：这里【不要】加 --legacy-peer-deps
+env -u https_proxy -u http_proxy -u all_proxy \
+  npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+
+# 2) 全局壳（瘦壳，逻辑永远来自 profile）
+env -u https_proxy -u http_proxy -u all_proxy \
+  npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@0.12.0
+
+# 3) profile 的 pin + node_modules（生态包会被一起带到同一版本）
+env -u https_proxy -u http_proxy -u all_proxy \
+  pnpm add -C ~/.dsh/profiles/dsh-tui @deepseek-harness-tui/dsh-tui@0.12.0
+```
+- **坑 ①：launcher 不能用 `--legacy-peer-deps`。** `dsh-app-boot` 把
+  `@deepseek-ai/cordis-plugin-group` 等 cordis 包声明为 **peerDependency**，而
+  `--legacy-peer-deps` 让 npm **跳过 peer 的自动安装**；其中 `cordis`/`include`/`loader`
+  恰好也在 launcher 自己的 dependencies 里，只有 `cordis-plugin-group` 不在 →
+  `dsh --version` 直接报
+  `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/cordis-plugin-group'`。
+  壳是瘦壳、没有这种 peer，所以 `--legacy-peer-deps` 只对壳无害。装坏了就**去掉开关**重装一次
+  dsh 修好（`added 27 packages`）。别把 launcher 和壳塞进同一条 `npm install -g`——
+  一起装会顺手削掉 launcher 的一批依赖。
+- **坑 ②：升级后第一次跑 `dsh` 会 reconcile profile**，把 `profiles/node_modules` 的
+  tool 两包换回 stock（补丁丢）。这是**一次性**的：第二次启动不再重装（实测 `dsh --version`
+  跑两遍，第二遍补丁仍在）。所以先随便跑一次 `dsh --version` 让它 reconcile 完，**再**执行
+  Step 1 的 `dsh-patch`，免得刚补好又被冲掉。
+- 第 3 步的 pin 不能省：profile 的 `package.json` 若还写着旧版本，launcher 启动时会照 pin 把
+  `node_modules` **拉回旧版**（见 §4「profile 掉回 0.10.1」那条）。本机升级前 pin 是 `0.11.1`
+  而实装 `0.11.2`，就是这种「pin 落后」的遗留。
+
 ### Step 1 — 检查缺失
 ```bash
 dsh-patch check        # = bash ~/.dsh-tui/patches/apply-diff-patches.sh check
