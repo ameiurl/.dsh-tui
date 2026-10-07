@@ -7,12 +7,16 @@
 # ---- 会话与历史数据(含对话内容，属个人数据) ----
 history.jsonl
 session-index.json
+# 列表首屏快照：与 session-index.json 同源，行里带会话标题
+session-lists/
 resume.txt
 
 # ---- 运行时状态 ----
 last-used.json
 agent-view-sessions.json
 session-mounts.json
+home.json
+usage.json
 
 # ---- 日志 / 账本 ----
 effect-ledger.jsonl
