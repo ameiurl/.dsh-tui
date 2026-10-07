@@ -11,10 +11,14 @@
 // order, with the address filter applied to both prompt levels:
 //
 //   * a `session/title` event wins, and its provenance still classifies it
-//     (provider → auto, TUI-written → renamed);
+//     (provider → auto, a person's rename → renamed);
+//   * dsh's deterministic PLACEHOLDER (`source.kind: 'fallback'`, the opening
+//     prompt truncated) is not a name at all: it never wins the row and never
+//     buries the provider title written after it — neither in the bounded
+//     head/tail read, nor in the deep scan, nor in an appended-suffix update;
 //   * otherwise the MOST RECENT human prompt names the row, and only then the
 //     opening prompt (`lastPrompt` before `firstPrompt`);
-//   * that recent prompt is normalized the way Claude normalizes its own
+//   * both prompt levels are normalized the way Claude normalizes its own
 //     `lastPrompt`: newlines folded to spaces, trimmed, clipped at 200
 //     characters with an ellipsis;
 //   * a prompt that is nothing but a filesystem address is stepped over at
@@ -26,7 +30,7 @@
 //     clean-up;
 //   * a log with no human input at all stays empty.
 
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -66,6 +70,21 @@ const title = (text, provider = false) => ({
   type: 'session/title',
   time: 3,
   data: provider ? { title: text, source: { kind: 'provider' } } : { title: text },
+});
+// dsh's own deterministic placeholder (`dsh-session-title`'s
+// `fallbackSessionTitle`): the first human prompt, truncated, appended so the
+// session is never nameless. This is the shape that made `/resume` rows show a
+// truncated file path, so it is the shape these checks exist for.
+const fallbackTitle = text => ({
+  type: 'session/title',
+  time: 3,
+  data: { title: text, messageSeqs: [1], source: { kind: 'fallback' } },
+});
+/** What `/rename` (and the picker's rename) appends: a person's decision. */
+const userTitle = text => ({
+  type: 'session/title',
+  time: 3,
+  data: { title: text, messageSeqs: [], source: { kind: 'user' } },
 });
 
 const dir = mkdtempSync(join(tmpdir(), 'dsh-title-'));
@@ -137,6 +156,78 @@ try {
   got = digestOf(log([boot()]));
   check(got.hasPrompt === false && got.source === 'fallback' && got.text === basename(CWD),
     `an input-less log stays empty and falls back to the basename (got ${JSON.stringify(got)})`);
+
+  // 6b. dsh's deterministic placeholder is the opening prompt truncated, not a
+  //     name: it never wins a row, and it never buries the provider title
+  //     written after it — the exact failure that made `/resume` rows show a
+  //     truncated path (`@modules/client/…/A`) instead of a name.
+  got = digestOf(log([boot(), user('@modules/client/controllers/v1/auction/AuctionController.php 操作过快'),
+    fallbackTitle('@modules/client/controllers/v1/auction/A')]));
+  check(got.text === '@modules/client/controllers/v1/auction/AuctionController.php 操作过快' && got.source === 'prompt',
+    `a placeholder is stepped over for the full prompt (got ${JSON.stringify(got)})`);
+  got = digestOf(log([boot(), user('第一句'), user('最近说的一句'), fallbackTitle('第一句')]));
+  check(got.text === '最近说的一句' && got.source === 'prompt',
+    `a placeholder does not outrank the most recent prompt (got ${JSON.stringify(got)})`);
+  got = digestOf(log([boot(), user('帮我看看这个'), fallbackTitle('帮我看看这个'), title('修复登录按钮', true)]));
+  check(got.text === '修复登录按钮' && got.source === 'auto',
+    `a placeholder does not bury the provider title (got ${JSON.stringify(got)})`);
+  got = digestOf(log([boot(), user('帮我看看这个'), fallbackTitle('帮我看看这个'), userTitle('我起的名字')]));
+  check(got.text === '我起的名字' && got.source === 'renamed',
+    `a person's rename still outranks every derived level (got ${JSON.stringify(got)})`);
+  got = digestOf(log([boot(), user('@src/views/Setting.vue'), fallbackTitle('@src/views/Setting.vue')]));
+  check(got.text === basename(CWD) && got.source === 'fallback' && got.hasPrompt === true,
+    `an address-only session with a placeholder still falls back to the basename (got ${JSON.stringify(got)})`);
+
+  // 6c. The OPENING prompt is normalized exactly like the recent one: a
+  //     multi-line or oversized opening must not wrap the row it names.
+  got = digestOf(log([boot(), user('第一行\n第二行')]));
+  check(got.text === '第一行 第二行', `a multi-line opening is folded to one line (got ${JSON.stringify(got)})`);
+  got = digestOf(log([boot(), user(`${'y'.repeat(250)}结尾`)]));
+  check(got.text?.length === 201 && got.text.endsWith('…'),
+    `an oversized opening is clipped at 200 characters (got ${got.text?.length} chars)`);
+
+  // 6d. Every path that writes the cache has to agree: the deep scan follows
+  //     the same chain, and an appended-suffix update must not let a
+  //     placeholder in as a name either.
+  const placeholderOnly = log([boot(), user('第一句'), user('最后一句'), fallbackTitle('第一句')]);
+  let deep = await digest.recoverSessionTitle(placeholderOnly, statSync(placeholderOnly).size);
+  check(deep.title?.text === '最后一句' && deep.title?.source === 'prompt' && deep.hasPrompt === true,
+    `recoverSessionTitle skips the placeholder for the recent prompt (got ${JSON.stringify(deep)})`);
+  const placeholderAndProvider = log([boot(), user('第一句'), fallbackTitle('第一句'), title('AI 起的名字', true)]);
+  deep = await digest.recoverSessionTitle(placeholderAndProvider, statSync(placeholderAndProvider).size);
+  check(deep.title?.text === 'AI 起的名字' && deep.title?.source === 'auto',
+    `recoverSessionTitle still prefers a provider title (got ${JSON.stringify(deep)})`);
+  const appended = log([boot(), user('第一句')]);
+  const beforeAppend = statSync(appended).size;
+  appendFileSync(appended, frame(fallbackTitle('第一句')));
+  let suffix = await digest.digestAppendedSuffix(appended, beforeAppend, statSync(appended).size);
+  check(suffix.complete === true && suffix.title === undefined && suffix.hasHumanPrompt === false,
+    `an appended placeholder leaves the cached name alone (got ${JSON.stringify(suffix)})`);
+  const beforeProvider = statSync(appended).size;
+  appendFileSync(appended, frame(title('AI 起的名字', true)));
+  suffix = await digest.digestAppendedSuffix(appended, beforeProvider, statSync(appended).size);
+  check(suffix.title?.text === 'AI 起的名字' && suffix.title?.source === 'auto',
+    `an appended provider title still updates the cached name (got ${JSON.stringify(suffix)})`);
+
+  // 6e. A tail holding only a placeholder cannot make the cheap path claim
+  //     completeness: the provider title may sit in the unseen middle, so the
+  //     entry has to stay open for the deep scan — which then finds it.
+  const middle = randomBytes(200_000).toString('base64');
+  const placeholderTail = log([
+    boot(),
+    user('第一句'),
+    { type: 'assistant/message', time: 4, data: { message: { content: [{ type: 'text', text: middle }] } } },
+    title('中间的 AI 名字', true),
+    { type: 'assistant/message', time: 5, data: { message: { content: [{ type: 'text', text: middle }] } } },
+    fallbackTitle('第一句'),
+  ]);
+  check(statSync(placeholderTail).size > 64 * 1024, 'the placeholder-tail fixture really is bigger than the head window');
+  const cheap = digest.digestSession(placeholderTail, CWD);
+  check(cheap.titleComplete !== true && cheap.title?.text === '第一句' && cheap.title?.source === 'prompt',
+    `a placeholder tail keeps the digest open for the deep scan (got ${JSON.stringify({ title: cheap.title, titleComplete: cheap.titleComplete })})`);
+  deep = await digest.recoverSessionTitle(placeholderTail, statSync(placeholderTail).size);
+  check(deep.title?.text === '中间的 AI 名字' && deep.title?.source === 'auto',
+    `the deep scan finds the provider title hidden in the middle (got ${JSON.stringify(deep)})`);
 
   // 7. The head window covers only the first 64 KB, so a big log has to find
   //    the recent prompt through the tail window — the path this level exists

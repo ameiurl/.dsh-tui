@@ -58,17 +58,18 @@
 > **编号说明**：0.10.0 → 0.10.1 迁移时列表重排为 F1–F3：
 > F1 diff 渲染、**F2 ↑/↓ 跨会话历史（同样只看当前目录）**、
 > **F3 resume 只看当前目录（扁平、无 rail）**；2026-09-11 追加
-> **F4 标题链路：按 Claude Code 的取名链**（最近一条 prompt 优先）+ **文件地址不当标题**。
+> **F4 标题链路：按 Claude Code 的取名链**（最近一条 prompt 优先）+ **文件地址不当标题**
+> + **dsh 自己写的兜底占位标题不算名字**（2026-10-07 补：见 §2 F4）。
 > 迁移时曾去掉五项旧定制，其中**旧 F3 的部分行为已恢复进当前的 F3**
 > （去掉 rail、列表扁平，但范围仍是当前工作目录）；
 > 仍去掉的四项是：旧 F2 会话标题不截断、旧 F4 vim 默认开启/INSERT 起手、
 > 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 10 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 1 个 F4；
+> **当前补丁集 = 11 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 2 个 F4；
 > `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.11.2`，
 > 逐包基线见 `patch-base-versions.json`（dsh-tui `0.11.2`／tool 两包 `0.1.7-rc.2`）。
-> F5（`recapOnOpen`）**不在**这 10 个里：0.11.2 上游自己把它做成了 stock，补丁已退役
+> F5（`recapOnOpen`）**不在**这 11 个里：0.11.2 上游自己把它做成了 stock，补丁已退役
 > （见下方「退役」与 §4 的状态表），别再把它加回 `TARGETS`。
 >
 > **0.11.2 迁移要点（2026-09-29）**：上游改动不大，`dsh-patch` 用 `diffs/*.patch` +
@@ -218,29 +219,51 @@
      没有「全部工作目录」范围 / hint 仍广告 Ctrl+N、Ctrl+X、Enter /
      **Ctrl+N 的 `onNewSession` 收到当前目录**（stock 上这条会收到 rail 行的工作区）。
 
-### F4 — `/resume` 的标题按 Claude Code 的取名链，且文件地址永不当标题
-- **涉及文件（1 个）**：
+### F4 — `/resume` 的标题按 Claude Code 的取名链，文件地址与 dsh 的兜底占位标题都不当标题
+- **涉及文件（2 个）**：
   - `…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`（**薄改动**：新增 `LAST_PROMPT_TITLE_CHARS`
-    / `isFileAddress()` / `normalizeLastPrompt()` / `lastPromptOf()`，`digestSession()` 的标题选择与
-    `recoverFirstPrompt()` 的扫描各改几行）。
+    / `isFileAddress()` / `normalizeLastPrompt()` / `lastPromptOf()` / `asTitle()`，`titleOf()` 给标题
+    事件分「真名字 / 占位」强弱，`digestSession()`、`recoverLatestName()`（原 `recoverLatestTitle()`）
+    与 `digestAppendedSuffix()` 各改几行）。
+  - `…/dsh-tui/lib/types/dsh-adapter/sessions/store.js`（**一个常量**：`SCHEMA_VERSION` 4 → 5，
+    让旧索引整份作废 —— 见下方「缓存 epoch」）。
 - **0.10.2 的结构锚点（重移植时先看这条）**：上游把 `humanPrompt()` 改成返回
   `{ text }`（无文本消息如纯图片 = `{ text: undefined }`），空会话判据也从
   `prompt !== undefined || !head.whole` 换成 `hasHumanMessage || !completeHead`，
   并要求日志首行 `type === 'session'` 才算"读完"。F4 的过滤建立在这个形状上：
   标题候选一律读 `human?.text` / `found.text`，而"任何人类消息都算有对话"由
   `hasHumanMessage` 承担 —— 这正是 F4 要的解耦，所以**不要再按 0.10.1 的字符串形状回改**。
-- **行为**：没有任何 `session/title` 事件的会话，按 Claude Code 的取名顺序取名
+- **行为**：没有任何**真名字**的会话，按 Claude Code 的取名顺序取名
   （它的链条是 `customTitle || aiTitle || lastPrompt || summaryHint || firstPrompt`），
   两层 prompt 候选都必须是"**整串不是文件地址**"：
-  1. 最后一条 `session/title` 事件（provider 自动标题 = `auto`；`/rename` 或 recap 点"应用"
-     = `renamed`）—— 对应 Claude 的 `customTitle || aiTitle`。**这一层不受过滤影响**：
+  1. 最后一条**真名字** `session/title` 事件（provider 自动标题 = `auto`；`/rename` 或 recap 点"应用"
+     = `renamed`）—— 对应 Claude 的 `customTitle || aiTitle`。**这一层不受地址过滤影响**：
      人和模型写下的名字照用；
   2. 否则**最近一条非地址人类消息**（`lastPromptOf()`，倒序扫、跳过地址，命中即返回）——
      对应 Claude 的 `lastPrompt`，并按它的 `normalizeLastPrompt` 归一化：换行折成空格、trim、
      超 `LAST_PROMPT_TITLE_CHARS = 200` 截断加 `…`；
   3. 否则**第一条非地址人类消息** —— 对应 Claude 的 `firstPrompt`（上游逻辑 + 跳过地址）；
+     **首条 prompt 也走第 2 层同一个 `normalizeLastPrompt`**（它以前原样上报，多行首句会把整行撑开）；
   4. 最后才是工作目录 basename（`source: 'fallback'`，上游原样、非空）。
      第 1 层有值时不做倒序扫描，已有标题的会话一个字节都不多读。
+     增量缓存更新（`digestAppendedSuffix()`）与深度恢复反扫（`recoverLatestName()`，原
+     `recoverLatestTitle()`）走同一条链：增量**只接受真名字**；恢复则一边反扫一边把"最近一条
+     非地址 prompt"记下来，扫完仍没有真名字就用它 —— 否则深度扫描（首条 prompt）会和快速路径
+     （最近一条 prompt）给出不同的名字，来回打架。
+- **dsh 的兜底占位标题不算名字**（2026-10-07，用户报「resume 只显示文件地址，导致分不清」）：
+  `dsh-session-title` 在没有 provider 标题时会把**首条人类消息截断**（`fallbackMaxWords` /
+  `fallbackMaxBytes` 双上限）写成一个 `session/title` 事件，`source.kind: 'fallback'`，好让会话
+  "永远有个名字"。它是一个 prompt，不是名字：多个会话只要首条都 `@` 同一个文件，行标题就长得
+  一模一样（真实数据里是 `@modules/client/controllers/v1/auction/A`）；而且它**写在 provider
+  标题之前**，上游"最后写入者胜"的规则又会反过来让占位标题压住后面的 AI 标题。所以 `titleOf()`
+  给它 `strong: false`，三处扫描（head/tail 窗口、深度反扫、增量后缀）一律只接受 `strong` 标题；
+  占位标题不参与 `titleComplete` 判断（tail 里只有一个占位，说明真名字可能藏在没读到的中间，
+  必须留给深度扫描）。
+- **缓存 epoch（`store.js`）**：`SCHEMA_VERSION` 4 → 5。标题的**语义**变了，而日志一个字节没变，
+  revision 会照常命中 → 版本 4 的 `session-index.json` 里可能存着旧的占位标题（就是上面那个路径）
+  并被无限复用。版本 4 因此**不在可读集合里**（`readIndex()` 只认 5 / 3 / 2）：整份丢弃，下一次
+  列表按新链重算。这是唯一的缓存失效机制，**不需要手动删 `session-index.json`**；旧进程即使把
+  索引写回版本 4，新代码照样不认。
 - **"文件地址"判据**（只认"整串就是一个地址"，**绝不做子串匹配**）：
   `^[/\\]`、`^~[/\\]`、`^\.{1,2}[/\\]`、`^[A-Za-z]:[\\/]`、`^@\S+$`；以及"单 token、
   含分隔符、带字母（`\p{L}`，所以 `2024/09/11` 不算）、且带扩展名或至少两级"的相对路径
@@ -263,29 +286,42 @@
   | `summaryHint` | dsh-tui 无对应字段，跳过 |
   | `firstPrompt` | 上游首条人类消息逻辑，额外跳过地址 |
   | 提示词生成 3–7 词标题（`qam = 10` 最小长度、1000 字符内容窗口、JSON `{title}`） | **不在 `digest.js` 做**：provider 标题事件与 recap 的"建议标题"已经是这一层 |
+  | （Claude 无此层） | dsh 的 `source.kind: 'fallback'` 占位标题（首条 prompt 截断）**被跳过**：`titleOf()` 判 `strong: false`，见上 |
   | 无标题时的兜底（窗口标题退到 sessionId 前 8 位，picker 返回 null） | 目录 basename（上游原样、且非空，所以 `SessionListRow.js` 不用改） |
 
-- **历史/被否方案**：需求原话是"取标题时，是文件地址不取"。一共做过三版：
+- **历史/被否方案**：需求原话是"取标题时，是文件地址不取"。一共做过四版：
   ① **纯地址过滤器**（过滤 + `hasPrompt` 解耦，但链条仍是上游的"首条 prompt"）；
   ② **只照 Claude 的链条、读取层不做内容判断**（`lastPrompt` 优先，但地址会原样上报）；
-  ③ **当前版 = ① 的过滤 + ② 的链条**（用户最终选定）：Claude 的顺序 + 两层 prompt 都跳过地址。
+  ③ **= ① 的过滤 + ② 的链条**（用户选定）：Claude 的顺序 + 两层 prompt 都跳过地址；
+  ④ **当前版 = ③ + 只认真名字的 `session/title`**（2026-10-07）：③ 只过滤了 digest 自己推导的
+  prompt 候选，管不到 dsh 已经写进日志的 `fallback` 占位标题 —— 它优先级最高，于是
+  `@modules/client/controllers/v1/auction/A` 这种截断路径又回到了行上（用户原话：
+  "resume 会只显示文件地址，导致分不清"）。④ 在 `titleOf()` 一处把占位标题判为
+  `strong: false`，三处扫描统一拒收，并顺手把首条 prompt 也纳入归一化。
   被否掉的是 ② 的"不过滤"（会把路径显示成标题）与 ① 的"只认首条 prompt"（不采用 Claude
   的 `lastPrompt` 优先）。
 - **验证**：
-  1. `/resume` 中：有标题事件的会话显示该标题；没有的显示**最近一条真实消息**（不是第一条、
-     也不是路径）；只发过路径、之后再没说话的会话显示**目录名**（既不是路径，也不是空白行）；
+  1. `/resume` 中：有真名字的会话显示该名字；没有的显示**最近一条真实消息**（不是第一条、
+     也不是路径，更不是 dsh 写的截断占位）；只发过路径、之后再没说话的会话显示**目录名**
+     （既不是路径，也不是空白行）；
   2. 无头行为测试（合成 zstd 会话日志，不启动 TUI、不写用户数据）：
      ```bash
      node ~/.dsh-tui/patches/test-resume-title-chain.mjs
      ```
-     它断言：`session/title` 优先且 `auto`/`renamed` 溯源不变；最近消息胜过首句；多行折成一行、
-     超 200 字符截断；**首句是地址 → 用后面那条真实消息**、**最近一条是地址 → 用更早的真实消息**；
-     7 种地址写法单独出现时都回落到目录名且 `hasPrompt=true`；提及路径的正常句子 / `2024/09/11` /
-     `工作/生活` 仍是标题；空会话 `hasPrompt=false` + 目录名；`>64KB` 日志从尾窗口取最近消息；
-     `recoverSessionTitle` 跳过地址、对地址型会话保留 `hasPrompt`。
-  3. 回归证据：对 `~/.dsh/sessions` 全部 161 条真实会话日志，改动前后 `digestSession()` 的
-     `{title, source, hasPrompt, titleComplete}` **逐条相同** → 现有 `session-index.json`
-     缓存无需作废，因此**没有**动 `store.js` 的 `SCHEMA_VERSION`。
+     它断言：真名字 `session/title` 优先且 `auto`/`renamed` 溯源不变；最近消息胜过首句；
+     两层 prompt 都折成一行、超 200 字符截断；**首句是地址 → 用后面那条真实消息**、
+     **最近一条是地址 → 用更早的真实消息**；7 种地址写法单独出现时都回落到目录名且
+     `hasPrompt=true`；提及路径的正常句子 / `2024/09/11` / `工作/生活` 仍是标题；空会话
+     `hasPrompt=false` + 目录名；`>64KB` 日志从尾窗口取最近消息；`recoverSessionTitle` 跳过地址、
+     对地址型会话保留 `hasPrompt`；**⑥（本轮新增）占位标题在四条路径上都不算名字**：被完整
+     prompt 取代、不压过最近 prompt、不埋掉 provider 标题、不压过 `/rename`，只有地址时仍回落
+     目录名；深度恢复与增量后缀同样拒收；尾部只有占位标题时 `titleComplete` 不再置真，
+     深度扫描随后能从"中间"找回 provider 标题；
+  3. 回归证据（③ 那版）：161 条真实会话日志改动前后 `digestSession()` 的
+     `{title, source, hasPrompt, titleComplete}` 逐条相同 → 当时缓存无需作废、未动 `SCHEMA_VERSION`；
+     ④ 不同：**语义变了、日志没变**，所以 231 条日志里有 **59 条**的标题按新链改写
+     （其中 11 条露出本来被占位标题压住的 provider 标题，其余变成完整的首条/最近 prompt），
+     没有任何一条退化成目录名 —— 正因如此才必须 bump `store.js` 的 `SCHEMA_VERSION` 让旧缓存作废。
 
 > 说明：`history.jsonl` 现有条目**全都没有 `cwd` 字段**（早年那版过滤器的遗留早已随
 > 200 条上限轮转出去），它们正是 F2 的「旧条目兜底池」：改完 ↑/↓ 立刻仍能看到全部老命令，
@@ -463,7 +499,10 @@ F1 的 `DIFF_BODY_MAX_LINES` 与 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已�
 F3 的 `railVisible = false`、按目录过滤的 `samePath(session.cwd, channel.cwd)`、
 `useState('list')`、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 补丁只动
 `supervisor-hint-list` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
-`LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 仍取自非过滤候选 /
+`LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 仍取自非过滤候选、
+**占位标题判 `strong: false`（3 处扫描按 grep 计数 + 增量 1 处）、`titleComplete` 不再跟着
+占位走、首条 prompt 也归一化、`store.js` 的 `SCHEMA_VERSION = 5` 且版本 4 不可读、
+`store.js` 在 TARGETS 里、行为测试覆盖占位标题** /
 仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 **F5 的 `recapOnOpen`**（`dsh-adapter/index.js`
 不在目标里 + `test-recap-setting.mjs` 的上游契约通过）/
 apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径（`patch -p0 --fuzz=3`、
@@ -499,8 +538,9 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 
 | **0.11.2 迁移**（2026-09-29，profile & 壳 → `0.11.2`；生态/tool 两包不变） | `dsh-patch check` 只报 **1 个 `NEEDS-REPORT`**：`dsh-adapter/index.js`（F5）——第 2 个 hunk 在 0.11.2 上失败（硬编码的可编辑键数组已被 `EDITABLE_CONFIG_KEYS` 取代）；其余 8 个 TUI 目标由 `diffs/*.patch` + `fuzz 3` 自动贴回（`history.js` 字节相同，7 个 `PATCHED-DRIFT`）。注意 F5 的**第 1 个 hunk 虽报 `succeeded with fuzz 3`，却是假落地**：它插在 `mathRendering` 之前，与上游自己后面那句 `recapOnOpen: Schema.boolean()` 重复，对象字面量里后者生效 → hunk 2 就算过了也等于白打，所以**不能**用 `dsh-patch apply` 强推 | ①先判 F5 留不留：上游 0.11.2 已自己修好（声明 `recapOnOpen`，volatility 由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供），`test-recap-setting.mjs` 实测键在 / volatile / 显式 `false` 存得下 / `/settings` 行与读点都在 → **退役**（删三件套、`TARGETS` 11 → 10、测试改成守 stock 契约）。②其余 8 个目标按 §3 复核：`git merge-file`（`base`=0.11.1 `original`、`theirs`=0.11.1 `backup`、`ours`=0.11.2 stock）结果与已装文件**逐字节相同**（7 个 0 冲突，`merge-file` 只差不写尾换行）；`useSessionSupervisor.js` 1 处冲突＝上游新增的「rail 按 cwd 自动选目录」effect 撞上 F3 的整体替换——**保留**上游新的 `snapshotSlot` 清理 effect、**删掉** rail 选择 effect（fork 里 `selectedPath`/`selectionManual`/`selectedUnregistered` 已不存在），F3 行为测试通过。③`original/` 换成 npm 取回的 0.11.2 原版（tool 两包 `original/` 亦与 0.1.7-rc.2 上游逐字节核对通过），`backup/` 换成复核后的已补丁件，`diffs/` 重新生成（**每个都在 0.11.2 stock 上 `--fuzz=0` 干净贴上且结果 == `backup/`**），`state/` 清空。④基线 `patch-base-version` 与 `patch-base-versions.json` → `0.11.2`；`check` 10/10 `OK` exit 0，四个测试通过，`check-doc-consistency.sh` 仅剩 `dsh-patch` 别名那两条 FAIL（别名确实不在 `~/.zshrc`/`~/.bashrc`，与本次升级无关，用绝对路径仍可跑） |
 
-**定制状态备忘（含已恢复 / 已去掉）**
+| （非升级）**F4 ④：dsh 的兜底占位标题不算名字**（2026-10-07） | 用户报「resume 会只显示文件地址，导致分不清」。根因不在 Claude 链（③ 已经过滤 prompt 候选），而在 dsh 自己写进日志的 `session/title` 事件：`dsh-session-title` 的确定性兜底会把**首条 prompt 截断**后落盘（`source.kind: 'fallback'`），上游"最后写入者胜"让它排在 provider 标题之前、并整条压过 ③ 的 prompt 链 → mallphp 里 3 个会话的行标题都是 `@modules/client/controllers/v1/auction/A`（全库 232 条里 17 条有占位标题，8 条是地址形态） | ①`titleOf()` 一处判强弱：`provider`/`user`/无 source = `strong: true`，`fallback` = `false`；三处扫描（head/tail 窗口、深度反扫、增量后缀）只收 `strong`；`titleComplete` 不再跟着占位走（尾部只有占位 → 留给深度扫描，它能从"没读到的中间"取回 provider 标题）。②深度反扫顺路记下"最近一条非地址 prompt"（`recoverLatestTitle()` → `recoverLatestName()`），让深度扫描和快速路径给出同一个名字。③首条 prompt 也走 `normalizeLastPrompt()`（以前原样上报，多行首句会撑开整行）。④**`store.js` 的 `SCHEMA_VERSION` 4 → 5**：语义变了而日志一个字节没变，版本 4 索引里存着旧占位标题且会被无限命中 → 整份丢弃、自动重算（旧进程写回版本 4 也照样不认），**不需要手动删缓存**。⑤回归：231 条真实日志里 59 条标题改变（11 条露出本来被压住的 provider 标题，0 条退化成目录名）；`test-resume-title-chain.mjs` 新增 6b–6e 一节；补丁集 10 → **11** 个目标。`patch-base-version` 仍 `0.11.2` |
 
+**定制状态备忘（含已恢复 / 已去掉）**
 > 编号复用提醒：下表是**旧编号**，其中「旧 F4 / 旧 F5」指 vim；2026-09-11 新增的
 > **F4 标题链路**（§2）只是借用了 F4 这个号，与 vim 无关，别按旧 F4 的描述去找文件。
 

@@ -1,0 +1,32 @@
+--- original/store.js	2026-10-07 16:30:30.840504383 +0800
++++ backup/store.js	2026-10-07 16:30:40.622687735 +0800
+@@ -34,8 +34,17 @@
+  * Bumped for cached mtime. Version 3 derivations remain readable and receive
+  * that field on their next listing; version 2 could cache incomplete reads as
+  * empty, so only its branch notes survive.
++ *
++ * Version 5 invalidates version 4 because F4 changed what a cached `title`
++ * MEANS: dsh's deterministic `fallback` placeholder (the opening prompt
++ * truncated, `source.kind: 'fallback'`) is no longer a name, so a version 4
++ * entry can hold a truncated file path — `@modules/client/…/A` — that the
++ * current digest would never derive. A cache hit would keep showing it
++ * forever, because the log itself never changed. Version 4 is therefore NOT in
++ * the readable set below: its entries are dropped, and the next listing
++ * re-derives every title through the new chain.
+  */
+-const SCHEMA_VERSION = 4;
++const SCHEMA_VERSION = 5;
+ const INDEX_FILE = join(DATA_DIR, 'session-index.json');
+ let loadedStamp;
+ let loadedIndex;
+@@ -110,7 +119,9 @@
+ /**
+  * Load the cache.
+  * @returns The parsed index; version 3 derivations are upgraded lazily and
+- *   version 2 retains branch notes only.
++ *   version 2 retains branch notes only. A version 4 index is discarded whole
++ *   — its cached titles may be placeholders the current chain refuses (see
++ *   {@link SCHEMA_VERSION}).
+  */
+ export function readIndex() {
+     const stamp = indexStamp();

@@ -171,6 +171,37 @@ ck "digest.js: recovery skips an address opening" \
 ck "title-chain fixture opens with a real session first line" \
    "grep -q \"type: 'session', version: 0\" '$DIR/test-resume-title-chain.mjs'"
 ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPrompt' '$G'"
+# dsh writes a deterministic PLACEHOLDER when nothing named a session: the
+# opening prompt, truncated, as `source.kind: 'fallback'`. It names nothing —
+# the row that showed `@modules/client/…/A` came from it — so titleOf
+# classifies it not-strong ONCE and every scan site refuses it: three sites
+# take `title?.strong`, the appended-suffix update takes `found?.strong`.
+ck "digest.js: the placeholder is classified not-strong" \
+   "grep -q \"strong: kind !== 'fallback'\" '$G'"
+ck "digest.js: three scan sites require a strong title" \
+   "[ \"\$(grep -c 'title?.strong === true' '$G')\" = 3 ]"
+ck "digest.js: the suffix update requires a strong title" \
+   "grep -q 'found?.strong === true' '$G'"
+# A tail holding only a placeholder must not mark the read complete: the name
+# that wins may sit in the unseen middle, which is what the deep scan is for.
+ck "digest.js: completeness no longer follows a placeholder" \
+   "grep -q 'completeHead || tailTitle !== undefined' '$G'"
+# The opening prompt is a title candidate too, so it gets the same one-line,
+# 200-character normalization the recent prompt gets: it used to reach the row
+# raw, and a multi-line opening wrapped the row it was naming.
+ck "digest.js: the opening prompt is normalized as well" \
+   "grep -q 'opening = normalizeLastPrompt(human.text)' '$G'"
+# F4 changed what a cached title MEANS, so the version 4 index — which can
+# hold a placeholder path as a name and would serve it on every cache hit —
+# must be unreadable. The bump IS the mechanism; no manual cache clearing.
+S="$LIB/types/dsh-adapter/sessions/store.js"
+ck "store.js: cache epoch bumped to 5"     "grep -q 'const SCHEMA_VERSION = 5' '$S'"
+ck "store.js: a version 4 index is discarded" \
+   "grep -q \"file\\['version'\\] !== SCHEMA_VERSION && file\\['version'\\] !== 3 && file\\['version'\\] !== 2\" '$S'"
+ck "store.js is a patch target" \
+   "grep -q 'sessions/store.js|store.js' '$DIR/apply-diff-patches.sh'"
+ck "the title-chain test covers the placeholder" \
+   "grep -q 'a placeholder does not bury the provider title' '$DIR/test-resume-title-chain.mjs'"
 
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"

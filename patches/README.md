@@ -19,11 +19,17 @@ Three customizations live here:
 3. **`/resume` names a session the way Claude Code does** — a row's title
    follows Claude's own order: a written title (provider/AI, or `/rename` and
    recap) first, then the **most recent** human prompt, then the opening
-   prompt, then the working directory's basename. The recent prompt is
+   prompt, then the working directory's basename. Both prompt levels are
    normalized to one line and clipped at 200 characters, exactly as Claude
    normalizes its `lastPrompt` fallback. A prompt that is nothing but a
-   filesystem address is stepped over at both prompt levels, so a path pasted,
-   dropped or `@`-mentioned as the opening message never becomes the name.
+   filesystem address is stepped over at both levels, so a path pasted,
+   dropped or `@`-mentioned as the opening message never becomes the name —
+   and neither does dsh's own **deterministic placeholder**: when nothing has
+   named a session, `dsh-session-title` appends the opening prompt *truncated*
+   as a `session/title` event (`source.kind: 'fallback'`), and taking that at
+   face value is what made rows show `@modules/client/…/A` — identical for
+   every session that opened on the same file — instead of a name. Only a
+   title a provider or a person actually wrote counts.
 
 ## User-level settings (survive upgrades)
 
@@ -106,7 +112,8 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.1.7-rc.2`,
 | `dsh-tui .../screens/sessionSupervisor/useSessionSupervisor.js` | **F3 fork** (0.11.x replaced `screens/SessionBrowser.js` with this screen): the workspace rail is never rendered (`railVisible = false`), the keyboard starts in the list and `←` is inert (`activateRail` empty, `activePane` pinned to `list`), the selection is synthesized from `channel.cwd` instead of a rail row, and the rows are the sessions whose recorded cwd `samePath`-matches it — every other directory is unreachable, and the empty-registry fallback group can no longer pull in another project's history. Search, live status, rename, delete, Ctrl+N/Ctrl+X and pins stay |
 | `dsh-tui .../screens/SessionSupervisor.js` | Ctrl+N starts the session in that pinned directory (`newSessionIn(selected)`) instead of in the rail's focused workspace. Test: `node ~/.dsh-tui/patches/test-resume-flat.mjs` |
 | `dsh-tui .../i18n.js` | `supervisor-hint-list` drops the `←/→ switch pane` wording (the fork has no second pane to advertise) |
-| `dsh-tui .../dsh-adapter/sessions/digest.js` | **title chain** for `/resume` rows, in Claude Code's own order: a `session/title` event (provider `auto` / TUI-written `renamed`) wins, else the **most recent** human prompt (`lastPromptOf`, newlines folded and clipped at `LAST_PROMPT_TITLE_CHARS = 200` the way Claude normalizes its `lastPrompt`), else the opening prompt, else the working directory's basename. Both prompt levels step over a candidate that is nothing but a filesystem address (`isFileAddress`), and an address-only session still counts as a conversation (`hasPrompt`), so it never reaches the destructive empty-session clean-up. Test: `node ~/.dsh-tui/patches/test-resume-title-chain.mjs` |
+| `dsh-tui .../dsh-adapter/sessions/digest.js` | **title chain** for `/resume` rows, in Claude Code's own order: a `session/title` event a **provider** (`auto`) or a **person** (`renamed`) wrote wins, else the **most recent** human prompt (`lastPromptOf`, newlines folded and clipped at `LAST_PROMPT_TITLE_CHARS = 200` the way Claude normalizes its `lastPrompt`), else the opening prompt (same normalization), else the working directory's basename. Both prompt levels step over a candidate that is nothing but a filesystem address (`isFileAddress`), and an address-only session still counts as a conversation (`hasPrompt`), so it never reaches the destructive empty-session clean-up. dsh's own **deterministic placeholder** (`source.kind: 'fallback'` — the opening prompt truncated by `dsh-session-title`) is not a name: `titleOf` marks it `strong: false`, all three scan sites (head/tail windows, the deep reverse scan, the appended-suffix update) refuse it, and a tail holding only a placeholder no longer claims `titleComplete` — the provider title may sit in the unseen middle, where the deep scan then finds it. Test: `node ~/.dsh-tui/patches/test-resume-title-chain.mjs` |
+| `dsh-tui .../dsh-adapter/sessions/store.js` | **cache epoch** for that change: `SCHEMA_VERSION` 4 → 5, because a cached `title` means something different now. A version 4 index can hold a placeholder path as a name and would keep serving it forever (the log never changed, so the revision keeps hitting), so version 4 is not in the readable set — the index is dropped whole and every title is re-derived. No manual cache clearing, and an old process writing the index back as version 4 is not trusted either |
 
 > **Reverted experiments (do not re-add):** a **cwd-scoped input history** was
 > reverted once during the 0.10.1 move, back when the resume browser was still

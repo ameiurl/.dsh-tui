@@ -91,8 +91,15 @@ declare -a TARGETS=(
   # F4 resume titles: a session with no title event is named the way Claude
   # Code names one — its most recent human prompt first (normalized to one
   # line, clipped at 200 characters), its opening prompt second, and the
-  # working directory's basename last.
+  # working directory's basename last. dsh's own deterministic `fallback`
+  # placeholder (the opening prompt truncated, `source.kind: 'fallback'`) is
+  # not a name and never wins a level.
   "$TUI_PKG/lib/types/dsh-adapter/sessions/digest.js|digest.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  # F4 cache epoch: the change above changed what a cached title MEANS, so the
+  # version 4 session index (which may hold a placeholder path as a name, and
+  # would keep serving it on every cache hit) must be unreadable. Bumping the
+  # schema version drops it whole and re-derives titles through the new chain.
+  "$TUI_PKG/lib/types/dsh-adapter/sessions/store.js|store.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
 )
 
 # Baseline version for a package name, from ./patch-base-versions.json.
