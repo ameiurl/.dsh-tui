@@ -13,14 +13,23 @@ resume.txt
 
 # ---- 运行时状态 ----
 last-used.json
+last-run.json
 agent-view-sessions.json
 session-mounts.json
 home.json
 usage.json
+onboarding.json
+
+# ---- 应用内 /settings 的落盘镜像(权威是 profile 的 cordis.patch.yml) ----
+settings.json
+
+# ---- Node 编译缓存(启动产物，数千个块) ----
+compile-cache/
 
 # ---- 日志 / 账本 ----
 effect-ledger.jsonl
 restart.log
+crash.log
 
 # ---- 补丁脚本的运行时状态(diff 落库指纹)与临时工作区 ----
 patches/state/
@@ -29,3 +38,6 @@ patches/.tmp.*
 # ---- 注入(inject)运行时：活动进程注册表 + unix socket ----
 inject/servers.json
 inject/*.sock
+
+# ---- 重移植工作区(git merge-file 的 ours/merged 临时文件，非入库内容) ----
+.port/
