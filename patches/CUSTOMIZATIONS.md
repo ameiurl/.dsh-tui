@@ -77,7 +77,7 @@
 - **涉及文件（4 个）**：
   - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（主补丁）
   - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（删「＋ 新建会话」行；Ctrl+T 新建用钉死目录；
-    Enter 只开光标行；Ctrl+P/K 上、Ctrl+N/F 下；按绝对行号传 `striped`）
+    Enter 只开光标行；Ctrl+P/K 上、Ctrl+N/J 下；按绝对行号传 `striped`）
   - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标；新增 `striped` 隔行底色）
   - `…/dsh-tui/lib/types/i18n.js`（两个 key：`supervisor-hint-list` 去掉 `←/→ 切换栏位`、
     改成 `Ctrl+P/N 移动 · Ctrl+T 新建`；删除 `supervisor-current`）
@@ -97,15 +97,19 @@
     传入，所以条纹跟着会话走，滚动不会在静止的视线下重排。层次是 hover 蓝 > 隔行底色 > 面板底：
     hover 盖掉条纹，光标行始终是绿的（`❯` + 绿色粗体标题 + 非 dim 的元信息行）。想换强度只改
     这一个主题键（更淡 `toolCardBackgroundDim`，更明显 `messageActionsBackground`/`selectionBg`）。
-  - **Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+F 向下**：与方向键走同一个 `moveSession`，DSH 列表和
-    外来后端列表都生效。`p`/`n` 是 emacs 自己的 previous/next，`k`/`f` 是顺手的第二对
-    （注意 `Ctrl+K` 的方向与最初那版相反）。判据集中在导出的 `listKeyStep(input, key)`：
-    四个都是**普通控制字节**（0x10 / 0x0E / 0x0B / 0x06），裸字节和 kitty/modifyOtherKeys 的拼写
-    都解析成同一个字母 + ctrl，所以没有 Ctrl+J 那种"LF 被 Ink 当成无修饰的 `enter`"的坑；
-    `isMod` 保证不带修饰的 p/n/k/f 仍旧只进过滤器。方向键仍是主键位，提示行只登 `Ctrl+P/N`。
+  - **Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下**：与方向键走同一个 `moveSession`，DSH 列表和
+    外来后端列表都生效。`p`/`n` 是 emacs 自己的 previous/next，`k`/`j` 是顺手的第二对
+    （注意 `Ctrl+K` 的方向与最初那版相反；而 `Ctrl+J` 第一版是向上，现在是向下）。
+    判据集中在导出的 `listKeyStep(input, key, event)`：`p`/`n`/`k` 是**普通控制字节**
+    （0x10 / 0x0E / 0x0B），裸字节和 kitty/modifyOtherKeys 拼写都解析成同一个字母 + ctrl；
+    **`Ctrl+J` 是例外** —— 不上报扩展键的终端发的是 **LF（0x0A）**，Ink 把它解析成 `enter` 且
+    ctrl 为 false，只能靠原始字节 + `keypress.name === 'enter'` 判（与 `PromptInput` 认换行同一对
+    判据），粘贴进来的换行会被 `isPasted` 排除。这条拼写有镜像代价、已接受：**宿主若把 Enter 键
+    也送成 LF，两者无法区分**（这种宿主上本屏的 Enter 本来也走不到 `key.return`）。
+    `isMod` 保证不带修饰的 p/n/k/j 仍旧只进过滤器。方向键仍是主键位，提示行只登 `Ctrl+P/N`。
   - **Ctrl+T 新建会话**：`Ctrl+N` 让给列表移动后，新建搬到这里（`newSessionIn(selected)` 不变），
     提示行也改成 `Ctrl+P/N 移动 · Ctrl+T 新建`。改键只需动 `isMod(key) && input === 't'`
-    与 `listKeyStep` 里的两个 `return`（加减字母都在那个 `||` 里）。
+    与 `listKeyStep` 里的几个 `return`（加减字母都在那些 `||` 里）。
   - **不列「背后没有日志」的记录**：每次开终端都会在会话目录注册一条记录，而日志可能始终没落盘；
      它没有名字 → 标题回落到目录 basename，显示成 `☆ ∙ .dsh-tui` 这种“像目录”的行 —— **而且
      这条通常就是当前这个窗口自己的会话**，所以看起来像“当前目录”。判据是 `bytes === undefined`
@@ -125,10 +129,11 @@
   `selectionManual`）与「按 cwd 自动选 rail 行」的 effect 在新结构里没有位置，**整块删掉**；
   上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
 - **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
-  Ctrl+T 落在本目录、隔行有底色而相邻两行分得开、Ctrl+P/K 上移、Ctrl+N/F 下移、Enter 落在第一行
-  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（40 条断言，真渲染该屏 + 单独
+  Ctrl+T 落在本目录、隔行有底色而相邻两行分得开、Ctrl+P/K 上移、Ctrl+N/J 下移、Enter 落在第一行
+  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（44 条断言，真渲染该屏 + 单独
   渲染行组件验证 `current` prop 已被忽略且 `striped` 才铺底色 + 按 Enter 验证默认落在最近会话、
-  首行可开、四个移动键（裸字节与 kitty 拼写各一遍）真的移动、普通 p/n/k/f 只过滤、Ctrl+T 才是新建）。
+  首行可开、四个移动键（Ctrl+J 的 **LF** 与 kitty 拼写各走一遍）真的移动、普通 p/n/k/j 只过滤、
+  Ctrl+F 已不绑定、Ctrl+T 才是新建）。
 
 ### F3 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
 - **涉及文件（2 个）**：`…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`、
@@ -304,7 +309,7 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 - **F1**：Edit/Write 有行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行、Ctrl+O 展开；
   hover 不变底色。`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`
 - **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、Ctrl+T 落在本目录、
-  相邻行底色隔开（上下分得清）、Ctrl+P/K 上移与 Ctrl+N/F 下移、Enter 在第一行也开会话。
+  相邻行底色隔开（上下分得清）、Ctrl+P/K 上移与 Ctrl+N/J 下移、Enter 在第一行也开会话。
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`
 - **F3**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
   `node ~/.dsh-tui/patches/test-resume-title-chain.mjs`
@@ -324,7 +329,8 @@ segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 
 无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、无日志记录不列、
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+T 用钉死目录、i18n 只动
 `supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删、
-`listKeyStep` 就是 Ctrl+P/K 上、Ctrl+N/F 下（Ctrl+J 未绑定）、`striped` 隔行底色按绝对行号传入、
+`listKeyStep` 就是 Ctrl+P/K 上、Ctrl+N/J 下（Ctrl+J 还要认 LF 拼写、Ctrl+F 未绑定）、
+`striped` 隔行底色按绝对行号传入、
 Enter 的 `sessionIndex === 0` 新建分支已删 /
 F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、

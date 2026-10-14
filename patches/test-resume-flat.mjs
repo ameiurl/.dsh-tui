@@ -17,9 +17,11 @@
 //   * sub-agent runs stay out of the listing;
 //   * Ctrl+T starts a session in the CURRENT directory, not in a rail row
 //     (the key moved there because Ctrl+N walks the list now);
-//   * Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+F step DOWN, on the bare
-//     control byte and on the kitty/modifyOtherKeys spelling alike, while the
-//     unmodified letters are still typed into the filter;
+//   * Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+J step DOWN, on the bare
+//     control byte and on the kitty/modifyOtherKeys spelling alike (Ctrl+J's
+//     bare byte is LF, which Ink names `enter` with no modifier — that spelling
+//     is driven too), while the unmodified letters are still typed into the
+//     filter;
 //   * Enter opens the FIRST row like any other (there is no new-session card);
 //   * every other row paints the zebra band that separates two-line rows.
 
@@ -269,27 +271,32 @@ process.stdout.write = realWriteForFocus;
 check(opened.length === 1 && opened[0] === 's3',
   `Enter on open targets the most recently used session, not the live one (got ${JSON.stringify(opened)})`);
 
-// F2 fork: Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+F step DOWN. All four are
-// ordinary control bytes, so the bare byte and the kitty / modifyOtherKeys
-// spelling arrive as the same letter plus ctrl, while the unmodified letters
-// must still reach the filter. Driven through the real screen, and read back
-// through Enter: ink repaints incrementally, so where `❯` sits inside a
-// captured frame is not a reliable read of the cursor.
-const listKey = (input, key = {}) => listKeyStep(input, key);
+// F2 fork: Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+J step DOWN. Three are
+// ordinary control bytes; Ctrl+J is LF, which Ink names `enter` with no
+// modifier, so it needs its own spelling (see listKeyStep) and is driven here
+// both ways. Unmodified letters must still reach the filter. Driven through the
+// real screen, and read back through Enter: ink repaints incrementally, so
+// where `❯` sits inside a captured frame is not a reliable read of the cursor.
+const listKey = (input, key = {}, event = {}) => listKeyStep(input, key, event);
 check(listKey('p', { ctrl: true }) === -1 && listKey('k', { ctrl: true }) === -1,
   'listKeyStep: `ctrl+p` and `ctrl+k` both step up');
-check(listKey('n', { ctrl: true }) === 1 && listKey('f', { ctrl: true }) === 1,
-  'listKeyStep: `ctrl+n` and `ctrl+f` both step down');
-check(['p', 'n', 'k', 'f'].every(plain => listKey(plain) === 0),
-  'listKeyStep: plain p/n/k/f are NOT movement keys (they filter)');
-check(listKey('', { return: true }) === 0, 'listKeyStep: Enter is none of them');
-check(listKey('j', { ctrl: true }) === 0 && listKey('b', { ctrl: true }) === 0,
-  'listKeyStep: ctrl+j / ctrl+b are not bound');
+check(listKey('n', { ctrl: true }) === 1 && listKey('j', { ctrl: true }) === 1,
+  'listKeyStep: `ctrl+n` and `ctrl+j` both step down');
+check(listKey('\u000a', {}, { keypress: { name: 'enter' } }) === 1,
+  'listKeyStep: the bare LF spelling of Ctrl+J steps down');
+check(listKey('\u000a', { isPasted: true }, { keypress: { name: 'enter' } }) === 0,
+  'listKeyStep: a pasted LF is content, not Ctrl+J');
+check(['p', 'n', 'k', 'j'].every(plain => listKey(plain) === 0),
+  'listKeyStep: plain p/n/k/j are NOT movement keys (they filter)');
+check(listKey('', { return: true }, { keypress: { name: 'return' } }) === 0,
+  'listKeyStep: Enter is none of them');
+check(listKey('\u0006', { ctrl: true }) === 0 && listKey('b', { ctrl: true }) === 0,
+  'listKeyStep: ctrl+f / ctrl+b are not bound');
 
-// Titles, cwd and branch carry none of `p`/`n`/`k`/`f`, so the "a plain letter
-// filters" checks below really empty the list instead of quietly matching a row
-// (the first draft used "AAA first" and a plain `f` matched it, which read as a
-// movement bug).
+// Titles, cwd and branch carry none of `p`/`n`/`k`/`j`/`f`, so the "a plain
+// letter filters" checks below really empty the list instead of quietly
+// matching a row (the first draft used "AAA first" and a plain `f` matched it,
+// which read as a movement bug).
 const walkList = [
   session('w1', 'AAA red', CURRENT, 300),
   session('w2', 'BBB blue', CURRENT, 200),
@@ -337,21 +344,28 @@ check(steppedDown.created.length === 0,
 const steppedBack = await walk(['\u000e', '\u0010', '\r']);
 check(steppedBack.opened.length === 1 && steppedBack.opened[0] === 'w1',
   `Ctrl+P steps back up (got ${JSON.stringify(steppedBack.opened)})`);
-// The alias pair: Ctrl+F is down (0x06), Ctrl+K is up (0x0B) — note this is the
-// opposite of what Ctrl+K meant before the pair was remapped.
-const steppedAlias = await walk(['\u0006', '\u000b', '\r']);
+// The alias pair: Ctrl+J is down, Ctrl+K is up. Ctrl+J arrives as LF (0x0A) on
+// a terminal that reports no extended keys — the spelling a real terminal sends
+// — so this is also the end-to-end proof that the raw byte is read.
+const steppedAlias = await walk(['\u000a', '\u000b', '\r']);
 check(steppedAlias.opened.length === 1 && steppedAlias.opened[0] === 'w1',
-  `Ctrl+F walks down and Ctrl+K walks back up (got ${JSON.stringify(steppedAlias.opened)})`);
+  `Ctrl+J walks down and Ctrl+K walks back up (got ${JSON.stringify(steppedAlias.opened)})`);
 check(steppedAlias.created.length === 0, 'neither alias creates a session');
+// Ctrl+F is unbound again: pressing it must leave the cursor where it was, so
+// Enter opens the row the screen opened on.
+const steppedRetired = await walk(['\u0006', '\r']);
+check(steppedRetired.opened.length === 1 && steppedRetired.opened[0] === 'w1',
+  `the retired Ctrl+F moves nothing (got ${JSON.stringify(steppedRetired.opened)})`);
 // The extended-keys spellings, on a terminal that reports modifiers: CSI-u for
 // `ctrl+n` (codepoint 110) and `ctrl+p` (112), modifier 5 = ctrl.
 const steppedKitty = await walk(['\u001b[110;5u', '\u001b[112;5u', '\r']);
 check(steppedKitty.opened.length === 1 && steppedKitty.opened[0] === 'w1',
   `kitty \`ctrl+n\` / \`ctrl+p\` walk down and back up (got ${JSON.stringify(steppedKitty.opened)})`);
-// ... and the same for the alias pair: `ctrl+f` (102) down, `ctrl+k` (107) up.
-const steppedAliasKitty = await walk(['\u001b[102;5u', '\u001b[107;5u', '\r']);
+// ... and the same for the alias pair: `ctrl+j` (106) down, `ctrl+k` (107) up on
+// a terminal that DOES report modifiers.
+const steppedAliasKitty = await walk(['\u001b[106;5u', '\u001b[107;5u', '\r']);
 check(steppedAliasKitty.opened.length === 1 && steppedAliasKitty.opened[0] === 'w1',
-  `kitty \`ctrl+f\` / \`ctrl+k\` walk down and back up (got ${JSON.stringify(steppedAliasKitty.opened)})`);
+  `kitty \`ctrl+j\` / \`ctrl+k\` walk down and back up (got ${JSON.stringify(steppedAliasKitty.opened)})`);
 // A plain p/n is a filter character, never a movement key: the query matches no
 // session, so the list empties and Enter has no row to act on. Had the ctrl
 // requirement been dropped, the query would stay empty, all three rows would
@@ -365,6 +379,9 @@ check(typedPlainK.opened.length === 0,
 const typedPlainF = await walk(['f', '\r']);
 check(typedPlainF.opened.length === 0,
   `a plain f filters instead of moving (got ${JSON.stringify(typedPlainF.opened)})`);
+const typedPlainJ = await walk(['j', '\r']);
+check(typedPlainJ.opened.length === 0,
+  `a plain j filters instead of moving (got ${JSON.stringify(typedPlainJ.opened)})`);
 // The fork has no new-session card: row 0 is an ordinary session, so Enter on
 // it resumes that session (the stock branch started a NEW one instead).
 const enteredFirst = await walk(['\r']);

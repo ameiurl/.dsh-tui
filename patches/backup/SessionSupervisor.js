@@ -128,11 +128,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         const index = Math.max(0, tabs.findIndex(candidate => candidate.id === tab));
         switchTab(tabs[(index + by + tabs.length) % tabs.length].id);
     }, [tabs, tab, switchTab]);
-    useInput((input, key) => {
-        // F2 fork: Ctrl+P / Ctrl+N step the list on top of the arrows (see
+    useInput((input, key, event) => {
+        // F2 fork: Ctrl+P/K and Ctrl+N/J step the list on top of the arrows (see
         // listKeyStep). Computed once per key because the "a movement key puts
         // the caret back in the list" rule below wants the same answer.
-        const step = listKeyStep(input, key);
+        const step = listKeyStep(input, key, event);
         // Modal layers own the keyboard, in the same order they render.
         // The draft is read through a ref: keystrokes that arrive in one batch
         // (typing, then Enter) must commit everything typed, not the last render.
@@ -397,9 +397,9 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
      * Keys on a source tab: the same pane model as DSH (←/→ pick the column,
      * ↑/↓ move, typing filters), with what a foreign source cannot do left out —
      * no workspace menu, no new session, no stop — and Ctrl+L rescanning the
-     * source instead of re-listing. The fork's Ctrl+P / Ctrl+N pair rides along
-     * as the `step` the caller already computed, so the movement keys are the
-     * same on every tab.
+     * source instead of re-listing. The fork's Ctrl+P/K and Ctrl+N/J pair rides
+     * along as the `step` the caller already computed, so the movement keys are
+     * the same on every tab.
      */
     function foreignKey(input, key, step) {
         if (key.leftArrow) {
@@ -596,24 +596,33 @@ export function railWindowTop(focus, entryCount, capacity) {
 export { SpinnerGlyph };
 /**
  * F2 fork: the session list's movement keys besides the arrows — **Ctrl+P /
- * Ctrl+K step UP** and **Ctrl+N / Ctrl+F step DOWN**. `p`/`n` are emacs' own
- * previous/next pair; `k`/`f` are the second pair, kept because hands reach for
+ * Ctrl+K step UP** and **Ctrl+N / Ctrl+J step DOWN**. `p`/`n` are emacs' own
+ * previous/next pair; `k`/`j` are the second pair, kept because hands reach for
  * them. Ctrl+T is what creates a session, since Ctrl+N belongs to the list.
  *
- * All four are ordinary control bytes (0x10 / 0x0E / 0x0B / 0x06): a terminal
- * reports them as `p`/`n`/`k`/`f` with ctrl set, on the bare byte and on the
- * kitty/modifyOtherKeys spellings alike, so unlike Ctrl+J (LF, which Ink reads
- * as `enter` with no modifier at all) there is nothing to disambiguate here.
- * The `isMod` gate is what keeps a plain `p`/`n`/`k`/`f` in the filter.
+ * Three of the four are ordinary control bytes (0x10 / 0x0E / 0x0B): a terminal
+ * reports them as `p`/`n`/`k` with ctrl set, on the bare byte and on the
+ * kitty/modifyOtherKeys spellings alike. Ctrl+J is the exception — a terminal
+ * that reports no extended keys sends **LF (0x0A)** for it, and Ink parses LF
+ * as `enter` with NO modifier flag at all, so the raw byte plus the keypress
+ * name is the only signal left (the same pair PromptInput accepts for a literal
+ * newline). Pasted text is excluded: a pasted "\n" is content, not a keypress.
+ * That spelling has a mirror-image price, accepted here: on a host that
+ * delivers LF for the Enter KEY, nothing can tell the two apart.
+ *
+ * The `isMod` gate is what keeps a plain `p`/`n`/`k`/`j` in the filter.
  *
  * @param input - The event's text.
  * @param key - The event's key flags.
+ * @param event - The input event, for the LF spelling's `keypress.name`.
  * @returns -1 up, 1 down, 0 when this is not one of these keys.
  */
-export function listKeyStep(input, key) {
+export function listKeyStep(input, key, event) {
     if (isMod(key) && (input === 'p' || input === 'k'))
         return -1;
-    if (isMod(key) && (input === 'n' || input === 'f'))
+    if (isMod(key) && (input === 'n' || input === 'j'))
+        return 1;
+    if (input === '\n' && key.isPasted !== true && event?.keypress?.name === 'enter')
         return 1;
     return 0;
 }

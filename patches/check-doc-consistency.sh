@@ -207,12 +207,14 @@ ck "i18n diff touches only the keys this fork owns" \
 # band on every other row, and an Enter that opens the row it stands on (the
 # stock new-session card branch is gone; creating moved off Ctrl+N to Ctrl+T
 # precisely because Ctrl+N walks the list now).
-ck "screen: Ctrl+P/Ctrl+N are answered once per key" \
-   "grep -q 'const step = listKeyStep(input, key)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
-ck "screen: listKeyStep is Ctrl+P/K up, Ctrl+N/F down" \
-   "grep -qF \"isMod(key) && (input === 'p' || input === 'k')\" '$SS' && grep -qF \"isMod(key) && (input === 'n' || input === 'f')\" '$SS'"
-ck "screen: Ctrl+J stays unbound" \
-   "! grep -qF \"input === 'j'\" '$SS'"
+ck "screen: the movement keys are answered once per key" \
+   "grep -q 'const step = listKeyStep(input, key, event)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
+ck "screen: listKeyStep is Ctrl+P/K up, Ctrl+N/J down" \
+   "grep -qF \"isMod(key) && (input === 'p' || input === 'k')\" '$SS' && grep -qF \"isMod(key) && (input === 'n' || input === 'j')\" '$SS'"
+ck "screen: listKeyStep accepts Ctrl+J's bare LF spelling" \
+   "grep -qF \"key.isPasted !== true && event?.keypress?.name === 'enter'\" '$SS'"
+ck "screen: the retired Ctrl+F is unbound" \
+   "! grep -qF \"input === 'f'\" '$SS'"
 ck "screen: Ctrl+T is what creates now" \
    "grep -qF \"isMod(key) && input === 't'\" '$SS' && grep -q 'newSessionIn(selected)' '$SS'"
 ck "i18n: the hint advertises Ctrl+P/N and Ctrl+T" \
@@ -227,9 +229,9 @@ ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,'
 ck "test-resume-flat.mjs covers the keys and the band" \
    "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs'"
 ck "CUSTOMIZATIONS.md documents the pair and the band" \
-   "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+F 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md'"
+   "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md' && grep -q 'LF（0x0A）' '$DIR/CUSTOMIZATIONS.md'"
 ck "README.md documents the keys and the band" \
-   "grep -q 'Ctrl+P / Ctrl+K' '$DIR/README.md' && grep -q 'Ctrl+N / Ctrl+F' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
+   "grep -q 'Ctrl+P / Ctrl+K' '$DIR/README.md' && grep -q 'Ctrl+N / Ctrl+J' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"
