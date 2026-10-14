@@ -134,8 +134,21 @@ export function useSessionSupervisor(input) {
             ancestors.add(parent);
             cursor = byId.get(parent);
         }
-        return sessions.filter(session => session.hasPrompt && session.kind.kind !== 'subagent' && !ancestors.has(session.id));
-    }, [sessions, channel.agentId]);
+        return sessions.filter(session => session.hasPrompt
+            && session.kind.kind !== 'subagent'
+            && !ancestors.has(session.id)
+            // F2 fork: a record that never held a conversation is not a session
+            // this pane should offer. The catalog keeps one for every terminal
+            // that ever started — and ghosts whose log never landed at all — and
+            // with nothing to name them they render as the directory basename
+            // ("☆ ∙ .dsh-tui"), which reads like a directory row rather than a
+            // conversation. Such a record has no events of its own
+            // (`updatedAt === createdAt`) and no name (`fallback`); anything a
+            // terminal is actually using stays listed.
+            && (liveStateOf(session.id) !== undefined
+                || session.title?.source !== 'fallback'
+                || session.updatedAt !== session.createdAt));
+    }, [sessions, channel.agentId, liveStateOf]);
     /**
      * The rail's rows: the durable registry, plus rows for sessions that live in
      * a directory the registry does not know (or while it cannot be read at all).

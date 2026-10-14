@@ -88,6 +88,11 @@
     —— 比 stock 的"rail 分组 key 精确相等"更稳（尾斜杠/大小写不同仍算同目录）。
   - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+N 仍可新建），光标空间因此只有会话
     （`sessionAt(index) = visibleSessions[index]`，`moveSession` 按真实长度钳制，`cardFocused` 删除）。
+  - **不列「从未有过内容」的记录**：目录里每次启动都会在会话目录留下一条记录（还有日志从未落盘的
+     幽灵条目），它们没有名字 → 标题回落到目录 basename，显示成 `☆ ∙ .dsh-tui` 这种“像目录”的行。
+     判据是**从没有任何事件**（`updatedAt === createdAt`）**且**无真名字（`title.source === 'fallback'`）
+     **且**没有终端在用它（`liveStateOf` 为 undefined）—— 三者同时成立才不列；刚开的会话、
+     只有地址首句的正常对话、正在被挂载的会话都照常显示。
   - **打开即选中本目录最近使用的会话**：默认光标由 `recentSessionId` 给出，取自**面板自己那份
     列表**（`listedSessions` + `samePath`），不再查 rail 的分组表 —— 未登记目录在那里没有 key，
     旧写法会落空、光标退回排序后的第一行（于是常落在一个更旧的 live 会话上）。
@@ -293,7 +298,7 @@ segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 
 （`hunksPatch`、`newFileDiff`、校验器收 `patch`、`oldStart` 字段已删、`presentResult`）与
 行为测试 / 已退役的历史（`historyProjectKey`、`appendHistory(cwd)`、
 `loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F2 的 `railVisible = false`、
-无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、
+无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、空记录不列、
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 只动
 `supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删 /
 F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、

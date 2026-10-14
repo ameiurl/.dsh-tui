@@ -1,6 +1,30 @@
 --- original/useSessionSupervisor.js	2026-10-14 14:29:06.977427649 +0800
-+++ backup/useSessionSupervisor.js	2026-10-14 15:22:03.347696832 +0800
-@@ -192,38 +192,54 @@
++++ backup/useSessionSupervisor.js	2026-10-14 15:36:08.550821017 +0800
+@@ -134,8 +134,21 @@
+             ancestors.add(parent);
+             cursor = byId.get(parent);
+         }
+-        return sessions.filter(session => session.hasPrompt && session.kind.kind !== 'subagent' && !ancestors.has(session.id));
+-    }, [sessions, channel.agentId]);
++        return sessions.filter(session => session.hasPrompt
++            && session.kind.kind !== 'subagent'
++            && !ancestors.has(session.id)
++            // F2 fork: a record that never held a conversation is not a session
++            // this pane should offer. The catalog keeps one for every terminal
++            // that ever started — and ghosts whose log never landed at all — and
++            // with nothing to name them they render as the directory basename
++            // ("☆ ∙ .dsh-tui"), which reads like a directory row rather than a
++            // conversation. Such a record has no events of its own
++            // (`updatedAt === createdAt`) and no name (`fallback`); anything a
++            // terminal is actually using stays listed.
++            && (liveStateOf(session.id) !== undefined
++                || session.title?.source !== 'fallback'
++                || session.updatedAt !== session.createdAt));
++    }, [sessions, channel.agentId, liveStateOf]);
+     /**
+      * The rail's rows: the durable registry, plus rows for sessions that live in
+      * a directory the registry does not know (or while it cannot be read at all).
+@@ -192,38 +205,54 @@
      const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
      const [railFocus, setRailFocus] = useState(0);
      /**
@@ -81,7 +105,7 @@
      /**
       * The session column's cursor, as ONE fact.
       *
-@@ -378,57 +394,6 @@
+@@ -378,57 +407,6 @@
      React.useEffect(() => () => {
          snapshotSlot(channel).requestGeneration++;
      }, [channel]);
@@ -139,7 +163,7 @@
      // The cursor indexes the entry list directly (there is no `+` row in front of
      // it), so a shrinking ledger has to pull it back inside or the last row would
      // highlight nothing.
-@@ -437,16 +402,19 @@
+@@ -437,16 +415,19 @@
      }, [railEntries.length]);
      /**
       * Sessions whose recorded cwd is the selected workspace, minus the search
@@ -163,7 +187,7 @@
              .filter(session => sessionMatchesQuery(session, needle))
              .slice()
              .sort((left, right) => {
-@@ -454,44 +422,40 @@
+@@ -454,44 +435,40 @@
              const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0;
              return rightLive - leftLive || right.updatedAt - left.updatedAt;
          });
@@ -225,7 +249,7 @@
      const sessionWidth = Math.max(20, columns - (railVisible ? railWidth + 1 : 0));
      const railListHeight = Math.max(1, rows - RAIL_CHROME_ROWS);
      /**
-@@ -564,18 +528,15 @@
+@@ -564,18 +541,15 @@
          })
              .catch(error => report(t(archiveSessions ? 'session-archive-failed' : 'session-delete-failed', { err: message(error) }), 'error'));
      }, [archiveSessions, channel, holderOf, liveStateOf, reload, report]);
@@ -253,7 +277,7 @@
      /**
       * Mount a session, refusing one another terminal holds.
       *
-@@ -698,18 +659,16 @@
+@@ -698,18 +672,16 @@
              selectEntry(entry);
      }, [railEntries, selectEntry]);
      const moveSession = useCallback((by) => {
@@ -278,7 +302,7 @@
      const focusedSession = sessionAt(sessionIndex);
      return {
          dshBackend,
-@@ -751,7 +710,6 @@
+@@ -751,7 +723,6 @@
          selected,
          visibleSessions,
          sessionIndex,

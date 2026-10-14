@@ -191,6 +191,9 @@ ck "hook: the cursor space is sessions only" "! grep -q 'cardFocused' '$SUP'"
 # derived from the pane's own list (the rail grouping has no key for it).
 ck "hook: opens on the most recent session" \
    "grep -q 'for (const session of listedSessions)' '$SUP' && ! grep -q 'mostRecentIn' '$SUP'"
+# A never-used, nameless, unmounted catalog record is not offered as a session.
+ck "hook: never-used records are not listed" \
+   "grep -q 'session.updatedAt !== session.createdAt' '$SUP'"
 ck "hook: no rail-picked selection state left" \
    "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
 ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' '$SS'"
