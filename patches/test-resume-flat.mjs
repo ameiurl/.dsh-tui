@@ -236,10 +236,10 @@ check(BACKGROUND_RE.test(stripedRowRaw),
   'a `striped` row paints its surface — the band that separates two-line rows');
 // And it is an explicit 256 index, because every dark surface in the palette
 // quantises to index 59 (#5f5f5f, a loud mid grey) once dsh-tui clamps colours
-// to 256 for tmux. 240 (#585858) is the chosen pale grey-white. Pinned here so
-// a later nudge cannot quietly drift the tone.
-check(/\u001b\[48;5;240m/.test(stripedRowRaw),
-  'the band is ansi256 240 (#585858), not the palette surface that collapses to #5f5f5f');
+// to 256 for tmux. 238 (#444444) is the tone in use. Pinned here so a later
+// nudge cannot quietly drift it.
+check(/\u001b\[48;5;238m/.test(stripedRowRaw),
+  'the band is ansi256 238 (#444444), not the palette surface that collapses to #5f5f5f');
 
 // Opening the screen must land on the session the user last used — even when an
 // OLDER session is live and therefore sorts above it. Asserted behaviourally
