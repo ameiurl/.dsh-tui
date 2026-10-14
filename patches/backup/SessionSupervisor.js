@@ -128,7 +128,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         const index = Math.max(0, tabs.findIndex(candidate => candidate.id === tab));
         switchTab(tabs[(index + by + tabs.length) % tabs.length].id);
     }, [tabs, tab, switchTab]);
-    useInput((input, key) => {
+    useInput((input, key, event) => {
+        // F2 fork: Ctrl+J / Ctrl+K step the list on top of the arrows (see
+        // listKeyStep). Computed once per key because the "a movement key puts
+        // the caret back in the list" rule below wants the same answer.
+        const step = listKeyStep(input, key, event);
         // Modal layers own the keyboard, in the same order they render.
         // The draft is read through a ref: keystrokes that arrive in one batch
         // (typing, then Enter) must commit everything typed, not the last render.
@@ -269,11 +273,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             cycleTab(key.shift ? -1 : 1);
             return;
         }
-        if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.wheelUp || key.wheelDown || key.pageUp || key.pageDown) {
+        if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.wheelUp || key.wheelDown || key.pageUp || key.pageDown || step !== 0) {
             setFilterFocused(false);
         }
         if (tab !== DSH_TAB) {
-            foreignKey(input, key);
+            foreignKey(input, key, step);
             return;
         }
         // ←/→ choose the column. There is exactly one `❯` on screen because exactly
@@ -286,14 +290,14 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             activateList();
             return;
         }
-        if (key.upArrow || key.wheelUp) {
+        if (key.upArrow || key.wheelUp || step === -1) {
             if (activePane === 'rail')
                 moveRail(-1);
             else
                 moveSession(-1);
             return;
         }
-        if (key.downArrow || key.wheelDown) {
+        if (key.downArrow || key.wheelDown || step === 1) {
             if (activePane === 'rail')
                 moveRail(1);
             else
@@ -348,14 +352,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             // Enter means "the thing the active column is showing": its action menu
             // for a workspace, that session for the session list. Ctrl/Cmd+Enter keeps
             // the old "start a session in this workspace" shortcut from either column.
-            // Row 0 of the list is the new-session card, so it starts a session
-            // instead of opening one.
+            // F2 fork: the new-session card that used to BE row 0 is gone, so row 0 is
+            // an ordinary session and Enter opens it. Creating one is Ctrl+N — and an
+            // empty list (no sessions, or a filter with no match) does nothing, because
+            // there is no row for Enter to act on.
             if (activePane === 'list') {
-                if (sessionIndex === 0) {
-                    if (selected !== undefined)
-                        newSessionIn(selected);
-                    return;
-                }
                 // `sessionIndex` is derived from the SAME focus fact the render draws
                 // `❯` from, so Enter can only ever open the row the user is looking at.
                 const session = sessionAt(sessionIndex);
@@ -395,9 +396,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
      * Keys on a source tab: the same pane model as DSH (←/→ pick the column,
      * ↑/↓ move, typing filters), with what a foreign source cannot do left out —
      * no workspace menu, no new session, no stop — and Ctrl+L rescanning the
-     * source instead of re-listing.
+     * source instead of re-listing. The fork's Ctrl+J / Ctrl+K pair rides along
+     * as the `step` the caller already computed, so the movement keys are the
+     * same on every tab.
      */
-    function foreignKey(input, key) {
+    function foreignKey(input, key, step) {
         if (key.leftArrow) {
             foreign.activateRail();
             return;
@@ -406,7 +409,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             foreign.activateList();
             return;
         }
-        const by = key.upArrow || key.wheelUp || key.pageUp ? -1 : key.downArrow || key.wheelDown || key.pageDown ? 1 : 0;
+        const by = key.upArrow || key.wheelUp || key.pageUp || step === -1 ? -1 : key.downArrow || key.wheelDown || key.pageDown || step === 1 ? 1 : 0;
         if (by !== 0) {
             if (foreign.pane === 'rail')
                 foreign.moveRail(by);
@@ -523,7 +526,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                                 }, children: [loading && _jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(t('home-sessions-loading'), sessionWidth - 2)}` }), !loading && visibleSessions.length === 0 && (_jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(filtered ? t('supervisor-no-matches') : t('home-no-sessions'), sessionWidth - 2)}` })), visibleSessionRows.map((session, index) => {
                                         const state = liveStateOf(session.id);
                                         const holder = holderOf(session.id);
-                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
+                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, 
+                                            // F2 fork: the zebra band follows the row's ABSOLUTE
+                                            // index, so scrolling cannot re-stripe the list under
+                                            // a stationary eye — the row that was filled stays filled.
+                                            striped: (sessionTop + index) % 2 === 1, focused: activePane === 'list' && sessionTop + index === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
                                                 event.stopImmediatePropagation();
                                                 setFocusSessionId(session.id);
                                                 openSession(session);
@@ -586,3 +593,31 @@ export function railWindowTop(focus, entryCount, capacity) {
 }
 /** Re-exported so a regression can drive the spinner without importing ink. */
 export { SpinnerGlyph };
+/**
+ * F2 fork: the session list's second movement pair — Ctrl+J steps UP, Ctrl+K
+ * steps DOWN, deliberately the INVERSE of vim's j/k. The arrows stay the
+ * primary keys; this pair is for hands that would rather not leave the home
+ * row, and it works on every source tab because both callers share this one
+ * answer.
+ *
+ * Ctrl+K is an ordinary control byte (0x0B) and Ink parses it as `k` + ctrl on
+ * every terminal. Ctrl+J is not: a terminal that reports no extended keys sends
+ * LF (0x0A) for it, and Ink reads LF as `enter` with NO modifier flag, so the
+ * raw byte is the only signal left (PromptInput accepts the same pair for a
+ * literal newline). Pasted text is excluded — a pasted "\n" is content, not a
+ * keypress.
+ *
+ * @param input - The event's text.
+ * @param key - The event's key flags.
+ * @param event - The input event, for the LF spelling's `keypress.name`.
+ * @returns -1 up, 1 down, 0 when this is not one of the two keys.
+ */
+export function listKeyStep(input, key, event) {
+    if (isMod(key) && input === 'j')
+        return -1;
+    if (input === '\n' && key.isPasted !== true && event?.keypress?.name === 'enter')
+        return -1;
+    if (isMod(key) && input === 'k')
+        return 1;
+    return 0;
+}

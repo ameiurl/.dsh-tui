@@ -202,6 +202,30 @@ ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$
 # (no rail, so no ←/→ pane switch to advertise). A stray hunk is drift.
 ck "i18n diff touches only the keys this fork owns" \
    "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-(hint-list|current)\""
+# The fork's own additions to that list: a movement pair that survives BOTH
+# spellings of Ctrl+J, a zebra band on every other row, and an Enter that opens
+# the row it stands on (the stock new-session card branch is gone).
+ck "screen: Ctrl+J/Ctrl+K are answered once per key" \
+   "grep -q 'const step = listKeyStep(input, key, event)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
+ck "screen: listKeyStep accepts the bare LF spelling" \
+   "grep -qF \"key.isPasted !== true && event?.keypress?.name === 'enter'\" '$SS'"
+ck "screen: listKeyStep accepts kitty ctrl+j" \
+   "grep -qF \"isMod(key) && input === 'j'\" '$SS'"
+ck "screen: the movement pair rides the foreign lists too" \
+   "grep -q 'foreignKey(input, key, step)' '$SS'"
+ck "screen: every other row is striped by ABSOLUTE index" \
+   "grep -q 'striped: (sessionTop + index) % 2 === 1' '$SS'"
+ck "screen: Enter on row 0 opens it, never creates" \
+   "! grep -q 'if (sessionIndex === 0)' '$SS'"
+ck "row: striped paints the surface" \
+   "grep -q 'striped = false' '$ROW' && grep -qF \"striped ? 'toolCardBackground'\" '$ROW'"
+ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,' '$ROW'"
+ck "test-resume-flat.mjs covers the keys and the band" \
+   "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs'"
+ck "CUSTOMIZATIONS.md documents the pair and the band" \
+   "grep -q 'Ctrl+J 向上 / Ctrl+K 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md'"
+ck "README.md documents the pair and the band" \
+   "grep -q 'Ctrl+J / Ctrl+K' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md'"
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"

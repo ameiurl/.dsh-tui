@@ -76,8 +76,9 @@
 ### F2 — resume：只列本终端工作目录的历史会话（无 rail）
 - **涉及文件（4 个）**：
   - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（主补丁）
-  - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（删「＋ 新建会话」行；Ctrl+N 用钉死目录）
-  - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标）
+  - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（删「＋ 新建会话」行；Ctrl+N 用钉死目录；
+    Enter 只开光标行；Ctrl+J/K；按绝对行号传 `striped`）
+  - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标；新增 `striped` 隔行底色）
   - `…/dsh-tui/lib/types/i18n.js`（两个 key：`supervisor-hint-list` 去掉 `←/→ 切换栏位`、
     删除 `supervisor-current`）
 - **行为**（三条底线）：
@@ -88,6 +89,20 @@
     —— 比 stock 的"rail 分组 key 精确相等"更稳（尾斜杠/大小写不同仍算同目录）。
   - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+N 仍可新建），光标空间因此只有会话
     （`sessionAt(index) = visibleSessions[index]`，`moveSession` 按真实长度钳制，`cardFocused` 删除）。
+  - **Enter 落在第 0 行也开会话**：卡片没了，stock 的 `if (sessionIndex === 0) newSessionIn(selected)`
+    分支却还在 —— 第一行通常正是最近用过的那个会话，于是"恢复"变成"新建"。整块删掉：
+    Enter 只打开光标所在会话；列表为空（没有会话，或过滤后无匹配）时什么都不做，新建始终是 Ctrl+N。
+  - **上下分得清**：`SessionListRow` 新增 `striped` prop，为 `true` 时整行（两行高、满面板宽）铺
+    `toolCardBackground` 底色；`SessionSupervisor` 按**绝对行号** `(sessionTop + index) % 2 === 1`
+    传入，所以条纹跟着会话走，滚动不会在静止的视线下重排。层次是 hover 蓝 > 隔行底色 > 面板底：
+    hover 盖掉条纹，光标行始终是绿的（`❯` + 绿色粗体标题 + 非 dim 的元信息行）。想换强度只改
+    这一个主题键（更淡 `toolCardBackgroundDim`，更明显 `messageActionsBackground`/`selectionBg`）。
+  - **Ctrl+J 向上 / Ctrl+K 向下**：与方向键走同一个 `moveSession`，DSH 列表和外来后端列表都生效。
+    （**故意与 vim 的 j/k 相反**，改方向只需对调 `listKeyStep` 的两个返回值。）Ctrl+K 是普通控制
+    字节（0x0B）；Ctrl+J 要认**两种拼写** —— 不上报扩展键的终端发 LF（0x0A），Ink 把它解析成
+    `enter` 且 ctrl 为 false，只能靠原始字节判（`event.keypress.name === 'enter'`，与 `PromptInput`
+    认换行同一对判据），kitty/modifyOtherKeys 的 `ctrl+j` 则走 `isMod(key) && input === 'j'`；
+    粘贴进来的换行不算按键。判据集中在导出的 `listKeyStep(input, key, event)`，方向键仍是主键位。
   - **不列「背后没有日志」的记录**：每次开终端都会在会话目录注册一条记录，而日志可能始终没落盘；
      它没有名字 → 标题回落到目录 basename，显示成 `☆ ∙ .dsh-tui` 这种“像目录”的行 —— **而且
      这条通常就是当前这个窗口自己的会话**，所以看起来像“当前目录”。判据是 `bytes === undefined`
@@ -107,8 +122,10 @@
   `selectionManual`）与「按 cwd 自动选 rail 行」的 effect 在新结构里没有位置，**整块删掉**；
   上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
 - **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
-  Ctrl+N 落在本目录；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（14 条断言，
-  真渲染该屏 + 单独渲染行组件验证 `current` prop 已被忽略 + 按 Enter 验证默认落在最近会话）。
+  Ctrl+N 落在本目录、隔行有底色而相邻两行分得开、Ctrl+J/K 上下移动光标、Enter 落在第一行也能打开；
+  命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（32 条断言，真渲染该屏 + 单独渲染行组件
+  验证 `current` prop 已被忽略且 `striped` 才铺底色 + 按 Enter 验证默认落在最近会话、首行可开、
+  Ctrl+J/K 的两种拼写真的移动光标）。
 
 ### F3 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
 - **涉及文件（2 个）**：`…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`、
@@ -283,7 +300,8 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 逐项验证：
 - **F1**：Edit/Write 有行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行、Ctrl+O 展开；
   hover 不变底色。`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`
-- **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、Ctrl+N 落在本目录。
+- **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、Ctrl+N 落在本目录、
+  相邻行底色隔开（上下分得清）、Ctrl+J/K 上下移动、Enter 在第一行也开会话。
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`
 - **F3**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
   `node ~/.dsh-tui/patches/test-resume-title-chain.mjs`
@@ -302,7 +320,9 @@ segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 
 `loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F2 的 `railVisible = false`、
 无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、无日志记录不列、
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 只动
-`supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删 /
+`supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删、
+`listKeyStep` 认 Ctrl+J 的两种拼写且粘贴键不算、`striped` 隔行底色按绝对行号传入、
+Enter 的 `sessionIndex === 0` 新建分支已删 /
 F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
 占位标题判 `strong: false`（四处扫描）、`titleComplete` 不跟占位走、`store.js` 的
