@@ -61,13 +61,14 @@ const LIVE_STATUS_COLOR = {
  * nothing at all there, which is how the band came out so bright.
  *
  * An explicit `ansi256` index survives EVERY colour level, so the band is the
- * same tone in tmux, in a truecolor terminal and in VSCode. 236 (#303030) is
- * the tone being tried now: the faintest grey that still separates two rows —
- * well below the index the palette collapsed to (59, #5f5f5f). The whole ramp
- * is 232 (#080808) … 255 (#eeeeee) — head for 238/240 to go brighter, 234 to go
- * fainter; a LIGHT palette wants the other end (e.g. `ansi256(253)`).
+ * same tone in tmux, in a truecolor terminal and in VSCode. 237 (#3a3a3a) is
+ * the tone being tried now: one grey step above the faintest band that still
+ * separates two rows, and well below the index the palette collapsed to
+ * (59, #5f5f5f). The whole ramp is 232 (#080808) … 255 (#eeeeee) — head for
+ * 238/240 to go brighter, 236 to go fainter; a LIGHT palette wants the other end
+ * (e.g. `ansi256(253)`).
  */
-const STRIPE_BACKGROUND = 'ansi256(236)';
+const STRIPE_BACKGROUND = 'ansi256(237)';
 export function SessionListRow({ session, width, depth, focused, declareCursor = false, pinned, now, onClick, onContextMenu, onTogglePin, liveStatus, occupiedPid, spinner, striped = false, }) {
     const indent = depth * 2;
     const nativeCursor = useNativeCursor();
