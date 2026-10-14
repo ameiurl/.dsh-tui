@@ -87,6 +87,10 @@ declare -a TARGETS=(
   "$TUI_PKG/lib/types/screens/sessionSupervisor/useSessionSupervisor.js|useSessionSupervisor.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
   # F3 Ctrl+N follows that pinned directory now that the rail cannot name one.
   "$TUI_PKG/lib/types/screens/SessionSupervisor.js|SessionSupervisor.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  # F2 resume pane: the row's "current" badge is gone with the rest of the fork's
+  # minimal list — the screen no longer passes `current` and this stock component
+  # no longer knows the prop (nor the `supervisor-current` string, see i18n.js).
+  "$TUI_PKG/lib/types/components/sessions/SessionListRow.js|SessionListRow.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
   # F3 hint copy for that screen (no rail, so no ←/→ pane switch to advertise).
   "$TUI_PKG/lib/types/i18n.js|i18n.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
   # F5 `recapOnOpen` was a target here until 0.11.2: 0.11.1 dropped the key from

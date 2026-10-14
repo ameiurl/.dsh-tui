@@ -1,0 +1,29 @@
+--- original/SessionListRow.js	2026-10-14 14:52:07.408860585 +0800
++++ backup/SessionListRow.js	2026-10-14 14:52:07.437873813 +0800
+@@ -42,7 +42,7 @@
+  * stay exactly two lines at every terminal width, and a row that wraps
+  * destroys the alignment that lets the eye scan a list at all.
+  */
+-export function SessionListRow({ session, width, depth, focused, declareCursor = false, pinned, now, onClick, onContextMenu, onTogglePin, liveStatus, current, occupiedPid, spinner, }) {
++export function SessionListRow({ session, width, depth, focused, declareCursor = false, pinned, now, onClick, onContextMenu, onTogglePin, liveStatus, occupiedPid, spinner, }) {
+     const indent = depth * 2;
+     const nativeCursor = useNativeCursor();
+     const cursorRef = useDeclaredCursor({ line: 0, column: indent, active: focused && declareCursor, visible: nativeCursor, hideOnIdle: true });
+@@ -71,9 +71,8 @@
+             ? undefined
+             : LIVE_STATUS_COLOR[liveStatus];
+     const occupiedText = occupied ? ` ${t('supervisor-occupied-badge', { pid: occupiedPid })}` : '';
+-    const currentText = current === true ? ` ${t('supervisor-current')}` : '';
+     const titleBudget = body - 2 - (mark === undefined ? 0 : 2) - 2
+-        - stringWidth(occupiedText) - stringWidth(currentText);
++        - stringWidth(occupiedText);
+     const shownTitle = truncateWidth(titleText, Math.max(4, titleBudget));
+     const titleTooltip = useTooltip(() => {
+         const parts = [];
+@@ -107,5 +106,5 @@
+                             // toggles the pin and must never fall through to resume.
+                             event.stopImmediatePropagation();
+                             onTogglePin();
+-                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), _jsx(Box, { children: liveStatus === 'working' && !occupied && spinner !== undefined ? (_jsx(SpinnerGlyph, { frame: spinner.frame, messageColor: "suggestion", reducedMotion: false, time: spinner.time })) : (_jsx(Text, { color: stateColor, dimColor: liveStatus === undefined && !occupied, children: `${stateGlyph} ` })) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Box, { ...titleTooltip, children: _jsx(Text, { color: occupied ? 'error' : titleColor(session.title.source, focused), bold: focused, children: shownTitle }) }), occupiedText !== '' && _jsx(Text, { color: "error", children: occupiedText }), currentText !== '' && _jsx(Text, { color: "success", children: currentText })] }), _jsx(Box, { children: _jsx(Text, { color: focused ? 'success' : undefined, dimColor: !focused, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
++                        }, children: _jsx(Text, { color: pinned ? 'remember' : undefined, dimColor: !pinned, children: pinned ? '★ ' : '☆ ' }) }), _jsx(Box, { children: liveStatus === 'working' && !occupied && spinner !== undefined ? (_jsx(SpinnerGlyph, { frame: spinner.frame, messageColor: "suggestion", reducedMotion: false, time: spinner.time })) : (_jsx(Text, { color: stateColor, dimColor: liveStatus === undefined && !occupied, children: `${stateGlyph} ` })) }), mark !== undefined && _jsx(Text, { color: mark.color, children: `${mark.glyph} ` }), _jsx(Box, { ...titleTooltip, children: _jsx(Text, { color: occupied ? 'error' : titleColor(session.title.source, focused), bold: focused, children: shownTitle }) }), occupiedText !== '' && _jsx(Text, { color: "error", children: occupiedText })] }), _jsx(Box, { children: _jsx(Text, { color: focused ? 'success' : undefined, dimColor: !focused, children: `${' '.repeat(indent + 2)}${truncateWidth(facts.join(' · '), body)}` }) })] }));
+ }

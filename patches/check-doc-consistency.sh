@@ -180,6 +180,12 @@ ck "hook: the list owns the keyboard"      "grep -q \"useState('list')\" '$SUP'"
 # sessions only, and Ctrl+N (advertised in the hint) is the way to create one.
 ck "screen: no new-session row"             "! grep -q \"t('supervisor-new-session')\" '$SS'"
 ck "screen: no current badge"               "! grep -q 'current: state?.current' '$SS'"
+# The badge is gone WHOLE: prop, budget term, JSX and its i18n string.
+ROW="$LIB/types/components/sessions/SessionListRow.js"
+ck "row: the current badge is gone from the component" "! grep -q 'current' '$ROW'"
+ck "i18n: the badge string is gone too" "! grep -q \"'supervisor-current'\" '$LIB/i18n.js'"
+ck "targets: SessionListRow.js is a patch target" \
+   "grep -q 'SessionListRow.js|SessionListRow.js' '$DIR/apply-diff-patches.sh'"
 ck "hook: the cursor space is sessions only" "! grep -q 'cardFocused' '$SUP'"
 ck "hook: no rail-picked selection state left" \
    "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
@@ -187,8 +193,8 @@ ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' 
 ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$LIB'"
 # The doc says the i18n patch is exactly the one hint key this screen renders
 # (no rail, so no ←/→ pane switch to advertise). A stray hunk is drift.
-ck "i18n diff touches only supervisor-hint-list" \
-   "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-hint-list\""
+ck "i18n diff touches only the keys this fork owns" \
+   "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-(hint-list|current)\""
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"

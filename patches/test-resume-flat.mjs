@@ -128,11 +128,12 @@ process.stdout.write = realStdoutWrite;
 
 // Ink repositions the cursor rather than emitting spaces, so strip escapes and
 // leftover control bytes, then match on each row's distinctive token.
-const plain = output
+const stripAnsi = raw => raw
   .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
   .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
   .replace(/\u001b[=>NOPc]/g, '')
   .replace(/[\u0000-\u0008\u000b-\u001f]/g, '');
+const plain = stripAnsi(output);
 
 let failures = 0;
 /** The report goes to stderr so ink's own escapes never reach it. */
@@ -162,6 +163,31 @@ check(plain.includes('Ctrl+N') && plain.includes('Ctrl+X'), 'the hint still adve
 check(plain.includes('Enter'), 'list hint renders');
 check(newSessionCalls.length === 1 && newSessionCalls[0] === CURRENT,
   `Ctrl+N starts a session in the current directory (got ${JSON.stringify(newSessionCalls)})`);
+
+// The badge is gone from the COMPONENT, not just from the screen's call: a
+// caller that still passes `current` gets a row without it (the prop and the
+// `supervisor-current` string are both gone).
+const { SessionListRow } = await import(join(TUI, 'lib/types/components/sessions/SessionListRow.js'));
+let rowOutput = '';
+const rowCapture = { ...sink(), write: chunk => { rowOutput += chunk; return true; } };
+const realWriteForRow = process.stdout.write.bind(process.stdout);
+process.stdout.write = () => true;
+const rowApp = renderSync(
+  React.createElement(SessionListRow, {
+    session: sessions[0], width: 100, depth: 0, focused: false, pinned: false,
+    now: Date.now(), current: true, spinner: undefined,
+    onClick: () => {}, onTogglePin: () => {}, onContextMenu: () => {},
+  }),
+  { stdout: rowCapture, stdin: new FakeStdin(), stderr: sink() },
+);
+await new Promise(r => setTimeout(r, 100));
+rowApp.unmount();
+await new Promise(r => setTimeout(r, 30));
+process.stdout.write = realWriteForRow;
+const rowPlain = stripAnsi(rowOutput);
+check(rowPlain.includes('AAA'), 'the row still renders its session title');
+check(!rowPlain.includes('当前'),
+  'and ignores a `current` prop entirely — the badge is gone from the component');
 report(failures === 0
   ? '\nPASS: /resume shows this working directory only, flat and rail-free.'
   : `\n${failures} check(s) failed.`);

@@ -561,7 +561,6 @@ const dict = {
     'supervisor-hint-filter': { zh: '输入过滤会话 · **Enter** 进入 · Esc 清空', en: 'Type to filter · **Enter** enter · Esc clears' },
     'supervisor-occupied': { zh: '被其他 TUI 终端占用（pid {{pid}}），无法进入', en: 'Held by another TUI terminal (pid {{pid}}) — cannot enter' },
     'supervisor-occupied-badge': { zh: '占用 pid {{pid}}', en: 'held by pid {{pid}}' },
-    'supervisor-current': { zh: '当前', en: 'current' },
     'supervisor-counts': { zh: '{{working}} 运行中 · {{live}} 个活跃 · 共 {{total}}', en: '{{working}} working · {{live}} live · {{total}} total' },
     'supervisor-new-session': { zh: '＋ 新建会话', en: '+ New session' },
     'supervisor-new-session-hint': { zh: '在「{{name}}」新建一个会话', en: 'Start a session in "{{name}}"' },

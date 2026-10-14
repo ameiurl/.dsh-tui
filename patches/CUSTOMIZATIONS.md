@@ -2,7 +2,7 @@
 
 本文件是**唯一权威**的定制清单与升级手册。升级后照 [第 3 节](#3-升级后重打流程) 走一遍即可。
 
-- **补丁集 = 8 个目标文件**：F1（3）+ F2（3）+ F3（2），`node resolve-patch-targets.mjs` 可列出。
+- **补丁集 = 9 个目标文件**：F1（3）+ F2（4）+ F3（2），`node resolve-patch-targets.mjs` 可列出。
 - 快速体检：`bash ~/.dsh-tui/patches/apply-diff-patches.sh check`（逐目标 `OK` / `DIFFERS` /
   `MISSING` / `NEEDS-REPORT` / `PATCHED-*`）。
 - 已退役（别再往 `TARGETS` 里加）：**按目录的输入历史**（0.15.0 上游自带：
@@ -74,24 +74,31 @@
   命令行：`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`（31 条断言，含无头 ink 真渲染）。
 
 ### F2 — resume：只列本终端工作目录的历史会话（无 rail）
-- **涉及文件（3 个）**：
+- **涉及文件（4 个）**：
   - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（主补丁）
-  - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（Ctrl+N 用钉死目录）
-  - `…/dsh-tui/lib/types/i18n.js`（只改 `supervisor-hint-list` 一个 key，去掉 `←/→ 切换栏位`）
+  - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（删「＋ 新建会话」行；Ctrl+N 用钉死目录）
+  - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标）
+  - `…/dsh-tui/lib/types/i18n.js`（两个 key：`supervisor-hint-list` 去掉 `←/→ 切换栏位`、
+    删除 `supervisor-current`）
 - **行为**（三条底线）：
   - **无 rail**：`railVisible = false`，两侧 rail JSX 不渲染，面板占满宽度；键盘一开始就归列表，
     `activateRail()` 置空（`←` 不抢键盘）。
   - **范围=本终端的工作目录**：`selected` 由 `channel.cwd` 合成（cwd 已注册则取 registry 的拼写），
     `visibleSessions` 对 `listedSessions` 用 `samePath(session.cwd, channel.cwd)` 过滤
     —— 比 stock 的"rail 分组 key 精确相等"更稳（尾斜杠/大小写不同仍算同目录）。
-  - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+N 仍可新建）、**没有**「当前」徽标；
-    搜索 `/`、实时状态与占用、重命名、删除、pin、Ctrl+X、Esc 都保留。
+  - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+N 仍可新建），光标空间因此只有会话
+    （`sessionAt(index) = visibleSessions[index]`，`moveSession` 按真实长度钳制，`cardFocused` 删除）。
+  - **「当前」徽标整块删除**（不是"不传 prop"）：组件里 `current` prop、`currentText`、
+    标题宽度预算里的那一项、JSX 分支，以及 i18n 的 `supervisor-current` 文案全部去掉 ——
+    所以 `SessionListRow.js` 进了补丁集（标题截断等其余行为仍 stock）。
+  - 搜索 `/`、实时状态与占用、重命名、删除、pin、Ctrl+X、Esc 都保留。
   - 代价（已接受）：**没有切换工作区的入口**；要看别的目录的会话，就在那个目录启动 dsh-tui。
 - **重移植注意**：stock 的 rail 选择状态（`selectedPath`/`selectedUnregisteredId`/
   `selectionManual`）与「按 cwd 自动选 rail 行」的 effect 在新结构里没有位置，**整块删掉**；
   上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
 - **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
-  Ctrl+N 落在本目录；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（13 条断言，真渲染该屏）。
+  Ctrl+N 落在本目录；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（14 条断言，
+  真渲染该屏 + 单独渲染行组件验证 `current` prop 已被忽略）。
 
 ### F3 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
 - **涉及文件（2 个）**：`…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`、
@@ -123,7 +130,7 @@
   （45 条断言，合成 zstd 会话日志）。
 
 ### 仍 stock（别再打补丁）
-`SessionListRow.js`（标题按宽度截断）；vim 默认关且指示在输入框内（`/vim` 开启）；
+vim 默认关且指示在输入框内（`/vim` 开启）；
 `ToolFileDiff.d.ts`（`oldStart`/`newStart` 由 JS 产出与读取，`.d.ts` 只影响 `tsc`——
 需要类型时在自己工程里 `declare module` 增强）。
 
@@ -283,9 +290,10 @@ segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 
 （`hunksPatch`、`newFileDiff`、校验器收 `patch`、`oldStart` 字段已删、`presentResult`）与
 行为测试 / 已退役的历史（`historyProjectKey`、`appendHistory(cwd)`、
 `loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F2 的 `railVisible = false`、
-无新建会话行、无「当前」徽标、
+无新建会话行、徽标整块已删（prop/JSX/i18n）、
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 只动
-`supervisor-hint-list` / F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
+`supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删 /
+F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
 占位标题判 `strong: false`（四处扫描）、`titleComplete` 不跟占位走、`store.js` 的
 `SCHEMA_VERSION = 5` 且版本 4 不可读 / 仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 F5 的
