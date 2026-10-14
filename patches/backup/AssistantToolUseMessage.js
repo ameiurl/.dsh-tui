@@ -309,10 +309,67 @@ function patchLines(diff, multiFile) {
     });
     return out;
 }
+/** Legacy payloads — what the pre-0.15.0 tool patch (and therefore every card
+ *  already sitting in a session log) sent: ONE hunk's side texts plus its
+ *  1-based `oldStart`/`newStart`. Line-diff the two sides into context/del/add
+ *  rows so those cards keep a real line-number gutter and word segments
+ *  instead of falling back to bare `-`/`+` lines. */
+function legacyHunkRows(diff) {
+    const rows = [];
+    const parts = JsDiff.diffLines(diff.oldText ?? '', diff.newText);
+    let o = diff.oldStart;
+    let n = diff.newStart;
+    for (let i = 0; i < parts.length; i += 1) {
+        const part = parts[i];
+        const lines = part.value.replace(/\n$/, '').split('\n');
+        if (!part.added && !part.removed) {
+            for (const line of lines)
+                rows.push({ kind: 'context', oldNo: o++, newNo: n++, text: line });
+        }
+        else if (part.removed) {
+            const next = parts[i + 1]?.added === true ? parts[i + 1] : undefined;
+            const addedLines = next === undefined ? [] : next.value.replace(/\n$/, '').split('\n');
+            if (next !== undefined && lines.length === addedLines.length) {
+                for (let k = 0; k < lines.length; k += 1) {
+                    const pair = wordSegments(lines[k], addedLines[k]);
+                    rows.push({ kind: 'del', oldNo: o++, text: lines[k], segments: pair.old });
+                    rows.push({ kind: 'add', newNo: n++, text: addedLines[k], segments: pair.new });
+                }
+                i += 1;
+            }
+            else {
+                for (const line of lines)
+                    rows.push({ kind: 'del', oldNo: o++, text: line });
+            }
+        }
+        else {
+            for (const line of lines)
+                rows.push({ kind: 'add', newNo: n++, text: line });
+        }
+    }
+    return rows;
+}
+/** Numbered rows for a legacy hunk payload (see {@link legacyHunkRows}). */
+function legacyDiffLines(diff) {
+    const rows = legacyHunkRows(diff);
+    const width = String(rows.reduce((max, row) => Math.max(max, row.oldNo ?? 0, row.newNo ?? 0), 1)).length;
+    const gutterOf = (row, marker) => `${String((marker === '-' ? row.oldNo : row.newNo) ?? '').padStart(width)} ${marker} `;
+    return rows.map(row => {
+        const marker = row.kind === 'add' ? '+' : row.kind === 'del' ? '-' : ' ';
+        return {
+            text: row.text,
+            tone: row.kind === 'add' ? 'add' : row.kind === 'del' ? 'del' : 'plain',
+            gutter: gutterOf(row, marker),
+            ...(row.segments === undefined ? {} : { segments: row.segments }),
+        };
+    });
+}
 /** Diff hunks → add/del rows. The header already carries the path for the
  *  common single-hunk case; with several hunks a path row separates files
  *  and `⋯` separates scattered hunks of one file (upstream DiffBlock). A
- *  patch file (`ToolFileDiff.patch`) renders through {@link patchLines}. */
+ *  patch file (`ToolFileDiff.patch`) renders through {@link patchLines}; a
+ *  legacy hunk payload renders through {@link legacyDiffLines} when it carries
+ *  hunk starts, and as bare `-`/`+` lines when it does not. */
 function diffLines(diffs) {
     const out = [];
     let prevPath;
@@ -329,6 +386,10 @@ function diffLines(diffs) {
                 out.push(dim('⋯'));
         }
         prevPath = diff.path;
+        if (typeof diff.oldStart === 'number' && typeof diff.newStart === 'number') {
+            out.push(...legacyDiffLines(diff));
+            continue;
+        }
         if (diff.oldText !== null) {
             for (const line of sideLines(diff.oldText))
                 out.push(del(`- ${line}`));

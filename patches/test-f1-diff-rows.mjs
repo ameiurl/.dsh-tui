@@ -275,6 +275,30 @@ check(translatedView?.diffs?.[0]?.patch === editDiffs[0].patch,
 check(callEvents[0]?.presentation?.diffs?.[0]?.patch === undefined,
   'while the in-flight call view stays fragments (no numbers until the result lands)');
 
+// ── legacy payloads: the old host's shape, and every card already in a log ─
+// `{oldText,newText,oldStart,newStart}` (one hunk per diff) has no patch text
+// to parse, so the renderer line-diffs the two sides itself and numbers them
+// from the hunk starts — that is what makes a pre-patch transcript show real
+// line numbers once a post-patch TUI renders it.
+const legacyDiffs = [{
+  path: 'src/x.js',
+  oldText: 'one\ntwo\nthree\nfour\nfive\n',
+  newText: 'one\nTWO\nthree\nfour\nfive\n',
+  oldStart: 11,
+  newStart: 11,
+}];
+const legacyRows = diffRows(legacyDiffs);
+check(legacyRows.some(row => row.gutter === '12 - ' && row.text === 'two'),
+  'a legacy hunk payload renders a numbered removed row (12 - two)');
+check(legacyRows.some(row => row.gutter === '12 + ' && row.text === 'TWO'
+  && row.segments?.some(segment => segment.changed === true && segment.text === 'TWO')),
+  'and its added counterpart, word segments included');
+check(legacyRows.some(row => row.gutter === '13   ' && row.text === 'three'),
+  'while context rows advance both sides (13   three)');
+check(diffRows([{ path: 'src/x.js', oldText: 'a\n', newText: 'b\n' }])
+  .every(row => row.gutter === undefined),
+  'a payload with no hunk starts still falls back to unnumbered stock rows');
+
 report(failures === 0
   ? '\nPASS: F1 diffs travel as patch text, stock numbers them, our layout decorates them.'
   : `\n${failures} check(s) failed.`);

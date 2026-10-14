@@ -127,8 +127,16 @@
   - **渲染器只补 stock 画不出来的那一层**：`patchLines()` 用 `parseFilePatch()` 的
     `hunk.lines`（**带 `oldNo`/`newNo`**）生成行，每行带 `gutter`（宽度 = 文件最大行号的
     位数，右对齐）与 `segments`；`diffLines()` 的非 patch 分支保持 stock 不动。
+  - **兼容旧形状（换补丁过渡期的关键）**：老 host（还在跑 0.12 版 tool 补丁）和历史
+    记录里的 diff 是 `{oldText,newText,oldStart,newStart}`——没有 patch 文本可解析。
+    `diffLines()` 对这类 payload 走 `legacyDiffLines()`：自己 `JsDiff.diffLines` 对齐两侧、
+    按 `oldStart`/`newStart` 编号、等长段照样配对出词级 segments。所以**只要 TUI 客户端
+    是补丁后启动的**，老卡片（含会话日志回放）也能显示真实行号；完全没有行号线索的
+    payload 才退回 stock 的裸 `-`/`+`。
   - **不再有** `oldStart`/`newStart` 字段、也不再有我们自绘的行号逻辑（那是旧补丁里最容易
-    随上游漂移的部分）。
+    随上游漂移的部分）。**注意分工**：tool 两包跑在 **host 进程**
+    （`lib/types/dsh-adapter/host-entry.js`，每会话一个、跨 TUI 重启存活），渲染器跑在
+    **TUI 客户端进程**——所以"换完要看行号"至少要重开 TUI 客户端，tool 侧的新形状则要新会话。
 - **行为**：diff 以 **unified** 呈现——真实行号 gutter、上下文行、`+`/`-` 标记、
   `+N -M` 变更数汇总行、hunk 之间 `⋯`、多文件时路径行（**以上四项由 stock 提供**），
   外加我们的装饰：
@@ -565,7 +573,7 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 F1 的「unified diff 不折叠（`newFileDiff ? NEW_FILE_DIFF_MAX_LINES : Infinity`）、
 `NEW_FILE_DIFF_MAX_LINES = 11`、分屏仍 8（`DIFF_BODY_MAX_LINES = 8`）、
 `diffRowBackground`/段级 `diffAddedDimmed`、`wordSegments`+`segmentNodes`、
-`gutter: gutterOf(`、`hunk.lines.every(line => line.kind === 'add')` 的新文件判定、
+`gutter: gutterOf(`、`legacyDiffLines` 的旧形状兼容、`hunk.lines.every(line => line.kind === 'add')` 的新文件判定、
 `hoverTint` 已删、
 `diffRows` 测试缝」**与 tool 侧「`hunksPatch` 序列化 + `patch: hunksPatch(patch.hunks)`、
 `newFileDiff` 的 `@@ -0,0 +1,N @@`、两个校验器都收 `patch`、`oldStart` 已彻底移除、

@@ -111,6 +111,11 @@ ck "renderer: word-level segments" \
 ck "renderer: numbered gutters come from the parsed patch" "grep -q 'gutter: gutterOf(' '$A'"
 ck "renderer: a create is detected by its all-added hunk" \
    "grep -q \"hunk.lines.every(line => line.kind === 'add')\" '$A'"
+# The pre-0.15.0 tool patch (old hosts, and every card already in a session
+# log) sends `{oldText,newText,oldStart,newStart}`: the renderer line-diffs the
+# sides itself so those cards keep a real gutter instead of bare markers.
+ck "renderer: legacy hunks keep their line numbers" \
+   "grep -q 'function legacyDiffLines' '$A' && grep -q \"typeof diff.oldStart === 'number'\" '$A'"
 ck "renderer: upstream hoverTint branch deleted" "! grep -q 'hoverTint' '$A'"
 ck "renderer: diffRows test seam exported" "grep -q 'export function diffRows' '$A'"
 # F1's tool half: the two packages carry the diff at all (str_replace has no
