@@ -71,15 +71,16 @@ declare -a TARGETS=(
   "$TOOLS/dsh-tool-fs/lib/index.js|dsh-tool-fs.index.js|$TOOLS/dsh-tool-fs|@deepseek-ai/dsh-tool-fs"
   "$TOOLS/dsh-tool-str-replace-editor/lib/index.js|dsh-tool-str-replace-editor.index.js|$TOOLS/dsh-tool-str-replace-editor|@deepseek-ai/dsh-tool-str-replace-editor"
   "$TUI_PKG/lib/types/components/messages/AssistantToolUseMessage.js|AssistantToolUseMessage.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
-  # F2 input history: tag each entry with the directory it was submitted in and
-  # read it back scoped to the current working directory (untagged legacy
-  # entries act as a fallback until the directory has entries of its own).
-  "$TUI_PKG/lib/types/history.js|history.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
-  # F2 ↑/↓ walk: seed from that scoped history — re-seeded when the working
-  # directory changes — and tag what this session submits.
-  "$TUI_PKG/lib/types/components/PromptInput.js|PromptInput.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
-  # F2 Ctrl+R: the search dialog reads through the same scoped loadHistory().
-  "$TUI_PKG/lib/types/screens/Chat.js|Chat.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  # F2 (cwd-scoped input history) was a target here — history.js, PromptInput.js
+  # and Chat.js — until 0.15.0. Upstream now ships the whole chain itself:
+  # historyProjectKey()/appendHistory(text, cwd)/loadHistory(cwd)/
+  # loadHistoryOldestFirst(cwd), a per-project cap plus the untagged legacy pool,
+  # PromptInput re-seeding per directory (historySeededProject, not our
+  # historySeedCwd) and Chat.js reading loadHistory(channel.cwd). The patch was
+  # RETIRED, not re-ported. The one behaviour it had that upstream does not —
+  # ↑/↓ falling out of the suggestion-menu boundary into history instead of
+  # wrapping — went with it (user call, 2026-10-14). test-history-cwd.mjs now
+  # guards the stock contract. See CUSTOMIZATIONS.md §2 (retired list).
   # F3 resume browser: 0.11.x moved it from screens/SessionBrowser.js (gone) to
   # the sessionSupervisor screen. The fork hides the workspace rail and pins the
   # pane to THIS terminal's working directory — no other directory is reachable.

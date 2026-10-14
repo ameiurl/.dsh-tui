@@ -66,11 +66,12 @@
 > 旧 F5 vim 指示移到底部状态栏、旧 F7 `ToolFileDiff` 类型补充（后两项与运行时无关，
 > 只影响 `tsc`）。找回办法见 §4 与 git 历史。
 >
-> **当前补丁集 = 11 个目标文件**（3 个 F1 + 3 个 F2 + 3 个 F3 + 2 个 F4；
+> **当前补丁集 = 8 个目标文件**（3 个 F1 + 3 个 F3 + 2 个 F4；
 > `node resolve-patch-targets.mjs` 可列出），`patch-base-version` = `0.12.0`，
 > 逐包基线见 `patch-base-versions.json`（dsh-tui `0.12.0`／tool 两包 `0.2.0-rc.2`）。
-> F5（`recapOnOpen`）**不在**这 11 个里：0.11.2 上游自己把它做成了 stock，补丁已退役
-> （见下方「退役」与 §4 的状态表），别再把它加回 `TARGETS`。
+> **两项已退役、不在这 8 个里，别再往 `TARGETS` 里加**：F5（`recapOnOpen`，0.11.2 起上游
+> 自己做成了 stock）与 **F2**（↑/↓ 的按目录历史，0.15.0 起上游自带 —— 见下方 F2 一节
+> 与 §4 状态表）。
 >
 > **0.12.0 迁移要点（2026-09-30）**：上游只动了 **3 个**目标文件（`Chat.js`、`PromptInput.js`、
 > `i18n.js`），另外 **7 个（含 tool 两包）字节未变 → 免移植**；动过的 3 个按 §3 三方合并
@@ -136,52 +137,28 @@
 - **验证**：触发一次 Edit/Write，看是否 CC 统一式（行号 + 绿红底）；NEW 文件只出
   前 10 行（`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行。
 
-### F2 — ↑/↓ 跨会话历史（**按当前工作目录过滤**）+ 建议菜单边界落历史
-- **涉及文件（3 个）**：
-  - `…/dsh-tui/lib/types/history.js` —— 写入时给条目打上提交目录（`cwd` 字段），
-    读取时只返回该目录的条目。**0.11.x 上游新增 `loadHistoryOldestFirst()`**
-    （composer 的 ↑/↓ 走它），所以过滤抽成一个 `scopeToCwd(entries, cwd)` 助手，
-    `loadHistory(cwd)`（Ctrl+R，新→旧）与 `loadHistoryOldestFirst(cwd)`（↑/↓，旧→新）
-    共用它——否则会出现「Ctrl+R 过滤了、↑/↓ 没过滤」的错位。两个函数都新增**可选**参数，
-    不传即旧行为（返回全部）。`history.d.ts` **不补**，理由同旧 F7：
-    安装后的包不做类型检查，声明只影响 `tsc`。
-  - `…/dsh-tui/lib/types/components/PromptInput.js` —— ↑/↓ 播种改走
-    `loadHistoryOldestFirst(channel.cwd)`（0.11.x 的播种函数 `seedHistory()` 以
-    `historySeedCwd === channel.cwd` 为守卫，取代上游的 `historySeeded` 布尔：
-    目录变了就重播种），提交时 `appendHistory(text, channel.cwd)` 打标。
-  - `…/dsh-tui/lib/types/screens/Chat.js` —— Ctrl+R 历史搜索改读
-    `loadHistory(channel.cwd)`，与 ↑/↓ 范围一致。
-- **行为**：
-  - ↑/↓ 读取**持久化历史文件**（跨会话、跨进程可翻），但**只列当前工作目录的条目**；
-    Ctrl+R 同理（同一份 `loadHistory`）。
-  - **播种按目录重播**：`historySeedCwd` 记住上次播种用的目录，目录变了
-    （workspace picker 可以中途换工作区）就重新播种并结束进行中的历史游走。
-    这顺带修掉旧补丁的一个竞态：旧版在**每次 render** 都重新播种，提交后若在落盘前
-    重渲染，刚提交的命令会被从内存历史里抹掉；现在只在挂载/换目录时播种。
-  - **旧条目兜底**（升级平滑的关键）：打标之前写入的条目没有 `cwd`。
-    当**当前目录一条都没有**时，`loadHistory(cwd)` 返回这些无标记条目，所以刚改完
-    ↑/↓ 不会突然变空；一旦该目录攒下自己的条目，兜底池立刻让位
-    ——别的目录的命令不会永久泄漏进来。
-  - **去重按目录分别算**：同一句话在另一个目录提交算**新条目**（`last.cwd === cwd`
-    才算连续重复），否则合并会把条目留在错误的目录标签下。
-  - 在命令建议菜单顶部/底部再按 ↑/↓ **落到历史**（而非 stock 的环绕）。
-- **重移植注意**：只保留「按目录播种/打标 + 菜单边界落历史」；
-  vim 相关（默认开启、`onVimChange` 上报、输入框内指示）已移除，重移植时不要带回。
-  三个文件的改动都很薄（`history.js` 约 40 行、`Chat.js` 1 行、`PromptInput.js` 是
-  播种块 + 两处传参），若上游大改，底线是「条目带目录 + 读取按目录过滤 + 旧条目兜底」。
-- **验证**：
-  1. 重启后 ↑/↓ 能翻到**本目录**以前输过的命令；换个目录启动应看不到这里的命令。
-  2. 菜单在第 0 项按 ↑ 应进历史。
-  3. 命令行无头测试（临时 `HOME`，绝不碰真实历史文件）：
-     ```bash
-     node ~/.dsh-tui/patches/test-history-cwd.mjs
-     ```
-     断言：条目带 `cwd` 落盘、按目录过滤、旧无标记条目兜底且在有本目录条目后让位、
-     跨目录同名文本不合并、未过滤读取返回全部、真实 `history.jsonl` 未被改动。
-  4. 过渡期快检——当前 200 条**全无 `cwd`**，所以过滤前后条数应相等：
-     ```bash
-     node -e "import('$HOME/.dsh/profiles/dsh-tui/node_modules/@deepseek-harness-tui/dsh-tui/lib/types/history.js').then(m=>console.log(m.loadHistory().length, m.loadHistory(process.cwd()).length))"
-     ```
+### F2 — ↑/↓ 跨会话历史（按当前工作目录过滤）：**已退役（0.15.0 起回归 stock）**
+- **为什么退役**：0.15.0 上游自己把整条链做成了 stock，而且比补丁更完整——
+  `historyProjectKey(cwd)`（`resolve()` 归一化 + 去尾斜杠）、`appendHistory(text, cwd)`、
+  `loadHistory(cwd)`（Ctrl+R，新→旧）、`loadHistoryOldestFirst(cwd)`（↑/↓，旧→新）、
+  空标记条目的 `inProject()` 兜底、**按项目各自 200 条**的上限（补丁只有全局上限）、
+  `PromptInput` 按目录重播种（上游 `historySeededProject`，取代补丁的 `historySeedCwd`）、
+  `Chat.js` 读 `loadHistory(channel.cwd)`。补丁三件套（`history.js` / `PromptInput.js` /
+  `Chat.js` 的 `backup` + `original` + `diffs`）**已删**，`TARGETS` 里也不再列它们。
+  注意磁盘字段名：补丁用 `cwd`，**上游用 `project`**（归一化后的绝对路径）。
+- **与补丁的两处行为差异（用户已接受，别再"补回来"）**：
+  1. **菜单边界**：stock 在命令建议菜单第 0 项再按 ↑ 依旧是**环绕**；补丁曾是「落到历史」，
+     退役时按用户决定（2026-10-14）一起去掉。
+  2. **旧无标记条目**：stock 的 `inProject()` 是**并集**——没有 `project` 的老条目
+     **永远**出现在每个目录的视图里（直到被 200 条上限轮转掉）；补丁的兜底池则会在该目录
+     攒下自己的条目后让位。
+- **验证**：命令行无头测试（临时 `HOME`，绝不碰真实历史文件）：
+  ```bash
+  node ~/.dsh-tui/patches/test-history-cwd.mjs
+  ```
+  它已从「补丁行为测试」翻转成**上游契约守卫**：条目带 `project` 落盘、按目录过滤、
+  尾斜杠拼写算同一目录、未过滤读取返回全部、同一句话在别的目录算新条目、
+  无标记老条目对每个目录都可见、真实 `history.jsonl` 未被改动。
 
 ### F3 — resume：只列**当前工作目录**的历史会话（无左侧工作区 rail）
 - **涉及文件（3 个）**：
@@ -337,9 +314,10 @@
      （其中 11 条露出本来被占位标题压住的 provider 标题，其余变成完整的首条/最近 prompt），
      没有任何一条退化成目录名 —— 正因如此才必须 bump `store.js` 的 `SCHEMA_VERSION` 让旧缓存作废。
 
-> 说明：`history.jsonl` 现有条目**全都没有 `cwd` 字段**（早年那版过滤器的遗留早已随
-> 200 条上限轮转出去），它们正是 F2 的「旧条目兜底池」：改完 ↑/↓ 立刻仍能看到全部老命令，
-> 等各目录攒下带标记的新条目后自动按目录分化。**文件不需要迁移，保持原样**。
+> 说明：`history.jsonl` 里 2026-10 之前写入的条目**都没有标记**（补丁时代想用的字段是
+> `cwd`，上游用的是 `project`，两者都没写进过老条目）。在 stock 的 `inProject()` 下，
+> 这些无标记条目对**每个目录**都可见，会随 200 条上限自然轮转出去；F2 退役时
+> **文件不需要迁移，保持原样**。
 
 > 所有组件补丁都做了**语法校验门禁**：`apply-diff-patches.sh` 在写入前 `node --check`
 > （仅 `.js`），失败即中止，避免用旧补丁覆盖结构已变的上游文件。
@@ -516,11 +494,11 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 
 ### Step 7 — 重启验证
 完全退出并重开 `dsh-tui`（进程会缓存已加载模块，必须重启才吃新 JS），然后按 §2 的
-「验证」逐项过 F1–F3：
+「验证」逐项过补丁集里的 F1/F3，并顺手确认退役成 stock 的 F2：
 - **F1**：触发一次 Edit/Write，看 CC 统一式 diff（行号 + 绿红底；NEW 文件只出前 10 行）。
-- **F2**：↑/↓ 只翻到**当前目录**输过的命令（别的目录不出现；旧的**无**标记条目仍作兜底，
-  所以刚改完看起来和以前一样）；菜单在第 0 项按 ↑ 进历史。命令行侧：
-  `node ~/.dsh-tui/patches/test-history-cwd.mjs`。
+- **F2（已退役，按 stock 确认）**：↑/↓ 只翻到**当前目录**输过的命令（上游自带）；
+  旧的**无**标记条目对每个目录都可见；菜单第 0 项再按 ↑ 是 stock 的环绕。命令行侧：
+  `node ~/.dsh-tui/patches/test-history-cwd.mjs`（守上游契约，不是守补丁）。
 - **F3**：`/resume` 应只列**当前目录**的会话（别的目录不出现），左侧**无工作区 rail**、
   无「工作区」分区头；`←` 不改变光标归属；Ctrl+N 新建落在**当前目录**；命令行侧：
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`。
@@ -541,9 +519,11 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 `patch-base-versions.json` 可解析且与 `patch-base-version` 一致）/ §1.2 用户级设置 /
 F1 的 `DIFF_BODY_MAX_LINES` 与 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 **与 tool 侧
 4 个锚点（`oldStart`/`newStart` 产出、`presentationMeta` 转发、`computeHunkDiffs`、
-`presentResult`）与「tool 补丁不含上游回退」** / F2 的 `loadHistory(cwd)`、
-`loadHistoryOldestFirst(cwd)`、共用的 `scopeToCwd`、`historySeedCwd`、
-`appendHistory(text, channel.cwd)` 与 Ctrl+R 走 `channel.cwd` /
+`presentResult`）与「tool 补丁不含上游回退」** / **F2 已退役**：上游 stock 的
+`loadHistory(cwd)`、`loadHistoryOldestFirst(cwd)`、`appendHistory(text, cwd)`、
+`PromptInput` 的按目录播种与 `Chat.js` 的 `loadHistory(channel.cwd)` 仍在
+（契约测试 `test-history-cwd.mjs` 通过），且 `history.js`／`PromptInput.js`／`Chat.js`
+**不在** `TARGETS`／`original/`／`diffs/` 里 /
 F3 的 `railVisible = false`、按目录过滤的 `samePath(session.cwd, channel.cwd)`、
 `useState('list')`、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 补丁只动
 `supervisor-hint-list` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
@@ -560,7 +540,7 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 与逐包基线读取 / `dsh-patch` 别名在 `~/.zshrc` 与 `~/.bashrc` 里都在 /
 目标数 = `original/` = `diffs/` 且命名一致 / **每个 `diffs/*.patch` 都能在它自己的
 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**（只有真正重移植过的基线做得到；
-要靠 fuzz 才贴得上就是漂移）/ 三个行为测试通过。
+要靠 fuzz 才贴得上就是漂移）/ 四个测试通过（F3/F4 行为 + F2/F5 上游契约）。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
 
 ---
@@ -590,6 +570,7 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 
 | **0.12.0 迁移**（2026-09-30，profile & 壳 → `0.12.0`；生态 `dsh`/tool 两包 → `0.2.0-rc.2`） | `dsh-patch check` 报 **10/10 `DIFFERS`**（补丁全被升级还原），但**没有一条 `NEEDS-REPORT`**：其中 7 个目标（`AssistantToolUseMessage`/`history`/`useSessionSupervisor`/`SessionSupervisor`/`digest` 加 tool 两包）的新 stock 与 `original/` **逐字节相同** → 整文件恢复即可；上游真正动过的只有 `Chat.js`、`PromptInput.js`、`i18n.js`（鲸鱼券弹窗 `WhaleCouponPrompt`/`bonusNotices`、`channel.minimal` → `minimalUi`、`cycleMode()` 补 catch、`/resume` 一批新 key 等） | ①按 §3 对那 3 个做三方合并（`base`=0.11.2 `original`、`theirs`=0.11.2 `backup`、`ours`=0.12.0 stock）：**3/3 零冲突**，且结果与「旧 diff 直接贴在 0.12.0 上（`--fuzz=0`）」**逐字节相同** → 定制点一处没挪窝，上游改动全部保留（F2 的 `historySeedCwd` 三处、Ctrl+R 的 `loadHistory(channel.cwd)`、F3 的 `supervisor-hint-list` 文案）。②`original/` 换成 0.12.0 stock（= 已装原版）、`backup/` 换成合并结果、`diffs/` 重新生成，**10/10 都能在各自的 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**；`state/` 保持空。③基线 `patch-base-version` = `0.12.0`、`patch-base-versions.json` = dsh-tui `0.12.0` + tool 两包 `0.2.0-rc.2`（两包 `lib/index.js` 与 0.1.7-rc.2 **逐字节相同**，所以旧补丁原样有效，只换版本号）。④**顺手修掉 `apply-diff-patches.sh` 的两个真 bug**：GNU patch 的 hunk 报告（含 `with fuzz N`）走 **stdout**，旧脚本只重定向 stderr、又带 `-s` → 失败时 `NEEDS-REPORT` 下一行证据都打不出来、成功时 patch 的啰嗦话反倒漏进报告（列 0 那些 `File … is read-only` 就是它）；现在 stdout/stderr 两路都抓，并把 **fuzz 与 offset 分开报**（`PATCHED-FUZZ` 置 drift：fuzz 是上下文模糊匹配，可能贴到错的函数上），另加 `--read-only=ignore` 去掉 `-o` 下毫无意义的只读警告。⑤`check-doc-consistency.sh` 的 launcher 断言由硬编码 `0.1.7-rc.2` 改成**从已装树读版本 + 断言文档记的就是它**（生态每次升级不必再手改这一条，且断言更强），并补 3 条脚本锚点。⑥复验：`apply` 10/10 `applied` → `check` 10/10 `OK` exit 0，四个行为测试全过。补丁集仍 **10** 个目标，`patch-base-version` = `0.12.0` |
 | （非升级）**F4 ④：dsh 的兜底占位标题不算名字**（2026-10-07） | 用户报「resume 会只显示文件地址，导致分不清」。根因不在 Claude 链（③ 已经过滤 prompt 候选），而在 dsh 自己写进日志的 `session/title` 事件：`dsh-session-title` 的确定性兜底会把**首条 prompt 截断**后落盘（`source.kind: 'fallback'`），上游"最后写入者胜"让它排在 provider 标题之前、并整条压过 ③ 的 prompt 链 → mallphp 里 3 个会话的行标题都是 `@modules/client/controllers/v1/auction/A`（全库 232 条里 17 条有占位标题，8 条是地址形态） | ①`titleOf()` 一处判强弱：`provider`/`user`/无 source = `strong: true`，`fallback` = `false`；三处扫描（head/tail 窗口、深度反扫、增量后缀）只收 `strong`；`titleComplete` 不再跟着占位走（尾部只有占位 → 留给深度扫描，它能从"没读到的中间"取回 provider 标题）。②深度反扫顺路记下"最近一条非地址 prompt"（`recoverLatestTitle()` → `recoverLatestName()`），让深度扫描和快速路径给出同一个名字。③首条 prompt 也走 `normalizeLastPrompt()`（以前原样上报，多行首句会撑开整行）。④**`store.js` 的 `SCHEMA_VERSION` 4 → 5**：语义变了而日志一个字节没变，版本 4 索引里存着旧占位标题且会被无限命中 → 整份丢弃、自动重算（旧进程写回版本 4 也照样不认），**不需要手动删缓存**。⑤回归：231 条真实日志里 59 条标题改变（11 条露出本来被压住的 provider 标题，0 条退化成目录名）；`test-resume-title-chain.mjs` 新增 6b–6e 一节；补丁集 10 → **11** 个目标；与远端 0.12.0 迁移合并后，基线取 `0.12.0` |
+| （非升级）**F2 退役：按目录历史回归 stock**（2026-10-14） | 0.15.0 上游把整条链做成了 stock：`historyProjectKey(cwd)`（resolve 归一化 + 去尾斜杠）、`appendHistory(text, cwd)`、`loadHistory(cwd)`（Ctrl+R）、`loadHistoryOldestFirst(cwd)`（↑/↓）、`inProject()` 的空标记兜底、**按项目各自 200 条**上限、`PromptInput` 用 `historySeededProject` 按目录重播种、`Chat.js` 已读 `loadHistory(channel.cwd)`。补丁的定制点全部成为上游行为（磁盘字段由补丁的 `cwd` 变成上游的 `project`），且上游更完整。`dsh-patch check` 对这三个文件报 `NEEDS-REPORT`（旧 hunk 全部贴不上 0.15.0） | ①判定：主体一致 + 上游更完整 → **退役**，删三件套（`history.js` / `PromptInput.js` / `Chat.js` 的 `backup`+`original`+`diffs`），`TARGETS` 11 → **8**；`patch-base-version` 不变（仍 `0.12.0` —— 这次只减目标，0.15.0 重移植按 8 个目标走）。②两处剩余差异按用户决定放弃：菜单边界 ↑ 回落历史（stock 是环绕）、无标记老条目的兜底池让位（stock 是永久并集）。③`test-history-cwd.mjs` 由「补丁行为测试」改写为**上游契约守卫**（22 条断言，字段改 `project`，并显式记录那两处差异）；`check-doc-consistency.sh` 的 F2 段改成断言 stock 锚点 + 三个文件不在补丁集里。 |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 
@@ -603,7 +584,8 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 | 旧 F4 | vim 默认 ON、INSERT 起手（`PromptInput` + `Chat` 初始状态） | stock：vim 默认 OFF，`/vim` 开启 |
 | 旧 F5 | `INSERT/NORMAL` 指示从输入框移到 `StatusLine` | stock：指示在输入框内；`Chat`/`StatusLine` 接线已移除 |
 | 旧 F7 | `ToolFileDiff` 增加可选 `oldStart`/`newStart`（配合 F1 的 hunk 行号；0.10.1 迁移时曾短暂编号为 F4） | 不再打补丁；字段由 tool 包（JS）产出、渲染器（JS）动态读取，`.d.ts` 只影响 `tsc`，安装后的包不做类型检查，因此零运行时影响。需要类型时在自己工程里 `declare module` 增强 |
-| （无编号） | ↑/↓ 历史按 `cwd` 过滤（`history.js` + `history.d.ts` + 回填脚本） | **已恢复为 F2 的一部分**：0.10.1 迁移时曾整版撤回（当时代价是 ↑/↓ 立刻变空），2026-09-11 F3 定为「只看当前目录」后按用户要求恢复，并加了**旧条目兜底**解决空窗。`history.d.ts` 仍不打补丁（同旧 F7 的理由） |
+| （无编号） | ↑/↓ 历史按 `cwd` 过滤（`history.js` + `history.d.ts` + 回填脚本） | **最终由上游实现后随 F2 一起退役**：0.10.1 迁移时曾整版撤回，2026-09-11 恢复为 F2 的一部分；0.15.0 上游自带按目录历史（字段叫 `project`）→ 2026-10-14 退役，见下面的「新 F2」行。`history.d.ts` 始终不打补丁（同旧 F7 的理由） |
+| 新 F2 | ↑/↓ + Ctrl+R 的历史按当前工作目录过滤（`history.js` + `PromptInput.js` + `Chat.js`） | **已退役（0.15.0 起回归 stock）**：上游自带 `historyProjectKey`/`appendHistory(text, cwd)`/`loadHistory(cwd)`/`loadHistoryOldestFirst(cwd)`，且比补丁多「按项目各自 200 条」上限与路径归一化。补丁三件套已删，`TARGETS` 11 → **8**。两处差异按用户决定放弃：菜单边界 ↑ 回落历史（stock 环绕）、无标记老条目的兜底池让位（stock 永久并集）。`test-history-cwd.mjs` 保留但改成守上游契约 |
 | 新 F5 | `recapOnOpen` 写回 adapter 的 Config schema（`dsh-adapter/index.js`），让 `/settings` 的 "Auto recap on open" 存得下去 | **已退役（0.11.2 起回归 stock）**：0.11.1 保留了 `/settings` 行与读取却把键从 schema 里删了，保存报 `Config field "recapOnOpen" is not volatile`，自动 recap 关不掉——当时的补丁声明该键并标 volatile。0.11.2 上游自己声明了 `recapOnOpen: Schema.boolean()`（**故意不给 `.default()`**：volatile 包装会吞掉默认值，而读点 `channel.js` 用 `!== false` 把 `undefined` 当开），volatility 改由 `SETTING_DEFINITIONS` 派生的 `EDITABLE_CONFIG_KEYS` 提供 → 补丁三件套（`backup`/`original`/`diffs`）已删，`TARGETS` 里也不再列它。`test-recap-setting.mjs` 保留但**改成守上游契约**（键在、volatile、显式 `false` 存得下、未设置不读成 `false`、行与读点仍在）——下次上游再把这键弄丢，它会响。 |
 
 备份目录语义：`original/`=纯净上游；`backup/`=已补丁（apply 恢复源）；

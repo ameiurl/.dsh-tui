@@ -1,24 +1,35 @@
 #!/usr/bin/env node
-// test-history-cwd.mjs — behaviour check for customization F2
+// test-history-cwd.mjs — stock-contract guard for retired customization F2
 // ("↑/↓ and Ctrl+R read the persisted history scoped to the working directory").
 //
 //   node ~/.dsh-tui/patches/test-history-cwd.mjs
+//
+// F2 used to be a patch (history.js + PromptInput.js + Chat.js). 0.15.0 ships
+// the whole chain upstream — `historyProjectKey()`, `appendHistory(text, cwd)`,
+// `loadHistory(cwd)`, `loadHistoryOldestFirst(cwd)` — so the patch was retired
+// and this test flipped from "our patch behaves" to "upstream still behaves":
+// if a later version drops the directory scope again, it fires.
 //
 // Exercises the shipped `lib/types/history.js` inside a throwaway HOME, so the
 // checks run against the real module while never touching the user's
 // `~/.dsh-tui/history.jsonl` (the real file's size+mtime is re-checked at the
 // end as a belt-and-braces guarantee). Asserts:
 //
-//   * an appended entry is tagged with the directory it was submitted in;
-//   * a scoped read returns that directory's entries only, newest first;
-//   * a directory with no entries of its own falls back to the untagged legacy
-//     pool, and stops falling back as soon as it has entries;
-//   * the composer's own read (`loadHistoryOldestFirst(cwd)`, added upstream in
-//     0.11.x) is scoped the same way and keeps chronological order — Ctrl+R and
-//     ↑/↓ must never disagree about which directory they are showing;
+//   * an appended entry is tagged on disk with the normalized project key of
+//     the directory it was submitted in (upstream's field is `project`, not the
+//     retired patch's `cwd`);
+//   * a scoped read returns that directory's entries only, newest first, and a
+//     never-used directory is empty while no legacy entries exist;
+//   * the composer's own read (`loadHistoryOldestFirst(cwd)`) is scoped the same
+//     way and keeps chronological order — Ctrl+R and ↑/↓ must never disagree
+//     about which directory they are showing;
 //   * an unscoped read still returns every entry;
-//   * dedupe is per directory — the same text submitted elsewhere is its own
-//     entry, so a merged one could never carry the wrong directory.
+//   * dedupe is per project — the same text submitted elsewhere is its own
+//     entry, so a merged one could never carry the wrong directory;
+//   * untagged legacy entries are shown by EVERY scoped view (upstream's
+//     `inProject` is a union, not the retired patch's pool that yields once the
+//     directory has entries of its own) — recorded here so the difference stays
+//     deliberate.
 
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -59,7 +70,8 @@ if (!DATA_DIR.startsWith(tmpHome)) {
   report(`ABORT: refusing to run — DATA_DIR resolved to ${DATA_DIR}, not under ${tmpHome}`);
   process.exit(1);
 }
-const { appendHistory, loadHistory, loadHistoryOldestFirst } = await import(join(TUI, 'lib/types/history.js'));
+const { appendHistory, historyProjectKey, loadHistory, loadHistoryOldestFirst } =
+  await import(join(TUI, 'lib/types/history.js'));
 const HISTORY_FILE = join(DATA_DIR, 'history.jsonl');
 check(true, `isolated run: history lives in ${DATA_DIR}`);
 
@@ -68,6 +80,11 @@ const B = '/proj/beta';
 const C = '/proj/gamma';
 
 // ── tagging + scoping ───────────────────────────────────────────────────────
+check(historyProjectKey(A) === A,
+  `the project key of ${A} is its resolved path (${historyProjectKey(A)})`);
+check(historyProjectKey(`${A}/`) === historyProjectKey(A),
+  'a trailing slash names the same project (the alias that used to split a directory)');
+
 await appendHistory('alpha one', A);
 await appendHistory('alpha two', A);
 await appendHistory('beta one', B);
@@ -76,6 +93,8 @@ check(texts(loadHistory(A)) === 'alpha two | alpha one',
   `a scoped read returns ${A}'s entries only, newest first (${texts(loadHistory(A))})`);
 check(texts(loadHistory(B)) === 'beta one',
   `a scoped read returns ${B}'s entries only (${texts(loadHistory(B))})`);
+check(texts(loadHistory(`${A}/`)) === 'alpha two | alpha one',
+  'the trailing-slash spelling reads the same history');
 check(loadHistory(C).length === 0,
   'a directory never used has nothing to show while the legacy pool is empty');
 check(texts(loadHistoryOldestFirst(A)) === 'alpha one | alpha two',
@@ -86,10 +105,10 @@ check(texts(loadHistoryOldestFirst()) === 'alpha one | alpha two | beta one',
   'an unscoped composer read stays chronological');
 check(loadHistory().length === 3, 'an unscoped read still returns every entry');
 check(texts(loadHistory()) === 'beta one | alpha two | alpha one', 'unscoped order stays newest first');
-check(readFileSync(HISTORY_FILE, 'utf8').includes(`"cwd":"${A}"`),
-  'entries on disk carry their submitting directory');
+check(readFileSync(HISTORY_FILE, 'utf8').includes(`"project":"${A}"`),
+  'entries on disk carry their submitting directory (upstream field: project)');
 
-// ── dedupe is per directory ─────────────────────────────────────────────────
+// ── dedupe is per project ───────────────────────────────────────────────────
 await appendHistory('beta one', B);
 check(texts(loadHistory(B)) === 'beta one', 'a repeat submit in the same directory only advances its timestamp');
 check(loadHistory().length === 3, 'and adds no new line to the file');
@@ -99,17 +118,17 @@ check(texts(loadHistory(A)) === 'beta one | alpha two | alpha one',
   "the same text submitted in another directory is that directory's own entry");
 check(loadHistory().length === 4, 'and is appended rather than folded into the previous entry');
 
-// ── legacy (untagged) entries as the fallback pool ──────────────────────────
+// ── legacy (untagged) entries join every view ───────────────────────────────
 rmSync(HISTORY_FILE, { force: true });
 appendFileSync(HISTORY_FILE, `${JSON.stringify({ text: 'legacy cmd', ts: 1 })}\n`);
 await appendHistory('gamma one', A);
 
 check(texts(loadHistory(C)) === 'legacy cmd',
-  `an unused directory falls back to the untagged legacy pool (${texts(loadHistory(C))})`);
+  `an unused directory still sees the untagged legacy pool (${texts(loadHistory(C))})`);
 check(texts(loadHistoryOldestFirst(C)) === 'legacy cmd',
-  'the composer read sees the same fallback pool');
-check(texts(loadHistory(A)) === 'gamma one',
-  'a directory with entries of its own does NOT see the legacy pool');
+  'the composer read sees the same legacy pool');
+check(texts(loadHistory(A)) === 'gamma one | legacy cmd',
+  'a directory with entries of its own ALSO sees the legacy pool (stock union, by design)');
 check(loadHistory().length === 2, 'the unscoped read still sees both');
 
 // ── the run left the user's real history alone ──────────────────────────────
@@ -118,6 +137,6 @@ check(stampOf(REAL_HISTORY) === realBefore,
 
 rmSync(tmpHome, { recursive: true, force: true });
 report(failures === 0
-  ? '\nPASS: ↑/↓ and Ctrl+R read the current directory\'s history, with the legacy pool as fallback.'
+  ? '\nPASS: directory-scoped input history is still upstream stock (F2 retired).'
   : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

@@ -8,14 +8,10 @@ Three customizations live here:
    like Claude Code: **unified layout with real line numbers, context lines and
    `+`/`-` markers** (instead of the default side-by-side panes), plus a Claude
    Code diff palette.
-2. **Resume & input history** — `/resume` lists the **current working
-   directory's** sessions with **no workspace rail** (the session screen
-   keeps its search, rename, delete, live-status and session-hosting keys, but
-   the rail and every other directory are out of reach), and ↑/↓ (plus Ctrl+R)
-   recall the persisted `history.jsonl` **scoped to the current working
-   directory**: each entry is tagged with the directory it was submitted in, and
-   untagged entries written before the tagging stay as a fallback until a
-   directory has entries of its own.
+2. **Resume** — `/resume` lists the **current working directory's** sessions with
+   **no workspace rail** (the session screen keeps its search, rename, delete,
+   live-status and session-hosting keys, but the rail and every other directory
+   are out of reach).
 3. **`/resume` names a session the way Claude Code does** — a row's title
    follows Claude's own order: a written title (provider/AI, or `/rename` and
    recap) first, then the **most recent** human prompt, then the opening
@@ -30,6 +26,19 @@ Three customizations live here:
    face value is what made rows show `@modules/client/…/A` — identical for
    every session that opened on the same file — instead of a name. Only a
    title a provider or a person actually wrote counts.
+
+**Retired into stock upstream (do not re-add):** the **cwd-scoped input history**
+(F2) — 0.15.0 ships the whole chain itself (`historyProjectKey`,
+`appendHistory(text, cwd)`, `loadHistory(cwd)`, `loadHistoryOldestFirst(cwd)`, a
+per-project cap and the untagged legacy pool, plus `PromptInput` re-seeding per
+directory and `Chat.js` reading `loadHistory(channel.cwd)`), so `history.js`,
+`PromptInput.js` and `Chat.js` left the patch set; and `recapOnOpen` (F5), which
+0.11.2 declares and makes volatile on its own. Two F2 details went with the
+retirement: the suggestion-menu boundary ↑/↓ wraps again (stock) instead of
+falling into history, and untagged legacy entries join **every** project's view
+(stock's union) instead of yielding once a directory has entries of its own.
+`test-history-cwd.mjs` and `test-recap-setting.mjs` are kept as guards on those
+upstream contracts.
 
 ## User-level settings (survive upgrades)
 
@@ -109,9 +118,6 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.2.0-rc.2`,
 | `dsh-tool-fs/lib/index.js` | `computeHunkDiffs` + `presentationMeta` now carry 1-based `oldStart`/`newStart` per hunk |
 | `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}`, result-time hunk diffs with line numbers via `presentationMeta` + new `presentResult` (model-facing output text unchanged) |
 | `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest); tool-card hover keeps its background (upstream `hoverTint` branch removed) |
-| `dsh-tui .../history.js` | entries are persisted with the directory they were submitted in (`cwd`); one `scopeToCwd` helper narrows both reads — `loadHistory(cwd)` (newest first, Ctrl+R) and `loadHistoryOldestFirst(cwd)` (the composer's walk, added upstream in 0.11.x) — falling back to the untagged legacy pool while the directory has none of its own. An argument-less read still returns everything, and the consecutive-duplicate dedupe only folds entries from the same directory |
-| `dsh-tui .../components/PromptInput.js` | ↑/↓ seed from the persisted history file scoped to `channel.cwd` (re-seeded when the working directory changes), submit with `appendHistory(text, channel.cwd)`, and at the suggestion-menu boundary they fall through into history |
-| `dsh-tui .../screens/Chat.js` | Ctrl+R (the `history` action) fills its search dialog from `loadHistory(channel.cwd)`, so the search covers exactly what ↑/↓ walks |
 | `dsh-tui .../screens/sessionSupervisor/useSessionSupervisor.js` | **F3 fork** (0.11.x replaced `screens/SessionBrowser.js` with this screen): the workspace rail is never rendered (`railVisible = false`), the keyboard starts in the list and `←` is inert (`activateRail` empty, `activePane` pinned to `list`), the selection is synthesized from `channel.cwd` instead of a rail row, and the rows are the sessions whose recorded cwd `samePath`-matches it — every other directory is unreachable, and the empty-registry fallback group can no longer pull in another project's history. Search, live status, rename, delete, Ctrl+N/Ctrl+X and pins stay |
 | `dsh-tui .../screens/SessionSupervisor.js` | Ctrl+N starts the session in that pinned directory (`newSessionIn(selected)`) instead of in the rail's focused workspace. Test: `node ~/.dsh-tui/patches/test-resume-flat.mjs` |
 | `dsh-tui .../i18n.js` | `supervisor-hint-list` drops the `←/→ switch pane` wording (the fork has no second pane to advertise) |
@@ -119,22 +125,25 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.2.0-rc.2`,
 | `dsh-tui .../dsh-adapter/sessions/store.js` | **cache epoch** for that change: `SCHEMA_VERSION` 4 → 5, because a cached `title` means something different now. A version 4 index can hold a placeholder path as a name and would keep serving it forever (the log never changed, so the revision keeps hitting), so version 4 is not in the readable set — the index is dropped whole and every title is re-derived. No manual cache clearing, and an old process writing the index back as version 4 is not trusted either |
 
 > **Reverted experiments (do not re-add):** a **cwd-scoped input history** was
-> reverted once during the 0.10.1 move, back when the resume browser was still
-> meant to list every project. It is **deliberately back** now — see the
-> `history.js` row above, including the legacy fallback that removes the
-> empty-↑/↓ cost — because the wanted resume behaviour turned out to be the
-> current directory. For the resume browser three rejected variants are on
+> reverted once during the 0.10.1 move, then restored as F2, and finally
+> **retired in 0.15.0** because upstream ships it itself (see the headline
+> note above — no `history.js`/`PromptInput.js`/`Chat.js` rows in the table any
+> more). For the resume browser three rejected variants are on
 > record: a thin patch that kept the rail and only removed the grouping,
 > lowering the rail's minimum width from 120 to 90 columns, and making the fork
 > default to `allProjects: true` (every project). The wanted behaviour is the
 > fork **scoped to the current directory**: no rail, one flat list, no way to
 > widen the scope.
 
-Deliberately **stock** (previously customized, removed in the 0.10.0 → 0.10.1 move):
+Deliberately **stock** (previously customized, removed in the 0.10.0 → 0.10.1 move,
+or retired since):
 `SessionListRow.js` (titles truncate again), the **vim wiring** in `Chat.js` /
 `StatusLine.js` and the vim parts of `PromptInput.js` (vim is OFF by default, `/vim`
 enables it, and the `INSERT`/`NORMAL` indicator lives in the input box as upstream
-ships it — `Chat.js` is in the patch set for its Ctrl+R line only),
+ships it),
+the **cwd-scoped input history** (F2 — upstream-owned since 0.15.0, which also
+took `Chat.js` and `PromptInput.js` out of the patch set entirely), the
+`recapOnOpen` schema field (F5 — upstream-owned since 0.11.2),
 and the `ToolFileDiff` `.d.ts` (the optional `oldStart`/`newStart` fields are
 produced and read in plain JS; the declaration only matters to `tsc`, so it is not
 patched — add a `declare module` augmentation in your own project if you ever need it).

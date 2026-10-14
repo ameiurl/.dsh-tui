@@ -117,17 +117,28 @@ ck "str-replace: result diff card present"  "grep -q 'presentResult(args, result
 ck "tool-fs patch carries no upstream rollback" \
    "! grep -qE '^[-+].*(scope-aware|REMEDIES)' '$DIR/diffs/dsh-tool-fs.index.js.patch'"
 
-echo "== §2 F2 cwd-scoped history =="
+echo "== §2 F2 cwd-scoped history (retired: stock upstream since 0.15.0) =="
+# F2 was a patch (history.js + PromptInput.js + Chat.js) until 0.15.0 shipped the
+# whole chain upstream. The assertions below pin THAT upstream contract — the one
+# test-history-cwd.mjs guards — plus the fact that the three files left the patch
+# set. Note the field name: upstream writes `project`, the retired patch `cwd`.
 ck "history.js: loadHistory(cwd) filters"  "grep -q 'export function loadHistory(cwd)' '$LIB/types/history.js'"
 ck "history.js: appendHistory(text, cwd)"  "grep -q 'export function appendHistory(text, cwd)' '$LIB/types/history.js'"
-# 0.11.x added loadHistoryOldestFirst() for the composer's walk; the fork scopes
-# BOTH reads through one helper so Ctrl+R and ↑/↓ can never disagree.
 ck "history.js: loadHistoryOldestFirst(cwd) filters"    "grep -q 'export function loadHistoryOldestFirst(cwd)' '$LIB/types/history.js'"
-ck "history.js: one scoping helper serves both reads"    "grep -q 'function scopeToCwd(entries, cwd)' '$LIB/types/history.js'"
-ck "PromptInput.js: historySeedCwd re-seed" "grep -q 'historySeedCwd' '$LIB/types/components/PromptInput.js'"
+ck "history.js: one project key normalizes a directory" "grep -q 'export function historyProjectKey(cwd)' '$LIB/types/history.js'"
+# Stock is a UNION: an untagged legacy entry is visible to every project, unlike
+# the retired patch, whose pool yielded once a directory had entries of its own.
+ck "history.js: untagged entries join every view (stock union)" \
+   "grep -q 'entry.project === undefined || entry.project === project' '$LIB/types/history.js'"
+ck "PromptInput.js: seeds per directory"    "grep -q 'historySeededProject' '$LIB/types/components/PromptInput.js'"
 ck "PromptInput.js: seeds with channel.cwd" "grep -q 'loadHistoryOldestFirst(channel.cwd)' '$LIB/types/components/PromptInput.js'"
 ck "PromptInput.js: submits tagged with channel.cwd"    "grep -q 'appendHistory(text, channel.cwd)' '$LIB/types/components/PromptInput.js'"
 ck "Chat.js: Ctrl+R reads channel.cwd"      "grep -q 'loadHistory(channel.cwd)' '$LIB/types/screens/Chat.js'"
+# Retired means gone from the set, not merely failing to apply.
+ck "F2: history/PromptInput/Chat are no longer patch targets" \
+   "! node '$DIR/resolve-patch-targets.mjs' 2>/dev/null | grep -qE '/(history|PromptInput|Chat)\\.js\\|'"
+ck "F2: no F2 backup/original/diff left behind" \
+   "[ ! -f '$DIR/original/history.js' ] && [ ! -f '$DIR/original/PromptInput.js' ] && [ ! -f '$DIR/original/Chat.js' ] && [ ! -f '$DIR/diffs/history.js.patch' ] && [ ! -f '$DIR/diffs/PromptInput.js.patch' ] && [ ! -f '$DIR/diffs/Chat.js.patch' ]"
 
 echo "== §2 F3 resume screen (sessionSupervisor) =="
 # 0.11.x deleted screens/SessionBrowser.js: /resume is the sessionSupervisor
@@ -229,7 +240,7 @@ ck "test-recap-setting.mjs passes (F5 stock contract)" \
 echo "== §2/§3 scripts and tests referenced by the docs =="
 ck "resolve-patch-targets.mjs runs"  "node '$DIR/resolve-patch-targets.mjs'"
 ck "test-resume-flat.mjs passes"     "node '$DIR/test-resume-flat.mjs'"
-ck "test-history-cwd.mjs passes"     "node '$DIR/test-history-cwd.mjs'"
+ck "test-history-cwd.mjs passes (F2 stock contract)" "node '$DIR/test-history-cwd.mjs'"
 ck "test-resume-title-chain.mjs passes" "node '$DIR/test-resume-title-chain.mjs'"
 ck "TARGETS count == original/ count" \
    "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/original' | wc -l)\" ]"
