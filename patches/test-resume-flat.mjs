@@ -231,16 +231,16 @@ check(opened.length === 1 && opened[0] === 's3',
 // directory basename — "☆ ∙ .dsh-tui" — which reads like a directory row. Such
 // a record has no events of its own (`updatedAt === createdAt`) and no name
 // (`fallback`); anything a terminal is actually using stays listed.
-const nameless = (id, createdAt, updatedAt) => ({
-  ...session(id, '.dsh-tui', CURRENT, updatedAt),
+const nameless = (id, bytes) => ({
+  ...session(id, '.dsh-tui', CURRENT, 500),
   title: { text: '.dsh-tui', source: 'fallback' },
-  createdAt,
-  updatedAt,
+  bytes,
 });
 const ghostList = [
-  nameless('ghost', 500, 500),      // never used, nothing mounting it → hidden
-  nameless('fresh', 600, 601),      // a session that just started → listed
-  nameless('mounted', 700, 700),    // no events either, but a terminal is in it → listed
+  nameless('ghost', undefined),        // no artifact behind it → hidden
+  nameless('mounted', undefined),      // the session this terminal is IN, log not landed → hidden too
+  nameless('fresh', 320),              // just started, log written → listed
+  { ...nameless('named', undefined), title: { text: 'REAL name', source: 'auto' } },  // named → listed
 ];
 let ghostOutput = '';
 const ghostStdin = new FakeStdin();
@@ -256,7 +256,7 @@ const ghostApp = renderSync(
     onStopSession: async () => true,
     approval: null,
     onApprove: () => {},
-    liveStateOf: id => (id === 'mounted' ? { live: true, current: false, status: 'idle' } : undefined),
+    liveStateOf: id => (id === 'mounted' ? { live: true, current: true, status: 'idle' } : undefined),
   }),
   { stdout: { ...sink(), write: chunk => { ghostOutput += chunk; return true; } }, stdin: ghostStdin, stderr: sink() },
 );
@@ -266,7 +266,7 @@ await new Promise(r => setTimeout(r, 30));
 process.stdout.write = realWriteForGhost;
 const ghostRows = (stripAnsi(ghostOutput).match(/\u2606/g) ?? []).length;
 check(ghostRows === 2,
-  `a never-used, unmounted, nameless record is not listed (rows: ${ghostRows}, want 2 of 3)`);
+  `nameless records without an artifact are not listed, mounted or not (rows: ${ghostRows}, want 2 of 4)`);
 report(failures === 0
   ? '\nPASS: /resume shows this working directory only, flat and rail-free.'
   : `\n${failures} check(s) failed.`);

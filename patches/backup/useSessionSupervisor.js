@@ -137,17 +137,18 @@ export function useSessionSupervisor(input) {
         return sessions.filter(session => session.hasPrompt
             && session.kind.kind !== 'subagent'
             && !ancestors.has(session.id)
-            // F2 fork: a record that never held a conversation is not a session
-            // this pane should offer. The catalog keeps one for every terminal
-            // that ever started — and ghosts whose log never landed at all — and
-            // with nothing to name them they render as the directory basename
-            // ("☆ ∙ .dsh-tui"), which reads like a directory row rather than a
-            // conversation. Such a record has no events of its own
-            // (`updatedAt === createdAt`) and no name (`fallback`); anything a
-            // terminal is actually using stays listed.
-            && (liveStateOf(session.id) !== undefined
-                || session.title?.source !== 'fallback'
-                || session.updatedAt !== session.createdAt));
+            // F2 fork: a record with no artifact behind it is not a session this
+            // pane should offer. Every terminal start registers one, and its log
+            // may never land at all; with nothing to name it, it renders as the
+            // directory basename ("☆ ∙ .dsh-tui") and reads like a directory row
+            // rather than a conversation — including the session the terminal is
+            // IN, which is the one this pane is opened from (you do not need a
+            // row to resume the session you are already in). `bytes` is the
+            // artifact's size and stays undefined while no log exists; a real
+            // title or a real artifact keeps a row listed, so a conversation
+            // whose opening prompt was an address and a session that just
+            // started (log written, no prompt yet) both stay.
+            && (session.title?.source !== 'fallback' || session.bytes !== undefined));
     }, [sessions, channel.agentId, liveStateOf]);
     /**
      * The rail's rows: the durable registry, plus rows for sessions that live in
