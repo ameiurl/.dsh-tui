@@ -49,6 +49,23 @@ const LIVE_STATUS_COLOR = {
  * what makes the boundary visible. The row therefore states its own width —
  * the fill has to reach the pane edge, not the text's last cell.
  */
+/**
+ * The zebra band's fill ({@link SessionListRow}'s `striped` rows).
+ *
+ * NOT a theme key, and that is the whole point: every dark surface in the
+ * palette (`toolCardBackground` #242B3A, `toolCardBackgroundDim` #1C2330,
+ * `ignitionDim` #1B1E28, …) quantises to the SAME 256-colour index — 59,
+ * #5f5f5f, a loud mid grey — because dsh-tui clamps chalk to 256 colours
+ * whenever TMUX is set (ink/colorize.js) and the quantiser sends any channel
+ * ≥ 26 to the cube step 95. Picking a darker theme key therefore changes
+ * nothing at all there, which is how the band came out so bright.
+ *
+ * An explicit `ansi256` index survives EVERY colour level, so the band is the
+ * same tone in tmux, in a truecolor terminal and in VSCode. The ramp to nudge
+ * along is 232 (#080808) … 237 (#3a3a3a): 235 is fainter than this, 237
+ * stronger; a LIGHT palette wants the other end (e.g. `ansi256(253)`).
+ */
+const STRIPE_BACKGROUND = 'ansi256(236)';
 export function SessionListRow({ session, width, depth, focused, declareCursor = false, pinned, now, onClick, onContextMenu, onTogglePin, liveStatus, occupiedPid, spinner, striped = false, }) {
     const indent = depth * 2;
     const nativeCursor = useNativeCursor();
@@ -112,7 +129,7 @@ export function SessionListRow({ session, width, depth, focused, declareCursor =
         // for the pointer colour, and the cursor row keeps its green either way.
         backgroundColor: hovered && !focused
             ? 'userMessageBackgroundHover'
-            : striped ? 'toolCardBackground' : undefined, children: [_jsxs(Box, { ref: cursorRef, children: [_jsx(Text, { color: focused ? 'success' : 'subtle', children: `${' '.repeat(indent)}${focused ? '❯ ' : '  '}` }), _jsx(Box, { ...pinTooltip, onClick: onTogglePin === undefined ? undefined : (event) => {
+            : striped ? STRIPE_BACKGROUND : undefined, children: [_jsxs(Box, { ref: cursorRef, children: [_jsx(Text, { color: focused ? 'success' : 'subtle', children: `${' '.repeat(indent)}${focused ? '❯ ' : '  '}` }), _jsx(Box, { ...pinTooltip, onClick: onTogglePin === undefined ? undefined : (event) => {
                             // The star is a control on the row, not the row: a click here
                             // toggles the pin and must never fall through to resume.
                             event.stopImmediatePropagation();

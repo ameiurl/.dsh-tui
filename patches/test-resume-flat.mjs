@@ -234,6 +234,12 @@ check(!BACKGROUND_RE.test(plainRowRaw),
   'a row without `striped` paints no background (the pane shows through)');
 check(BACKGROUND_RE.test(stripedRowRaw),
   'a `striped` row paints its surface — the band that separates two-line rows');
+// And it is the QUIET fill: an explicit 256 index, because every dark surface in
+// the palette quantises to index 59 (#5f5f5f, a loud mid grey) once dsh-tui
+// clamps colours to 256 for tmux. Pinned here so a later nudge cannot quietly
+// bring the bright band back.
+check(/\u001b\[48;5;236m/.test(stripedRowRaw),
+  'the band is ansi256 236 (#303030), not the palette surface that collapses to #5f5f5f');
 
 // Opening the screen must land on the session the user last used — even when an
 // OLDER session is live and therefore sorts above it. Asserted behaviourally

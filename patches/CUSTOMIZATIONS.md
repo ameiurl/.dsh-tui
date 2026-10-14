@@ -93,10 +93,17 @@
     分支却还在 —— 第一行通常正是最近用过的那个会话，于是"恢复"变成"新建"。整块删掉：
     Enter 只打开光标所在会话；列表为空（没有会话，或过滤后无匹配）时什么都不做，新建始终是 Ctrl+T。
   - **上下分得清**：`SessionListRow` 新增 `striped` prop，为 `true` 时整行（两行高、满面板宽）铺
-    `toolCardBackground` 底色；`SessionSupervisor` 按**绝对行号** `(sessionTop + index) % 2 === 1`
-    传入，所以条纹跟着会话走，滚动不会在静止的视线下重排。层次是 hover 蓝 > 隔行底色 > 面板底：
-    hover 盖掉条纹，光标行始终是绿的（`❯` + 绿色粗体标题 + 非 dim 的元信息行）。想换强度只改
-    这一个主题键（更淡 `toolCardBackgroundDim`，更明显 `messageActionsBackground`/`selectionBg`）。
+    底色；`SessionSupervisor` 按**绝对行号** `(sessionTop + index) % 2 === 1` 传入，所以条纹跟着
+    会话走，滚动不会在静止的视线下重排。层次是 hover 蓝 > 隔行底色 > 面板底：hover 盖掉条纹，
+    光标行始终是绿的（`❯` + 绿色粗体标题 + 非 dim 的元信息行）。
+  - **底色是写死的 `ansi256(236)`，不是主题键 —— 别改回主题键**：dsh-tui 在 `TMUX` 存在时会把
+    chalk 压到 256 色（`ink/colorize.js` 的 `clampChalkLevelForTmux`），而 256 量化把**任何**
+    ≥26 的通道推到 cube 档位 95 —— 于是调色板里所有深色面（`toolCardBackground` #242B3A、
+    `toolCardBackgroundDim` #1C2330、`ignitionDim` #1B1E28、`messageActionsBackground`…）
+    **全部塌成同一个 59 号中灰 #5f5f5f**，看着是一条发亮的白底。第一版就是这样"越选越亮"的。
+    `ansi256` 索引在任何色阶下都原样透传，所以 tmux / truecolor / VSCode 里色调一致；想微调就在
+    `STRIPE_BACKGROUND` 上沿着 232（#080808）…237（#3a3a3a）挪（235 更淡、237 更重），
+    **浅色主题**要用另一端（如 `ansi256(253)`）。测试把 236 钉住了，改色调会同步提醒改断言。
   - **Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下**：与方向键走同一个 `moveSession`，DSH 列表和
     外来后端列表都生效。`p`/`n` 是 emacs 自己的 previous/next，`k`/`j` 是顺手的第二对
     （注意 `Ctrl+K` 的方向与最初那版相反；而 `Ctrl+J` 第一版是向上，现在是向下）。
@@ -130,8 +137,8 @@
   上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
 - **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
   Ctrl+T 落在本目录、隔行有底色而相邻两行分得开、Ctrl+P/K 上移、Ctrl+N/J 下移、Enter 落在第一行
-  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（44 条断言，真渲染该屏 + 单独
-  渲染行组件验证 `current` prop 已被忽略且 `striped` 才铺底色 + 按 Enter 验证默认落在最近会话、
+  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（45 条断言，真渲染该屏 + 单独
+  渲染行组件验证 `current` prop 已被忽略、`striped` 才铺底色且色调是 `ansi256 236` + 按 Enter 验证默认落在最近会话、
   首行可开、四个移动键（Ctrl+J 的 **LF** 与 kitty 拼写各走一遍）真的移动、普通 p/n/k/j 只过滤、
   Ctrl+F 已不绑定、Ctrl+T 才是新建）。
 
@@ -330,7 +337,7 @@ segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+T 用钉死目录、i18n 只动
 `supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删、
 `listKeyStep` 就是 Ctrl+P/K 上、Ctrl+N/J 下（Ctrl+J 还要认 LF 拼写、Ctrl+F 未绑定）、
-`striped` 隔行底色按绝对行号传入、
+`striped` 隔行底色按绝对行号传入且是写死的 `ansi256(236)`（不是主题键）、
 Enter 的 `sessionIndex === 0` 新建分支已删 /
 F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
