@@ -187,6 +187,10 @@ ck "i18n: the badge string is gone too" "! grep -q \"'supervisor-current'\" '$LI
 ck "targets: SessionListRow.js is a patch target" \
    "grep -q 'SessionListRow.js|SessionListRow.js' '$DIR/apply-diff-patches.sh'"
 ck "hook: the cursor space is sessions only" "! grep -q 'cardFocused' '$SUP'"
+# The default cursor is the most recently used session in this directory,
+# derived from the pane's own list (the rail grouping has no key for it).
+ck "hook: opens on the most recent session" \
+   "grep -q 'for (const session of listedSessions)' '$SUP' && ! grep -q 'mostRecentIn' '$SUP'"
 ck "hook: no rail-picked selection state left" \
    "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
 ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' '$SS'"

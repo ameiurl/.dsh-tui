@@ -188,6 +188,42 @@ const rowPlain = stripAnsi(rowOutput);
 check(rowPlain.includes('AAA'), 'the row still renders its session title');
 check(!rowPlain.includes('当前'),
   'and ignores a `current` prop entirely — the badge is gone from the component');
+
+// Opening the screen must land on the session the user last used — even when an
+// OLDER session is live and therefore sorts above it. Asserted behaviourally
+// (which session Enter opens): Ink repaints incrementally, so the `❯` position
+// inside a captured frame is not a reliable read of the cursor.
+const listed = [
+  session('s1', 'AAA oldest', CURRENT, 100),
+  session('s2', 'BBB live but older', CURRENT, 200),
+  session('s3', 'CCC newest', CURRENT, 300),
+];
+const opened = [];
+const focusStdin = new FakeStdin();
+const realWriteForFocus = process.stdout.write.bind(process.stdout);
+process.stdout.write = () => true;
+const focusApp = renderSync(
+  React.createElement(SessionSupervisor, {
+    channel: { ...channel, listSessions: async () => listed },
+    home: HOME,
+    onClose: () => {},
+    onOpenSession: async (id) => { opened.push(id); return true; },   // the screen passes the session id
+    onNewSession: async () => true,
+    onStopSession: async () => true,
+    approval: null,
+    onApprove: () => {},
+    liveStateOf: id => (id === 's2' ? { live: true, current: false, status: 'idle' } : undefined),
+  }),
+  { stdout: { ...sink(), write: () => true }, stdin: focusStdin, stderr: sink() },
+);
+await new Promise(r => setTimeout(r, 300));
+focusStdin.push('\r');
+await new Promise(r => setTimeout(r, 300));
+focusApp.unmount();
+await new Promise(r => setTimeout(r, 30));
+process.stdout.write = realWriteForFocus;
+check(opened.length === 1 && opened[0] === 's3',
+  `Enter on open targets the most recently used session, not the live one (got ${JSON.stringify(opened)})`);
 report(failures === 0
   ? '\nPASS: /resume shows this working directory only, flat and rail-free.'
   : `\n${failures} check(s) failed.`);
