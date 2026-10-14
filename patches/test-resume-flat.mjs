@@ -114,7 +114,7 @@ const app = renderSync(
     onStopSession: async () => true,
     approval: null,
     onApprove: () => {},
-    liveStateOf: () => undefined,
+    liveStateOf: id => (id === 's1' ? { live: true, current: true, status: 'idle' } : undefined),
   }),
   { stdout: capture, stdin, stderr: sink() },
 );
@@ -154,6 +154,10 @@ check(!plain.includes('\u5207\u6362\u680f\u4f4d') && !plain.includes('switch pan
   'the list hint no longer advertises the <-/-> pane switch');
 check(!plain.includes('\u5168\u90e8\u5de5\u4f5c\u76ee\u5f55') && !plain.includes('All working directories'),
   'no "all directories" scope is offered');
+check(!plain.includes('\u65b0\u5efa\u4f1a\u8bdd'),
+  'no new-session row is rendered (Ctrl+N still creates one)');
+check(!plain.includes('\u5f53\u524d'),
+  'and no "current" badge is drawn, even with a live session in this directory');
 check(plain.includes('Ctrl+N') && plain.includes('Ctrl+X'), 'the hint still advertises the keys kept');
 check(plain.includes('Enter'), 'list hint renders');
 check(newSessionCalls.length === 1 && newSessionCalls[0] === CURRENT,

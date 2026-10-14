@@ -414,29 +414,21 @@ export function useSessionSupervisor(input) {
     }, [listedSessions, channel.cwd, query, liveStateOf, pulse]);
     /**
      * Cursor identity: rows reorder on every reload and filter, so the cursor
-     * follows an ID rather than an index — and the cursor space includes the
-     * new-session card as row 0. The card is not decoration: it has to be
-     * selectable like every other card, or the keyboard loses a path to the one
-     * action that still works when the list is empty.
+     * follows an ID rather than an index.
+     *
+     * F3 fork: the new-session row is gone (`Ctrl+N` still creates one), so row
+     * 0 IS the first session and an empty list has no row to stand on.
      */
     const sessionIndex = useMemo(() => {
-        // No focused session means the card (row 0) holds the cursor.
         if (focusSessionId === undefined)
             return 0;
         const byId = visibleSessions.findIndex(session => session.id === focusSessionId);
-        if (byId >= 0)
-            return byId + 1;
-        // The focused session is not on screen (the filter removed it). The cursor
-        // must still stand on a REAL row, because Enter acts on whatever it stands
-        // on: landing on the card would turn "search, then Enter" into "start a new
-        // session" — an action the user never asked for. With an empty match set the
-        // card is the only row there is, so it keeps the cursor.
-        return visibleSessions.length === 0 ? 0 : 1;
+        // A focused session the filter removed must not leave the cursor on a
+        // stale id: Enter acts on whatever the cursor stands on.
+        return byId >= 0 ? byId : 0;
     }, [visibleSessions, focusSessionId]);
-    /** True while the new-session card holds the cursor; the render says why. */
-    const cardFocused = activePane === 'list' && sessionIndex === 0;
-    /** The new-session card is the list's row 0; sessions start at 1. */
-    const sessionAt = useCallback((index) => visibleSessions[index - 1], [visibleSessions]);
+    /** Row 0 is the first session (F3 fork: no new-session card). */
+    const sessionAt = useCallback((index) => visibleSessions[index], [visibleSessions]);
     /** Enter the session column without changing its selected row. */
     const activateList = useCallback(() => {
         setActivePane('list');
@@ -656,18 +648,16 @@ export function useSessionSupervisor(input) {
             selectEntry(entry);
     }, [railEntries, selectEntry]);
     const moveSession = useCallback((by) => {
-        // +1: the cursor space includes the new-session card as row 0, and with an
-        // EMPTY list the card is still a row the user can stand on. Clamping the
-        // index at 0 instead would have made ↓/↑ do nothing at all there.
-        const total = visibleSessions.length + 1;
+        const total = visibleSessions.length;
+        if (total === 0) {
+            setFocusSessionId(undefined);
+            return;
+        }
         const next = Math.min(total - 1, Math.max(0, sessionIndex + by));
-        // Landing on the card CLEARS the id: leaving the last session's id in place
-        // made the derived index resolve back to that session's row, which is what
-        // put `❯` on the first session while the user had selected the card.
         const landed = sessionAt(next);
         setFocusSessionId(landed?.id);
     }, [visibleSessions, sessionAt, sessionIndex, setFocusSessionId]);
-    /** The session under the cursor, or undefined while the card (row 0) holds it. */
+    /** The session under the cursor, or undefined while the list is empty. */
     const focusedSession = sessionAt(sessionIndex);
     return {
         dshBackend,
@@ -709,7 +699,6 @@ export function useSessionSupervisor(input) {
         selected,
         visibleSessions,
         sessionIndex,
-        cardFocused,
         sessionAt,
         activateList,
         activateRail,

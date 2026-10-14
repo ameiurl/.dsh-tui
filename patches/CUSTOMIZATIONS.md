@@ -2,11 +2,12 @@
 
 本文件是**唯一权威**的定制清单与升级手册。升级后照 [第 3 节](#3-升级后重打流程) 走一遍即可。
 
-- **补丁集 = 8 个目标文件**：F1（3）+ F3（3）+ F4（2），`node resolve-patch-targets.mjs` 可列出。
+- **补丁集 = 8 个目标文件**：F1（3）+ F2（3）+ F3（2），`node resolve-patch-targets.mjs` 可列出。
 - 快速体检：`bash ~/.dsh-tui/patches/apply-diff-patches.sh check`（逐目标 `OK` / `DIFFERS` /
   `MISSING` / `NEEDS-REPORT` / `PATCHED-*`）。
-- 已退役（别再往 `TARGETS` 里加）：**F2**（按目录的历史，0.15.0 上游自带）、
-  **F5**（`recapOnOpen`，0.11.2 上游自带）——两者的上游契约由
+- 已退役（别再往 `TARGETS` 里加）：**按目录的输入历史**（0.15.0 上游自带：
+  `historyProjectKey`/`appendHistory(text, cwd)`/`loadHistory(cwd)`/`loadHistoryOldestFirst(cwd)`，
+  磁盘字段 `project`）、**`recapOnOpen`**（0.11.2 上游自带）——上游契约由
   `test-history-cwd.mjs` / `test-recap-setting.mjs` 守着。
 
 ---
@@ -72,15 +73,7 @@
 - **验证**：触发一次 Edit/Write 看行号 + 底色；NEW 文件只出前 10 行、Ctrl+O 能展开；
   命令行：`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`（31 条断言，含无头 ink 真渲染）。
 
-### F2 — ↑/↓ 历史按当前工作目录过滤：**已退役（0.15.0 起 stock）**
-上游自带 `historyProjectKey`/`appendHistory(text, cwd)`/`loadHistory(cwd)`/
-`loadHistoryOldestFirst(cwd)`、按项目各自的 200 条上限、`PromptInput` 按目录重播种
-（`historySeededProject`）、`Chat.js` 读 `loadHistory(channel.cwd)`；磁盘字段是 **`project`**。
-- 两处与旧补丁的差异（已接受）：命令菜单边界 ↑/↓ 是 stock 的**环绕**（旧补丁是"落历史"）；
-  无标记老条目对**每个目录**都可见（stock 并集，旧补丁会在本目录有条目后让位）。
-- 守卫：`node ~/.dsh-tui/patches/test-history-cwd.mjs`（22 条上游契约断言）。
-
-### F3 — resume：只列**当前工作目录**的历史会话（无左侧工作区 rail）
+### F2 — resume：只列本终端工作目录的历史会话（无 rail）
 - **涉及文件（3 个）**：
   - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（主补丁）
   - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（Ctrl+N 用钉死目录）
@@ -88,18 +81,19 @@
 - **行为**（三条底线）：
   - **无 rail**：`railVisible = false`，两侧 rail JSX 不渲染，面板占满宽度；键盘一开始就归列表，
     `activateRail()` 置空（`←` 不抢键盘）。
-  - **范围=当前目录**：`selected` 由 `channel.cwd` 合成（cwd 已注册则取 registry 的拼写），
+  - **范围=本终端的工作目录**：`selected` 由 `channel.cwd` 合成（cwd 已注册则取 registry 的拼写），
     `visibleSessions` 对 `listedSessions` 用 `samePath(session.cwd, channel.cwd)` 过滤
     —— 比 stock 的"rail 分组 key 精确相等"更稳（尾斜杠/大小写不同仍算同目录）。
-  - **扁平静态列表**：保留搜索 `/`、实时状态与占用、重命名、删除、pin、Ctrl+N、Ctrl+X、Esc。
+  - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+N 仍可新建）、**没有**「当前」徽标；
+    搜索 `/`、实时状态与占用、重命名、删除、pin、Ctrl+X、Esc 都保留。
   - 代价（已接受）：**没有切换工作区的入口**；要看别的目录的会话，就在那个目录启动 dsh-tui。
 - **重移植注意**：stock 的 rail 选择状态（`selectedPath`/`selectedUnregisteredId`/
   `selectionManual`）与「按 cwd 自动选 rail 行」的 effect 在新结构里没有位置，**整块删掉**；
   上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
-- **验证**：`/resume` 只列当前目录、无 rail、`←` 不改光标、Ctrl+N 落在当前目录；
-  命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（11 条断言，真渲染该屏）。
+- **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
+  Ctrl+N 落在本目录；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（13 条断言，真渲染该屏）。
 
-### F4 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
+### F3 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
 - **涉及文件（2 个）**：`…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`、
   `…/dsh-tui/lib/types/dsh-adapter/sessions/store.js`（只有 `SCHEMA_VERSION` 4 → 5）。
 - **取名链**（对应 Claude 的 `customTitle || aiTitle || lastPrompt || firstPrompt`）：
@@ -218,7 +212,7 @@ grep -nE '^(<<<<<<<|=======|>>>>>>>)' merged.js # 有冲突就按 §2 的「行�
 - **自检**：`cmp -s ours.js base.js` 相等说明上游对这份文件字节没变，`merged.js` 应与
   `backup/<name>` 完全一致。
 - **有冲突** → 按 §2 对应功能的「行为/底线」取舍：上游新代码尽量保留，与定制意图冲突的
-  整块删（例：F3 删 rail 选择状态与自动选中 effect，F1 的旧自绘编号整块换成 patch 文本）。
+  整块删（例：F2 删 rail 选择状态与自动选中 effect，F1 的旧自绘编号整块换成 patch 文本）。
 - 只想去掉某项定制，就只抽该功能的 hunk 重打。
 
 ### Step 5 — 落库 + 应用
@@ -261,7 +255,7 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 
 | 补丁 | 进程 | 生效方式 |
 | --- | --- | --- |
-| 渲染器（F1 的 `AssistantToolUseMessage.js`）、i18n、F3/F4 的 TUI 文件 | TUI 客户端（`bin/dsh-tui.js`） | **重开 TUI** |
+| 渲染器（F1 的 `AssistantToolUseMessage.js`）、i18n、F2/F3 的 TUI 文件 | TUI 客户端（`bin/dsh-tui.js`） | **重开 TUI** |
 | tool 两包（F1 的 diff 形状） | 每会话一个的 host（`lib/types/dsh-adapter/host-entry.js`） | **新开会话**（host 跨 TUI 重启存活） |
 
 判断当前会话用的是哪份代码：`ps -eo pid,lstart,cmd | grep host-entry`，host 启动时间要晚于
@@ -272,9 +266,9 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 逐项验证：
 - **F1**：Edit/Write 有行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行、Ctrl+O 展开；
   hover 不变底色。`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`
-- **F3**：`/resume` 只列当前目录、无 rail、`←` 不改光标、Ctrl+N 落在当前目录。
+- **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、Ctrl+N 落在本目录。
   `node ~/.dsh-tui/patches/test-resume-flat.mjs`
-- **F4**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
+- **F3**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
   `node ~/.dsh-tui/patches/test-resume-title-chain.mjs`
 - 仍是 stock：会话标题按宽度截断；vim 默认关、指示在输入框内。
 
@@ -287,10 +281,11 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 `patch-base-version` 一致）/ §1.2 用户级设置 / F1 的渲染器锚点（不折叠、整行底色、词级
 segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 已删、测试缝）与 tool 侧
 （`hunksPatch`、`newFileDiff`、校验器收 `patch`、`oldStart` 字段已删、`presentResult`）与
-行为测试 / F2 的 stock 契约（`historyProjectKey`、`appendHistory(cwd)`、
-`loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F3 的 `railVisible = false`、
+行为测试 / 已退役的历史（`historyProjectKey`、`appendHistory(cwd)`、
+`loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F2 的 `railVisible = false`、
+无新建会话行、无「当前」徽标、
 `samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+N 用钉死目录、i18n 只动
-`supervisor-hint-list` / F4 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
+`supervisor-hint-list` / F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
 占位标题判 `strong: false`（四处扫描）、`titleComplete` 不跟占位走、`store.js` 的
 `SCHEMA_VERSION = 5` 且版本 4 不可读 / 仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 F5 的

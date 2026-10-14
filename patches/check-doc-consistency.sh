@@ -141,7 +141,7 @@ ck "tool-fs patch carries no upstream rollback" \
    "! grep -qE '^[-+].*(scope-aware|REMEDIES)' '$DIR/diffs/dsh-tool-fs.index.js.patch'"
 ck "F1 behaviour test passes"               "node '$DIR/test-f1-diff-rows.mjs'"
 
-echo "== §2 F2 cwd-scoped history (retired: stock upstream since 0.15.0) =="
+echo "== §2 retired: cwd-scoped history is stock upstream (0.15.0) =="
 # F2 was a patch (history.js + PromptInput.js + Chat.js) until 0.15.0 shipped the
 # whole chain upstream. The assertions below pin THAT upstream contract — the one
 # test-history-cwd.mjs guards — plus the fact that the three files left the patch
@@ -164,7 +164,7 @@ ck "F2: history/PromptInput/Chat are no longer patch targets" \
 ck "F2: no F2 backup/original/diff left behind" \
    "[ ! -f '$DIR/original/history.js' ] && [ ! -f '$DIR/original/PromptInput.js' ] && [ ! -f '$DIR/original/Chat.js' ] && [ ! -f '$DIR/diffs/history.js.patch' ] && [ ! -f '$DIR/diffs/PromptInput.js.patch' ] && [ ! -f '$DIR/diffs/Chat.js.patch' ]"
 
-echo "== §2 F3 resume screen (sessionSupervisor) =="
+echo "== §2 F2 resume screen (sessionSupervisor) =="
 # 0.11.x deleted screens/SessionBrowser.js: /resume is the sessionSupervisor
 # screen (workspace rail + session pane). The fork hides the rail and pins the
 # pane to the terminal's own directory, so the anchors moved with it.
@@ -176,6 +176,11 @@ ck "patch set follows it to sessionSupervisor" \
 ck "hook: rail is never rendered"          "grep -q 'const railVisible = false' '$SUP'"
 ck "hook: rows matched by directory"    "grep -q 'filter(session => samePath(session.cwd, channel.cwd))' '$SUP'"
 ck "hook: the list owns the keyboard"      "grep -q \"useState('list')\" '$SUP'"
+# The F3 fork also drops the new-session row and the "当前" badge: the list is
+# sessions only, and Ctrl+N (advertised in the hint) is the way to create one.
+ck "screen: no new-session row"             "! grep -q \"t('supervisor-new-session')\" '$SS'"
+ck "screen: no current badge"               "! grep -q 'current: state?.current' '$SS'"
+ck "hook: the cursor space is sessions only" "! grep -q 'cardFocused' '$SUP'"
 ck "hook: no rail-picked selection state left" \
    "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
 ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' '$SS'"
@@ -185,7 +190,7 @@ ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$
 ck "i18n diff touches only supervisor-hint-list" \
    "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-hint-list\""
 
-echo "== §2 F4 title chain (Claude Code's order) =="
+echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"
 ck "digest.js: lastPromptOf present"         "grep -q 'function lastPromptOf' '$G'"
 ck "digest.js: normalizeLastPrompt present"  "grep -q 'function normalizeLastPrompt' '$G'"

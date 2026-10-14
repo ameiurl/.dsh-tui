@@ -1,6 +1,26 @@
 --- original/SessionSupervisor.js	2026-10-14 14:29:06.980039825 +0800
-+++ backup/SessionSupervisor.js	2026-10-14 14:25:19.470411312 +0800
-@@ -319,9 +319,9 @@
++++ backup/SessionSupervisor.js	2026-10-14 14:45:05.310595881 +0800
+@@ -54,7 +54,7 @@
+     const { columns, rows } = useTerminalSize();
+     const inset = React.useContext(PageInsetContext);
+     const isTerminalFocused = useTerminalFocus();
+-    const { dshBackend, archiveSessions, sessionRename, setSessionRename, confirmDelete, setConfirmDelete, renameSession, deleteSession, entries, sessions, loading, refreshing, notice, setNotice, query, setQuery, holderOf, listedSessions, railEntries, countOf, railFocus, setRailFocus, setFocusSessionId, activePane, pins, menu, setMenu, rename, setRename, confirmRemove, setConfirmRemove, railRef, menuRef, queryRef, now, reload, selected, visibleSessions, sessionIndex, cardFocused, sessionAt, activateList, activateRail, railWidth, railVisible, sessionWidth, railEntryCapacity, sessionListHeight, noticeRows, persistPin, selectEntry, openSession, newSessionIn, renameEntry, removeEntry, stopSession, closeMenu, activateMenu, moveRail, moveSession, focusedSession, } = useSessionSupervisor({ channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows });
++    const { dshBackend, archiveSessions, sessionRename, setSessionRename, confirmDelete, setConfirmDelete, renameSession, deleteSession, entries, sessions, loading, refreshing, notice, setNotice, query, setQuery, holderOf, listedSessions, railEntries, countOf, railFocus, setRailFocus, setFocusSessionId, activePane, pins, menu, setMenu, rename, setRename, confirmRemove, setConfirmRemove, railRef, menuRef, queryRef, now, reload, selected, visibleSessions, sessionIndex, sessionAt, activateList, activateRail, railWidth, railVisible, sessionWidth, railEntryCapacity, sessionListHeight, noticeRows, persistPin, selectEntry, openSession, newSessionIn, renameEntry, removeEntry, stopSession, closeMenu, activateMenu, moveRail, moveSession, focusedSession, } = useSessionSupervisor({ channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows });
+     const menuEntry = menu === undefined ? undefined : railEntries.find(entry => samePath(entry.path, menu.path));
+     const menuActions = menuEntry === undefined ? [] : menuActionsFor(menuEntry);
+     /**
+@@ -73,10 +73,6 @@
+         && rename === undefined && confirmRemove === undefined && sessionRename === undefined && confirmDelete === undefined;
+     const searchCursor = filterFocused || (!railVisible && activePane === 'rail');
+     const nativeCursor = useNativeCursor();
+-    const newSessionCursorRef = useDeclaredCursor({
+-        line: 0, column: 0, active: tab === DSH_TAB && cursorActive && !searchCursor && cardFocused,
+-        visible: nativeCursor, hideOnIdle: true,
+-    });
+     const focusRail = () => {
+         setFilterFocused(false);
+         activateRail();
+@@ -319,9 +315,9 @@
              return;
          }
          if (isMod(key) && input === 'n') {
@@ -13,3 +33,45 @@
              return;
          }
          if (isMod(key) && input === 'l') {
+@@ -477,15 +473,13 @@
+     // Scroll window over the session rows, keeping the focused row visible
+     // without re-shuffling the list under a stationary cursor.
+     //
+-    // The new-session card is a permanent row above this window, so the window is
+-    // one card shorter and the cursor is expressed in the FULL list's space (card =
+-    // 0): without that offset the window kept its old height and the cursor could
+-    // land on a row that never made it on screen — a `❯` on an invisible row.
++    // F3 fork: the new-session row is gone, so the window holds the whole pane
++    // and the cursor indexes the sessions directly.
+     const capacity = Math.max(1, Math.floor(sessionListHeight / SESSION_ROW_LINES));
+-    const sessionCapacity = Math.max(1, capacity - 1);
+-    let sessionTop = Math.min(Math.max(0, sessionIndex - 1 - sessionCapacity + 1), Math.max(0, visibleSessions.length - sessionCapacity));
+-    if (sessionIndex - 1 < sessionTop)
+-        sessionTop = Math.max(0, sessionIndex - 1);
++    const sessionCapacity = Math.max(1, capacity);
++    let sessionTop = Math.min(Math.max(0, sessionIndex - sessionCapacity + 1), Math.max(0, visibleSessions.length - sessionCapacity));
++    if (sessionIndex < sessionTop)
++        sessionTop = Math.max(0, sessionIndex);
+     const visibleSessionRows = visibleSessions.slice(sessionTop, sessionTop + sessionCapacity);
+     const liveCount = listedSessions.filter(session => liveStateOf(session.id)?.live === true).length;
+     return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, onClick: menu !== undefined ? closeMenu : tabMenu !== undefined ? closeTabMenu : undefined, children: [_jsxs(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: [_jsxs(Box, { flexGrow: 1, flexShrink: 1, overflow: "hidden", children: [_jsx(Text, { color: "remember", bold: true, children: titleText }), showSubtitle && _jsx(Text, { dimColor: true, children: subtitleText })] }), tabs.length > 0 && (_jsx(Box, { flexShrink: 0, marginRight: 1, children: _jsx(SourceTabs, { layout: tabLayout, active: tab, leadId: DSH_TAB, onSelect: switchTab, onOverflow: (event) => {
+@@ -523,17 +517,13 @@
+                                     if (activePane !== 'list')
+                                         activateList();
+                                     setFilterFocused(true);
+-                                }, children: _jsx(SearchBox, { query: query, isFocused: activePane === 'list' || searchCursor, declareCursor: cursorActive && searchCursor, isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(t('supervisor-filter-placeholder'), Math.max(8, sessionWidth - 6)), prefix: "/", borderless: true, width: Math.max(8, sessionWidth - 2) }) }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, onMouseEnter: () => setFilterFocused(false), onClick: (event) => {
+-                                    event.stopImmediatePropagation();
+-                                    if (selected !== undefined)
+-                                        newSessionIn(selected);
+-                                }, children: [_jsxs(Box, { ref: newSessionCursorRef, height: 1, flexShrink: 0, overflow: "hidden", children: [_jsx(Text, { color: cardFocused ? 'success' : 'subtle', children: cardFocused ? '❯ ' : '  ' }), _jsx(Text, { color: cardFocused ? 'success' : undefined, bold: cardFocused, children: t('supervisor-new-session') })] }), _jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: _jsx(Text, { dimColor: true, children: `  ${truncateWidth(t('supervisor-new-session-hint', { name: selected?.title ?? t('supervisor-title') }), Math.max(8, sessionWidth - 3))}` }) })] }), _jsxs("ink-box", { style: { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, onMouseEnter: () => setFilterFocused(false), onWheel: (event) => {
++                                }, children: _jsx(SearchBox, { query: query, isFocused: activePane === 'list' || searchCursor, declareCursor: cursorActive && searchCursor, isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(t('supervisor-filter-placeholder'), Math.max(8, sessionWidth - 6)), prefix: "/", borderless: true, width: Math.max(8, sessionWidth - 2) }) }), _jsxs("ink-box", { style: { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, onMouseEnter: () => setFilterFocused(false), onWheel: (event) => {
+                                     setFilterFocused(false);
+                                     moveSession(event.deltaY >= 0 ? 1 : -1);
+                                 }, children: [loading && _jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(t('home-sessions-loading'), sessionWidth - 2)}` }), !loading && visibleSessions.length === 0 && (_jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(filtered ? t('supervisor-no-matches') : t('home-no-sessions'), sessionWidth - 2)}` })), visibleSessionRows.map((session, index) => {
+                                         const state = liveStateOf(session.id);
+                                         const holder = holderOf(session.id);
+-                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index + 1 === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, current: state?.current === true, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
++                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
+                                                 event.stopImmediatePropagation();
+                                                 setFocusSessionId(session.id);
+                                                 openSession(session);
