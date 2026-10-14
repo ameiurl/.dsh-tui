@@ -217,18 +217,29 @@ export function useSessionSupervisor(input) {
             from: 'cwd',
         };
     }, [railEntries, groupedEntries, channel.cwd]);
-    // Recency chooses the default even when an older live row sorts above it.
-    const mostRecentIn = useCallback((path) => {
+    /**
+     * The session the cursor opens on: the most recently used one in THIS
+     * directory, which is row 0 of the pane's own order only while no live
+     * session sorts above it.
+     *
+     * F2 fork: derived from the same list the pane shows (`listedSessions` by
+     * `samePath`) instead of the rail's grouping key. The rail key exists only
+     * for directories the workspace ledger knows, and with the pane pinned to a
+     * directory that may never have been registered, the lookup came back empty
+     * — the cursor then fell to whatever row sorted first (an older session that
+     * merely happened to be live), not to the session the user had just used.
+     */
+    const recentSessionId = useMemo(() => {
         const needle = query.trim().toLowerCase();
         let recent;
-        for (const session of groupedEntries.get(path) ?? []) {
-            if (sessionMatchesQuery(session, needle)
-                && (recent === undefined || session.updatedAt > recent.updatedAt))
+        for (const session of listedSessions) {
+            if (!samePath(session.cwd, channel.cwd) || !sessionMatchesQuery(session, needle))
+                continue;
+            if (recent === undefined || session.updatedAt > recent.updatedAt)
                 recent = session;
         }
         return recent?.id;
-    }, [groupedEntries, query]);
-    const recentSessionId = useMemo(() => selected === undefined ? undefined : mostRecentIn(selected.path), [selected?.path, mostRecentIn]);
+    }, [listedSessions, channel.cwd, query]);
     /**
      * The session column's cursor, as ONE fact.
      *
