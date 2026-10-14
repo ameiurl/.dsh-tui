@@ -15,21 +15,9 @@
  *
  * Titles carry their own provenance, so this module does not have to guess.
  * A title written by a provider records `source.kind: 'provider'`; the TUI's
- * own rename paths append `{ title }` (or `source.kind: 'user'`), and require
- * a person's decision. That difference is the evidence behind
- * {@link SessionTitle.source}, which is why the picker can dim a fallback and
- * explain a name instead of merely displaying one. A third kind,
- * `source.kind: 'fallback'`, is dsh's deterministic placeholder — the opening
- * prompt truncated — and names nothing; see {@link titleOf}.
- *
- * When no name was ever written, the levels below a title follow Claude
- * Code's own display chain for a session name: the most recent human prompt
- * (`lastPrompt`) before the opening one, each normalized to a single line.
- * dsh-tui's model-written titles arrive as `session/title` events, so the
- * levels derived here are the two prompt levels only — plus the placeholder
- * above, which is exactly the kind of thing those levels exist to replace. A
- * candidate that is nothing but a filesystem address is stepped over at both
- * levels (see isFileAddress): a path names a file, not a conversation.
+ * own rename paths append `{ title }` with no source at all. That difference
+ * is the evidence behind {@link SessionTitle.source}, which is why the picker
+ * can dim a fallback and explain a name instead of merely displaying one.
  *
  * @module @deepseek-harness-tui/dsh-tui/sessions/digest
  */
@@ -52,8 +40,7 @@ const TITLE_SCAN_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const TITLE_ANCHOR_BYTES = 256;
 /** Longest preview excerpt kept per message, in characters. */
 const PREVIEW_CHARS = 400;
-/** Longest recent-prompt title kept, in characters — the width Claude Code's
- *  own `lastPrompt` fallback normalizes to before its ellipsis. */
+/** Longest prompt-derived title, matching Claude Code's own `lastPrompt` cap. */
 const LAST_PROMPT_TITLE_CHARS = 200;
 /** The first text block of a message `content` payload. */
 function textOfContent(content) {
@@ -118,14 +105,7 @@ function humanPrompt(line) {
     }
     return undefined;
 }
-/**
- * Whether a title candidate is nothing but a filesystem address.
- *
- * A picker title answers "is this the conversation I mean". A path that was
- * pasted, dropped, or `@`-mentioned as the opening message answers nothing:
- * the same file shows up in every session that ever touched it, so the address
- * uses the row without naming anything. So an address is not a title
- * candidate — the scans below step over it and keep looking.
+/** Whether a prompt is nothing but a filesystem address — never a name.
  *
  * Only a candidate that is an address END TO END is refused. A real sentence
  * that merely mentions a path (`@src/views/Setting.vue 互转方向更改`) is the
@@ -155,33 +135,29 @@ function isFileAddress(text) {
         return false;
     return /[\\/][^\\/]*\.\w{1,8}$/.test(value) || (value.match(/[\\/]/g) ?? []).length >= 2;
 }
-/**
- * A prompt rendered on one line the way Claude Code normalizes its own
- * `lastPrompt` fallback: newlines folded to spaces, trimmed, and clipped to
- * {@link LAST_PROMPT_TITLE_CHARS} with an ellipsis. A multi-line prompt would
- * otherwise wrap the picker row it is standing in for.
+/** A prompt rendered on one line the way Claude Code normalizes its own
+ *  `lastPrompt` fallback: newlines folded to spaces, trimmed, and clipped to
+ *  {@link LAST_PROMPT_TITLE_CHARS} with an ellipsis. A multi-line prompt would
+ *  otherwise wrap the picker row it is standing in for.
  *
- * Named for the level it was introduced for, but both prompt levels go
- * through it: the opening prompt is a title candidate too, and it reaches the
- * picker with exactly the same width budget.
- */
+ *  Named for the level it was introduced for, but both prompt levels go
+ *  through it: the opening prompt is a title candidate too, and it reaches the
+ *  picker with exactly the same width budget. */
 function normalizeLastPrompt(text) {
     const folded = text.replaceAll('\n', ' ').trim();
     return folded.length > LAST_PROMPT_TITLE_CHARS
         ? `${folded.slice(0, LAST_PROMPT_TITLE_CHARS).trim()}…`
         : folded;
 }
-/**
- * The most recent human prompt in a window that could name the session, or
- * undefined. Addresses are stepped over (see isFileAddress), so "most recent"
- * means the most recent one worth showing.
+/** The most recent human prompt in a window that could name the session, or
+ *  undefined. Addresses are stepped over (see {@link isFileAddress}), so "most
+ *  recent" means the most recent one worth showing.
  *
- * This is Claude Code's `lastPrompt` level: the words a person typed last
- * describe the session at least as well as the ones it opened with, which is
- * why its chain asks for the recent prompt before the first one. Scanned
- * backwards so the newest eligible prompt wins at the cost of one line in the
- * common case.
- */
+ *  This is Claude Code's `lastPrompt` level: the words a person typed last
+ *  describe the session at least as well as the ones it opened with, which is
+ *  why its chain asks for the recent prompt before the first one. Scanned
+ *  backwards so the newest eligible prompt wins at the cost of one line in the
+ *  common case. */
 function lastPromptOf(lines) {
     for (let at = lines.length - 1; at >= 0; at -= 1) {
         const found = humanPrompt(lines[at]);
@@ -190,24 +166,21 @@ function lastPromptOf(lines) {
     }
     return undefined;
 }
-/**
- * A `session/title` payload, with the provenance that classifies it.
+/** A `session/title` payload, with the provenance that classifies it.
  *
  * Three provenances write this event, and only two of them NAME anything:
  *
  * - `provider` — a model wrote the title. The strongest name there is.
  * - `user`, or no source at all (the older rename shape) — a person decided
  *   this name, so it outranks anything derived from a prompt.
- * - `fallback` — dsh's deterministic placeholder: it is the FIRST human
- *   prompt, truncated to a word/byte cap and appended so a session is never
- *   nameless (`dsh-session-title`'s `fallbackSessionTitle`). That is a prompt
- *   wearing a title's clothes, so it is not a title candidate here
- *   (`strong: false`). Taking it would resurrect exactly the text the prompt
- *   levels below already normalize, clip and address-filter — and it would
- *   outrank the provider title written later — which is how a `/resume` row
+ * - `fallback` — dsh's deterministic placeholder: it is the FIRST human prompt,
+ *   truncated to a word/byte cap and appended so a session is never nameless.
+ *   That is a prompt wearing a title's clothes, so it is not a title candidate
+ *   here (`strong: false`). Taking it would resurrect exactly the text the
+ *   prompt levels below already normalize, clip and address-filter — and it
+ *   would outrank a provider title written later, which is how a `/resume` row
  *   came to show a truncated file path (`@modules/client/…/A`) instead of a
- *   name, with every session that opened on the same file looking identical.
- */
+ *   name, with every session that opened on the same file looking identical. */
 function titleOf(line) {
     if (line['type'] !== 'session/title')
         return undefined;
@@ -226,22 +199,25 @@ function titleOf(line) {
         strong: kind !== 'fallback',
     };
 }
-/**
- * A title candidate in the shape callers may store: text and provenance only.
- * `strong` is this module's own classification (see {@link titleOf}) and never
- * leaves it — a cache entry must not carry a field no reader knows about.
- */
+/** A title candidate in the shape callers may store: text and provenance only.
+ *  `strong` is this module's own classification (see {@link titleOf}) and never
+ *  leaves it — a cache entry must not carry a field no reader knows about. */
 function asTitle(title) {
     return { text: title.text, source: title.source };
 }
-/** The route recorded by a `request/context` event. */
+/** Request headers own the route; context events support historical logs. */
 function modelOf(line) {
-    if (line['type'] !== 'request/context')
-        return undefined;
     const data = line['data'];
     if (data === null || typeof data !== 'object')
         return undefined;
-    const model = data['model'];
+    const record = data;
+    let model;
+    if (line['type'] === 'request/header') {
+        const header = record['header'];
+        model = header?.config?.model;
+    }
+    else if (line['type'] === 'request/context')
+        model = record['model'];
     return typeof model === 'string' && model.length > 0 ? model : undefined;
 }
 /** The label a delegated run was started under. */
@@ -261,18 +237,6 @@ function timeOf(line) {
 }
 /**
  * Read both windows of one session log.
- *
- * A session that never got a NAME is named the way Claude Code names one: its
- * most recent human prompt first, its opening prompt second, and the working
- * directory's basename as the last resort. Both prompt levels normalize what
- * they take (one line, clipped) and step over a candidate that is nothing but
- * a filesystem address — while still counting it as the conversation it is.
- *
- * "Never got a name" means a `provider`/`user` title event, not dsh's
- * deterministic `fallback` placeholder: that one is the opening prompt
- * truncated (see {@link titleOf}), so it is stepped over here and the prompt
- * levels speak instead — with the full text, the address filter and the
- * recent-prompt-first order that the placeholder could only approximate.
  *
  * @param path - Absolute artifact path.
  * @param cwd - Working directory, for the last-resort title.
@@ -302,9 +266,9 @@ export function digestSession(path, cwd) {
     for (const line of headLines) {
         const human = humanPrompt(line);
         // Any human message at all — prose, a pasted path, or an image with no
-        // text — is evidence that this log holds a conversation. Only
-        // `opening` has to be able to NAME it, and an address cannot
-        // (isFileAddress): it is input, just not a title.
+        // text — is evidence that this log holds a conversation. Only `opening`
+        // has to be able to NAME it, and an address cannot (isFileAddress): it
+        // is input, just not a title.
         hasHumanMessage ||= human !== undefined;
         if (opening === undefined && human?.text !== undefined && !isFileAddress(human.text))
             opening = normalizeLastPrompt(human.text);
@@ -331,11 +295,11 @@ export function digestSession(path, cwd) {
             model = route;
     }
     const titled = tailTitle ?? headTitle;
-    // Claude Code's chain asks for the recent prompt BEFORE the opening one,
-    // and only once no name was written at all — so the backwards scan is
-    // never paid for by a session that already has one. Both prompt levels
-    // refuse addresses; when neither has anything to offer, the directory name
-    // is still a name, while a path never was one.
+    // Claude Code's chain asks for the recent prompt BEFORE the opening one, and
+    // only once no name was written at all — so the backwards scan is never paid
+    // for by a session that already has one. Both prompt levels refuse
+    // addresses; when neither has anything to offer, the directory name is still
+    // a name, while a path never was one.
     const recent = titled === undefined ? lastPromptOf(tailLines) : undefined;
     const named = recent ?? opening;
     return {
@@ -344,11 +308,12 @@ export function digestSession(path, cwd) {
             : asTitle(titled),
         hasPrompt,
         model,
+        modelComplete: model !== undefined || completeHead,
         label,
-        // A completely decoded head saw every event there is. Otherwise the
-        // tail must have produced the winning NAME: a tail that holds only a
-        // placeholder (or none at all) leaves an unseen middle event free to
-        // supersede the prompt-derived name, which is what the deep scan is for.
+        // A completely decoded head saw every event there is. Otherwise the tail
+        // must have produced the winning NAME: a tail holding only a placeholder
+        // (or none at all) leaves an unseen middle event free to supersede the
+        // prompt-derived name, which is what the deep scan is for.
         ...(completeHead || tailTitle !== undefined ? { titleComplete: true } : {}),
     };
 }
@@ -408,74 +373,88 @@ async function reversePage(handle, end, signal) {
     }
     return undefined;
 }
-/**
- * Scan newest-to-oldest for the name to display.
+/** One newest-to-oldest pass; each wanted fact is last-write-wins and
+ *  conclusive once found.
  *
- * Two answers come back from one pass, because the pass is the expensive part:
- *
- * - the LAST title anyone actually wrote (a `provider`/`user` event,
- *   last-write-wins), which outranks every prompt;
- * - when nobody wrote one, the MOST RECENT human prompt worth showing — the
- *   same level the bounded head/tail read applies, derived here so a deep scan
- *   and the cheap path name a session identically. Addresses are stepped over
- *   (see isFileAddress) and the text is normalized like Claude's `lastPrompt`.
- *
- * dsh's deterministic `fallback` placeholder is skipped on the way (see
- * {@link titleOf}): it is the opening prompt truncated, so letting it win
- * would undo both the filter and the recent-prompt-first order.
- *
- * `hasPrompt` is reported only by a scan that reached the beginning of the
- * log. One cut short by a torn frame knows nothing about the rest, and no
- * caller may overwrite a known conversation with that unknown.
- */
-async function recoverLatestName(path, bytes, signal) {
+ *  The same pass also records the most recent human prompt worth showing, for
+ *  the caller that finds no title at all: the deep scan and the cheap
+ *  head/tail read must name a session identically, so the backwards walk that
+ *  is already running collects it. Addresses are stepped over
+ *  ({@link isFileAddress}) and the text is normalized like Claude's
+ *  `lastPrompt`. dsh's deterministic `fallback` placeholder is not a title
+ *  ({@link titleOf}), so it never ends the walk. */
+async function recoverLatestMetadata(path, bytes, want, signal) {
     signal?.throwIfAborted();
+    let title;
+    let model;
+    let recent;
+    let hasPrompt;
+    let titleDone = !want.title;
+    let modelDone = !want.model;
+    // A walk that stopped early reports neither `recent` nor `hasPrompt`: they
+    // are facts about the WHOLE log, and a torn frame proves nothing about the
+    // part it hid.
+    const partial = () => ({ title, titleComplete: titleDone, model, modelComplete: modelDone });
+    const settled = () => ({
+        title,
+        titleComplete: true,
+        model,
+        modelComplete: modelDone || bytes > 0,
+        recent,
+        hasPrompt: hasPrompt === true,
+    });
     let handle;
     try {
         handle = await open(path, 'r');
     }
     catch {
         signal?.throwIfAborted();
-        return { title: undefined, complete: false };
+        return partial();
     }
-    let recent;
-    let hasPrompt;
     try {
         let end = bytes;
-        while (end > 0) {
+        while (end > 0 && !(titleDone && modelDone)) {
             signal?.throwIfAborted();
             const page = await reversePage(handle, end, signal);
             if (page === undefined)
-                return { title: undefined, complete: false };
-            for (let frameIndex = page.frames.length - 1; frameIndex >= 0; frameIndex--) {
-                const frame = page.frames[frameIndex];
-                const lines = decodeFrame(page.buffer, frame);
+                return partial();
+            for (let frameIndex = page.frames.length - 1; frameIndex >= 0 && !(titleDone && modelDone); frameIndex--) {
+                const lines = decodeFrame(page.buffer, page.frames[frameIndex]);
                 if (lines === undefined)
-                    return { title: undefined, complete: false };
+                    return partial();
                 for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex--) {
                     const line = lines[lineIndex];
-                    const title = titleOf(line);
-                    if (title?.strong === true)
-                        return { title: asTitle(title), complete: true };
-                    const human = humanPrompt(line);
-                    if (human === undefined)
-                        continue;
-                    hasPrompt = true;
-                    if (recent === undefined && human.text !== undefined && !isFileAddress(human.text))
-                        recent = normalizeLastPrompt(human.text);
+                    if (!titleDone) {
+                        const found = titleOf(line);
+                        if (found?.strong === true) {
+                            title = found;
+                            titleDone = true;
+                        }
+                    }
+                    if (want.title && recent === undefined) {
+                        const human = humanPrompt(line);
+                        if (human !== undefined) {
+                            hasPrompt = true;
+                            if (human.text !== undefined && !isFileAddress(human.text))
+                                recent = normalizeLastPrompt(human.text);
+                        }
+                    }
+                    if (!modelDone)
+                        modelDone = (model = modelOf(line)) !== undefined;
+                }
+                // Proving no route needs the session header; title absence never did.
+                if (!modelDone && page.start === 0 && frameIndex === 0 && lines[0]?.['type'] !== 'session') {
+                    titleDone = true;
+                    return partial();
                 }
             }
             const nextEnd = page.start + page.frames[0].start;
             if (nextEnd >= end)
-                return { title: undefined, complete: false };
+                return partial();
             end = nextEnd;
             await scheduler.yield();
         }
-        return {
-            title: recent === undefined ? undefined : { text: recent, source: 'prompt' },
-            complete: true,
-            hasPrompt: hasPrompt === true,
-        };
+        return settled();
     }
     finally {
         await handle.close().catch(() => { });
@@ -509,13 +488,9 @@ export async function digestAppendedSuffix(path, start, end, signal) {
                 if (lines === undefined)
                     return result(false);
                 for (const line of lines) {
-                    // Only a real name updates the cached title: a `fallback`
-                    // placeholder is the opening prompt truncated, and it must
-                    // not overwrite the provider title or the prompt-derived
-                    // name the entry already carries (see titleOf).
                     const found = titleOf(line);
                     if (found?.strong === true)
-                        title = asTitle(found);
+                        title = found;
                     model = modelOf(line) ?? model;
                     label = labelOf(line) ?? label;
                     hasHumanPrompt ||= humanPrompt(line) !== undefined;
@@ -533,16 +508,7 @@ export async function digestAppendedSuffix(path, start, end, signal) {
         await handle.close().catch(() => { });
     }
 }
-/**
- * Find the first human prompt after a complete reverse scan proved that no
- * name was written and no prompt after the opening one could supply one.
- *
- * The prompt returned is the first one that is not a filesystem address (see
- * isFileAddress) — an address-only opening is skipped and the scan keeps
- * going, exactly like the bounded head-window read. `hasPrompt` reports
- * whether the log held ANY human prompt, so a conversation that opened with
- * nothing but a path is still a conversation.
- */
+/** Find the first human prompt after a complete reverse scan proved no title. */
 async function recoverFirstPrompt(path, bytes, signal) {
     signal?.throwIfAborted();
     let handle;
@@ -551,7 +517,7 @@ async function recoverFirstPrompt(path, bytes, signal) {
     }
     catch {
         signal?.throwIfAborted();
-        return { prompt: undefined, hasPrompt: undefined, complete: false };
+        return { prompt: undefined, complete: false };
     }
     try {
         let position = 0;
@@ -560,29 +526,27 @@ async function recoverFirstPrompt(path, bytes, signal) {
             signal?.throwIfAborted();
             const page = await forwardPage(handle, position, bytes, signal);
             if (page === undefined)
-                return { prompt: undefined, hasPrompt: undefined, complete: false };
+                return { prompt: undefined, complete: false };
             for (const frame of page.frames) {
                 const lines = decodeFrame(page.buffer, frame);
                 if (lines === undefined)
-                    return { prompt: undefined, hasPrompt: undefined, complete: false };
+                    return { prompt: undefined, complete: false };
                 if (position === 0 && frame.start === 0 && lines[0]?.['type'] !== 'session') {
-                    return { prompt: undefined, hasPrompt: undefined, complete: false };
+                    return { prompt: undefined, complete: false };
                 }
                 for (const line of lines) {
-                    const found = humanPrompt(line);
-                    if (found === undefined)
-                        continue;
-                    hasPrompt = true;
+                    const prompt = humanPrompt(line);
+                    hasPrompt ||= prompt !== undefined;
                     // A path names no conversation: keep looking for a prompt
-                    // that does, while the address still counts as evidence.
-                    if (found.text === undefined || isFileAddress(found.text))
-                        continue;
-                    return { prompt: found.text, complete: true, hasPrompt: true };
+                    // that does, while the address still counts as evidence
+                    // (hasPrompt above) so the session is not read as empty.
+                    if (prompt?.text !== undefined && !isFileAddress(prompt.text))
+                        return { prompt: prompt.text, complete: true, hasPrompt: true };
                 }
             }
             const consumed = page.frames[page.frames.length - 1].end;
             if (consumed <= 0)
-                return { prompt: undefined, hasPrompt: undefined, complete: false };
+                return { prompt: undefined, complete: false };
             position += consumed;
             await scheduler.yield();
         }
@@ -592,25 +556,47 @@ async function recoverFirstPrompt(path, bytes, signal) {
         await handle.close().catch(() => { });
     }
 }
-/**
- * Recover the authoritative display name for one immutable file snapshot: a
- * reverse scan for the LAST name a person or a provider wrote, then — only
- * when nobody wrote one — that same scan's most recent eligible prompt, then a
- * forward scan for the FIRST eligible one. Every direction pages on verified
- * frame boundaries, and dsh's `fallback` placeholder never wins any of them.
- */
-export async function recoverSessionTitle(path, bytes, signal) {
-    const latest = await recoverLatestName(path, bytes, signal);
-    if (latest.title !== undefined || !latest.complete)
-        return latest;
+/** Fall back to a human prompt only after a complete scan proved no name was
+ *  written: the same reverse walk's most recent eligible prompt first (Claude
+ *  Code's `lastPrompt` level), then a forward scan for the first one. */
+async function titleRecovery(latest, path, bytes, signal) {
+    if (latest.title !== undefined || !latest.titleComplete)
+        return { title: latest.title, complete: latest.titleComplete };
+    if (latest.recent !== undefined) {
+        return {
+            title: { text: latest.recent, source: 'prompt' },
+            complete: true,
+            ...(latest.hasPrompt === undefined ? {} : { hasPrompt: latest.hasPrompt }),
+        };
+    }
     const opening = await recoverFirstPrompt(path, bytes, signal);
     return {
-        title: opening.prompt === undefined
-            ? undefined
-            : { text: normalizeLastPrompt(opening.prompt), source: 'prompt' },
+        title: opening.prompt === undefined ? undefined : { text: normalizeLastPrompt(opening.prompt), source: 'prompt' },
         complete: opening.complete,
         ...(opening.hasPrompt === undefined ? {} : { hasPrompt: opening.hasPrompt }),
     };
+}
+/**
+ * Recover the requested display facts for one immutable file snapshot in a
+ * single reverse pass: the LAST title and/or route, then (only when no title
+ * exists) a forward scan for the FIRST human prompt. Pages stay on verified
+ * frame boundaries.
+ */
+export async function recoverSessionMetadata(path, bytes, want, signal) {
+    const latest = await recoverLatestMetadata(path, bytes, want, signal);
+    return {
+        ...(want.title ? { title: await titleRecovery(latest, path, bytes, signal) } : {}),
+        ...(want.model ? { model: { model: latest.model, complete: latest.modelComplete } } : {}),
+    };
+}
+/** Title-only recovery; see {@link recoverSessionMetadata}. */
+export async function recoverSessionTitle(path, bytes, signal) {
+    return titleRecovery(await recoverLatestMetadata(path, bytes, { title: true, model: false }, signal), path, bytes, signal);
+}
+/** Route-only recovery; absence is proven only by a complete scan reaching the session header. */
+export async function recoverSessionModel(path, bytes, signal) {
+    const latest = await recoverLatestMetadata(path, bytes, { title: false, model: true }, signal);
+    return { model: latest.model, complete: latest.modelComplete };
 }
 /** Hash the previous EOF neighborhood; this detects replacement near the old tail. */
 export async function sessionTitleAnchor(path, bytes, signal) {

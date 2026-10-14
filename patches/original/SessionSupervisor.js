@@ -11,6 +11,7 @@ import { SessionListRow } from '../components/sessions/SessionListRow.js';
 import { SpinnerGlyph } from '../components/Spinner/SpinnerGlyph.js';
 import { ApprovalPanel } from '../components/approvals/ApprovalPanel.js';
 import { useTerminalFocus } from '../ink/hooks/use-terminal-focus.js';
+import { useDeclaredCursor, useNativeCursor } from '../ink/hooks/use-declared-cursor.js';
 import { useAnimationFrame } from '../ink/hooks/use-animation-frame.js';
 import { isPlainReturn, isMod } from '../utils/modifiers.js';
 import { truncateWidth } from '../sessions/format.js';
@@ -19,7 +20,7 @@ import { DSH_TAB, useForeignSessions } from './sessionSupervisor/useForeignSessi
 import { ForeignSessionPanes } from './sessionSupervisor/ForeignSessionPanes.js';
 import { SourceTabs, layoutSourceTabs, sourceTabsWidth } from '../components/sessions/SourceTabs.js';
 import { stringWidth } from '../ink/stringWidth.js';
-import { SESSION_ROW_LINES, MENU_ACTIONS, MENU_WIDTH, MENU_HEIGHT, MENU_LABEL_KEYS, samePath, sessionMatchesQuery } from './sessionSupervisor/model.js';
+import { SESSION_ROW_LINES, MENU_WIDTH, MENU_LABEL_KEYS, menuActionsFor, samePath, sessionMatchesQuery } from './sessionSupervisor/model.js';
 export { sessionMatchesQuery };
 /**
  * The unified session screen — `/resume`, `/agentview`, `/home` and the 🏠
@@ -53,7 +54,9 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
     const { columns, rows } = useTerminalSize();
     const inset = React.useContext(PageInsetContext);
     const isTerminalFocused = useTerminalFocus();
-    const { entries, sessions, loading, refreshing, notice, setNotice, query, setQuery, holderOf, listedSessions, railEntries, countOf, railFocus, setRailFocus, setFocusSessionId, activePane, pins, menu, setMenu, rename, setRename, confirmRemove, setConfirmRemove, railRef, menuRef, queryRef, now, reload, selected, visibleSessions, sessionIndex, cardFocused, sessionAt, activateList, activateRail, railWidth, railVisible, sessionWidth, railEntryCapacity, sessionListHeight, noticeRows, persistPin, selectEntry, openSession, newSessionIn, renameEntry, removeEntry, stopSession, closeMenu, activateMenu, moveRail, moveSession, focusedSession, } = useSessionSupervisor({ channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows });
+    const { dshBackend, archiveSessions, sessionRename, setSessionRename, confirmDelete, setConfirmDelete, renameSession, deleteSession, entries, sessions, loading, refreshing, notice, setNotice, query, setQuery, holderOf, listedSessions, railEntries, countOf, railFocus, setRailFocus, setFocusSessionId, activePane, pins, menu, setMenu, rename, setRename, confirmRemove, setConfirmRemove, railRef, menuRef, queryRef, now, reload, selected, visibleSessions, sessionIndex, cardFocused, sessionAt, activateList, activateRail, railWidth, railVisible, sessionWidth, railEntryCapacity, sessionListHeight, noticeRows, persistPin, selectEntry, openSession, newSessionIn, renameEntry, removeEntry, stopSession, closeMenu, activateMenu, moveRail, moveSession, focusedSession, } = useSessionSupervisor({ channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows });
+    const menuEntry = menu === undefined ? undefined : railEntries.find(entry => samePath(entry.path, menu.path));
+    const menuActions = menuEntry === undefined ? [] : menuActionsFor(menuEntry);
     /**
      * The source tab: this screen's own sessions ({@link DSH_TAB}) or another
      * coding agent's, by agent id. Every open starts on DSH — the screen is
@@ -63,8 +66,30 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
     const [tab, setTab] = useState(DSH_TAB);
     /** The `+N` dropdown of folded tabs, anchored where it was clicked. */
     const [tabMenu, setTabMenu] = useState(undefined);
+    // Like ModelPicker, the native caret follows the region last touched.
+    // The live filter keeps the rail/list's existing navigation and Enter target.
+    const [filterFocused, setFilterFocused] = useState(false);
+    const cursorActive = approval === null && menu === undefined && tabMenu === undefined
+        && rename === undefined && confirmRemove === undefined && sessionRename === undefined && confirmDelete === undefined;
+    const searchCursor = filterFocused || (!railVisible && activePane === 'rail');
+    const nativeCursor = useNativeCursor();
+    const newSessionCursorRef = useDeclaredCursor({
+        line: 0, column: 0, active: tab === DSH_TAB && cursorActive && !searchCursor && cardFocused,
+        visible: nativeCursor, hideOnIdle: true,
+    });
+    const focusRail = () => {
+        setFilterFocused(false);
+        activateRail();
+    };
+    const focusList = () => {
+        setFilterFocused(false);
+        activateList();
+    };
     const tabMenuRef = useRef(tabMenu);
     tabMenuRef.current = tabMenu;
+    /** The session-rename draft as the keyboard sees it (see the input handler). */
+    const sessionRenameRef = useRef(sessionRename);
+    sessionRenameRef.current = sessionRename;
     const foreign = useForeignSessions({ channel, tab, registry: entries, query, setNotice, onOpenSession });
     /**
      * Only sources with data get a tab, after DSH, in a fixed order: ranking
@@ -72,10 +97,15 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
      * each time this screen opens.
      */
     const tabs = useMemo(() => {
+        // Another backend's screen lists that backend's sessions: its one tab
+        // names it (foreign imports are a DSH feature and never probed there).
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- runtime guard: headless hosts pass partial channels
+        if (!dshBackend)
+            return [{ id: DSH_TAB, label: channel.backendCapabilities?.backendLabel ?? DSH_TAB }];
         if (foreign.sources.length === 0)
             return [];
         return [{ id: DSH_TAB, label: 'DSH' }, ...foreign.sources.map(source => ({ id: source.agentId, label: source.label }))];
-    }, [foreign.sources]);
+    }, [foreign.sources, dshBackend, channel.backendCapabilities]);
     const activeSource = foreign.sources.find(source => source.agentId === tab);
     // A source that vanished on refresh takes its tab with it; land on DSH
     // rather than on a tab the strip no longer draws.
@@ -92,6 +122,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         closeMenu();
         closeTabMenu();
         setQuery('');
+        setFilterFocused(false);
         setNotice(undefined);
         setTab(id);
     }, [closeMenu, closeTabMenu, setQuery, setNotice]);
@@ -103,6 +134,46 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
     }, [tabs, tab, switchTab]);
     useInput((input, key) => {
         // Modal layers own the keyboard, in the same order they render.
+        // The draft is read through a ref: keystrokes that arrive in one batch
+        // (typing, then Enter) must commit everything typed, not the last render.
+        const renaming = sessionRenameRef.current;
+        if (renaming !== undefined) {
+            const update = (next) => {
+                sessionRenameRef.current = next;
+                setSessionRename(next);
+            };
+            if (key.escape) {
+                update(undefined);
+                return;
+            }
+            if (isPlainReturn(key)) {
+                update(undefined);
+                renameSession(renaming.id, renaming.draft);
+                return;
+            }
+            if (key.backspace || key.delete) {
+                update({ ...renaming, draft: renaming.draft.slice(0, -1) });
+                return;
+            }
+            if (!isMod(key) && !key.meta && input && !key.return) {
+                const typed = input.replace(/[\r\n]+/gu, '');
+                if (typed !== '')
+                    update({ ...renaming, draft: renaming.draft + typed });
+            }
+            return;
+        }
+        if (confirmDelete !== undefined) {
+            if (isPlainReturn(key)) {
+                const target = listedSessions.find(candidate => candidate.id === confirmDelete);
+                setConfirmDelete(undefined);
+                if (target !== undefined)
+                    deleteSession(target);
+            }
+            else if (key.escape) {
+                setConfirmDelete(undefined);
+            }
+            return;
+        }
         if (rename !== undefined) {
             if (key.escape) {
                 setRename(undefined);
@@ -137,23 +208,25 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             return;
         }
         if (menuRef.current !== undefined) {
+            const current = menuRef.current;
+            const entry = railEntries.find(candidate => samePath(candidate.path, current.path));
+            if (entry === undefined) {
+                closeMenu();
+                return;
+            }
+            const actionCount = menuActionsFor(entry).length;
             if (key.upArrow) {
-                const current = menuRef.current;
-                const next = { ...current, item: (current.item + MENU_ACTIONS.length - 1) % MENU_ACTIONS.length };
+                const next = { ...current, item: (current.item + actionCount - 1) % actionCount };
                 menuRef.current = next;
                 setMenu(next);
             }
             else if (key.downArrow) {
-                const current = menuRef.current;
-                const next = { ...current, item: (current.item + 1) % MENU_ACTIONS.length };
+                const next = { ...current, item: (current.item + 1) % actionCount };
                 menuRef.current = next;
                 setMenu(next);
             }
             else if (isPlainReturn(key)) {
-                const current = menuRef.current;
-                const entry = railEntries.find(candidate => samePath(candidate.path, current.path));
-                if (entry !== undefined)
-                    activateMenu(entry, current.item);
+                activateMenu(entry, current.item);
             }
             else {
                 closeMenu();
@@ -186,6 +259,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                 return;
             }
             if (queryRef.current.length > 0) {
+                setFilterFocused(true);
                 setQuery('');
                 return;
             }
@@ -198,6 +272,9 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             // the route was given up to the tabs.
             cycleTab(key.shift ? -1 : 1);
             return;
+        }
+        if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.wheelUp || key.wheelDown || key.pageUp || key.pageDown) {
+            setFilterFocused(false);
         }
         if (tab !== DSH_TAB) {
             foreignKey(input, key);
@@ -234,12 +311,10 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                 moveRail(key.pageDown ? 1 : -1);
             return;
         }
-        // The filter is a LIVE query, not a mode you enter: this screen has no
-        // second cursor for a text seat, and the rail/list already own the arrows
-        // (a seat would have to relearn them). So printable input goes straight to
-        // the query — without this branch the box rendered, focused, and could never
-        // be typed into.
+        // Typing moves the native caret into the live filter; arrows and Enter
+        // still belong to the rail/list, so filtering adds no separate input mode.
         if (key.backspace || key.delete) {
+            setFilterFocused(true);
             setQuery(text => text.slice(0, -1));
             return;
         }
@@ -256,6 +331,21 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         if (isMod(key) && input === 'x') {
             if (focusedSession !== undefined)
                 stopSession(focusedSession);
+            return;
+        }
+        // Another backend's stored sessions are renamed / deleted through its
+        // catalog (the DSH screen keeps its keys exactly as they were).
+        if (!dshBackend && isMod(key) && input === 'r') {
+            if (activePane === 'list' && focusedSession !== undefined) {
+                const next = { id: focusedSession.id, draft: focusedSession.title.text };
+                sessionRenameRef.current = next;
+                setSessionRename(next);
+            }
+            return;
+        }
+        if (!dshBackend && isMod(key) && input === 'd') {
+            if (activePane === 'list' && focusedSession !== undefined)
+                setConfirmDelete(focusedSession.id);
             return;
         }
         if (isPlainReturn(key)) {
@@ -294,8 +384,10 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         // unknown key cannot type an invisible glyph into the query.
         if (!isMod(key) && !key.meta && !key.super && input && !key.return) {
             const typed = input.replace(/\p{Cc}/gu, '');
-            if (typed.length > 0)
+            if (typed.length > 0) {
+                setFilterFocused(true);
                 setQuery(text => text + typed);
+            }
         }
     });
     // Working rows animate their glyph. The shared clock only runs while at
@@ -327,6 +419,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             return;
         }
         if (key.backspace || key.delete) {
+            setFilterFocused(true);
             setQuery(text => text.slice(0, -1));
             return;
         }
@@ -346,8 +439,10 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         }
         if (!key.meta && !key.super && input && !key.return) {
             const typed = input.replace(/\p{Cc}/gu, '');
-            if (typed.length > 0)
+            if (typed.length > 0) {
+                setFilterFocused(true);
                 setQuery(text => text + typed);
+            }
         }
     }
     // Header: title, subtitle, and the source strip on the right. Width runs
@@ -363,7 +458,8 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
     const tabBudget = columns - stringWidth(titleText) - (showSubtitle ? stringWidth(subtitleText) : 0) - HEADER_GAPS;
     const tabLayout = layoutSourceTabs(tabs, tab, tabBudget);
     const tabMenuWidth = Math.max(12, ...tabLayout.hidden.map(hidden => stringWidth(hidden.label) + 6));
-    const withTabHint = (text) => (tabs.length === 0 ? text : `${text} · ${t('supervisor-hint-tabs')}`);
+    const withTabHint = (text) => (tabs.length < 2 ? text : `${text} · ${t('supervisor-hint-tabs')}`);
+    const listHint = dshBackend ? t('supervisor-hint-list') : t(archiveSessions ? 'supervisor-hint-list-archive' : 'supervisor-hint-list-backend');
     const railHint = rename !== undefined
         ? t('home-hint-rename')
         : confirmRemove !== undefined
@@ -372,7 +468,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                 ? t('home-hint-menu')
                 : activePane === 'rail'
                     ? withTabHint(t('home-hint-list'))
-                    : withTabHint(t('supervisor-hint-list'));
+                    : withTabHint(listHint);
     const railWindowTopIndex = railWindowTop(railFocus, railEntries.length, railEntryCapacity);
     const visibleRailRows = railEntries.slice(railWindowTopIndex, railWindowTopIndex + railEntryCapacity);
     /** Content-local anchor for a keyboard-opened menu (screen coords minus inset). */
@@ -397,12 +493,16 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                                 const next = { col: event.col, row: event.row, item: 0 };
                                 tabMenuRef.current = next;
                                 setTabMenu(next);
-                            } }) }))] }), _jsx(Divider, { bleed: true }), tab !== DSH_TAB && (_jsx(ForeignSessionPanes, { model: foreign, sourceLabel: activeSource?.label ?? tab, home: home, now: now, query: query, notice: notice, railVisible: railVisible, railWidth: railWidth, railEntryCapacity: railEntryCapacity, sessionWidth: sessionWidth, rows: rows, isTerminalFocused: isTerminalFocused })), tab === DSH_TAB && (_jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, overflow: "hidden", children: [railVisible && (_jsxs("ink-box", { style: { flexDirection: 'column', width: railWidth, height: '100%', flexShrink: 0, overflow: 'hidden' }, onClick: activateRail, onMouseEnter: activateRail, onWheel: (event) => {
+                            } }) }))] }), _jsx(Divider, { bleed: true }), tab !== DSH_TAB && (_jsx(ForeignSessionPanes, { model: foreign, sourceLabel: activeSource?.label ?? tab, home: home, now: now, query: query, notice: notice, railVisible: railVisible, railWidth: railWidth, railEntryCapacity: railEntryCapacity, sessionWidth: sessionWidth, rows: rows, isTerminalFocused: isTerminalFocused, filterFocused: filterFocused, cursorActive: cursorActive, onFilterFocus: setFilterFocused })), tab === DSH_TAB && (_jsxs(Box, { flexDirection: "row", flexGrow: 1, flexShrink: 1, overflow: "hidden", children: [railVisible && (_jsxs("ink-box", { style: { flexDirection: 'column', width: railWidth, height: '100%', flexShrink: 0, overflow: 'hidden' }, onClick: focusRail, onMouseEnter: focusRail, onWheel: (event) => {
+                            setFilterFocused(false);
                             moveRail(event.deltaY >= 0 ? 1 : -1);
-                        }, children: [_jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", paddingX: 1, children: _jsx(Text, { dimColor: true, children: truncateWidth(t('home-section-workspaces', { n: railEntries.length }), railWidth - 2) }) }), !loading && railEntries.length === 0 && (_jsx(Box, { paddingX: 1, children: _jsx(Text, { dimColor: true, italic: true, wrap: "truncate-end", children: truncateWidth(t('home-no-workspaces'), railWidth - 2) }) })), visibleRailRows.map((entry) => {
+                        }, children: [_jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", paddingX: 1, children: _jsx(Text, { dimColor: true, children: truncateWidth(railEntries.length === entries.length
+                                        ? t('home-section-workspaces', { n: entries.length })
+                                        : t('supervisor-workspace-groups', { registered: entries.length, history: railEntries.length - entries.length }), railWidth - 2) }) }), !loading && railEntries.length === 0 && (_jsx(Box, { paddingX: 1, children: _jsx(Text, { dimColor: true, italic: true, wrap: "truncate-end", children: truncateWidth(t('home-no-workspaces'), railWidth - 2) }) })), visibleRailRows.map((entry) => {
                                 const absolute = railEntries.indexOf(entry);
-                                return (_jsx(HomeWorkspaceRow, { title: entry.title, path: entry.path, home: home, sessionCount: countOf(entry), present: entry.present, selected: selected !== undefined && selected.id === entry.id, focused: activePane === 'rail' && railFocus === absolute, width: railWidth, onSelect: (event) => {
+                                return (_jsx(HomeWorkspaceRow, { title: entry.title, path: entry.path, home: home, sessionCount: countOf(entry), historyOnly: entry.from === 'unregistered', present: entry.present, selected: selected !== undefined && selected.id === entry.id, focused: activePane === 'rail' && railFocus === absolute, declareCursor: cursorActive && !searchCursor, width: railWidth, onSelect: (event) => {
                                         event.stopImmediatePropagation();
+                                        setFilterFocused(false);
                                         railRef.current = absolute;
                                         setRailFocus(absolute);
                                         selectEntry(entry);
@@ -414,20 +514,31 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                                         menuRef.current = next;
                                         setMenu(next);
                                     } }, entry.id));
-                            }), _jsx(Box, { flexGrow: 1 }), _jsx(Box, { flexShrink: 0, paddingX: 1, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: railHint }) }) })] })), railVisible && (_jsx(Box, { width: 1, flexShrink: 0, flexDirection: "column", children: _jsx(Text, { dimColor: true, children: '│' }) })), _jsxs(Box, { flexDirection: "column", width: sessionWidth, height: "100%", flexShrink: 0, overflow: "hidden", onClick: activateList, onMouseEnter: activateList, children: [_jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: _jsxs(Box, { flexShrink: 1, overflow: "hidden", children: [_jsx(Text, { color: "remember", bold: true, children: truncateWidth(` ${t('home-sessions-title', { name: selected?.title ?? t('supervisor-title') })}`, Math.max(4, sessionWidth - 3)) }), _jsx(Text, { dimColor: true, children: `  ${truncateWidth(t('supervisor-counts', { working: workingCount, live: liveCount, total: visibleSessions.length }) + (refreshing ? ` · ${t('home-sessions-refreshing')}` : ''), Math.max(4, sessionWidth - 3))}` })] }) }), _jsx(Box, { height: 1, flexShrink: 0, paddingX: 1, children: _jsx(SearchBox, { query: query, isFocused: activePane === 'list', isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(t('supervisor-filter-placeholder'), Math.max(8, sessionWidth - 6)), prefix: "/", borderless: true, width: Math.max(8, sessionWidth - 2) }) }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, onClick: (event) => {
+                            }), _jsx(Box, { flexGrow: 1 }), _jsx(Box, { flexShrink: 0, paddingX: 1, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: railHint }) }) })] })), railVisible && (_jsx(Box, { width: 1, flexShrink: 0, flexDirection: "column", children: _jsx(Text, { dimColor: true, children: '│' }) })), _jsxs(Box, { flexDirection: "column", width: sessionWidth, height: "100%", flexShrink: 0, overflow: "hidden", onClick: focusList, onMouseEnter: focusList, children: [_jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: _jsxs(Box, { flexShrink: 1, overflow: "hidden", children: [_jsx(Text, { color: "remember", bold: true, children: truncateWidth(` ${t('home-sessions-title', { name: selected?.title ?? t('supervisor-title') })}`, Math.max(4, sessionWidth - 3)) }), _jsx(Text, { dimColor: true, children: `  ${truncateWidth(t('supervisor-counts', { working: workingCount, live: liveCount, total: visibleSessions.length }) + (refreshing ? ` · ${t('home-sessions-refreshing')}` : ''), Math.max(4, sessionWidth - 3))}` })] }) }), _jsx(Box, { height: 1, flexShrink: 0, paddingX: 1, onClick: event => {
+                                    event.stopImmediatePropagation();
+                                    activateList();
+                                    setFilterFocused(true);
+                                }, onMouseEnter: event => {
+                                    event.stopImmediatePropagation();
+                                    if (activePane !== 'list')
+                                        activateList();
+                                    setFilterFocused(true);
+                                }, children: _jsx(SearchBox, { query: query, isFocused: activePane === 'list' || searchCursor, declareCursor: cursorActive && searchCursor, isTerminalFocused: isTerminalFocused, placeholder: truncateWidth(t('supervisor-filter-placeholder'), Math.max(8, sessionWidth - 6)), prefix: "/", borderless: true, width: Math.max(8, sessionWidth - 2) }) }), _jsxs(Box, { flexDirection: "column", flexShrink: 0, onMouseEnter: () => setFilterFocused(false), onClick: (event) => {
                                     event.stopImmediatePropagation();
                                     if (selected !== undefined)
                                         newSessionIn(selected);
-                                }, children: [_jsxs(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: [_jsx(Text, { color: cardFocused ? 'success' : 'subtle', children: cardFocused ? '❯ ' : '  ' }), _jsx(Text, { color: cardFocused ? 'success' : undefined, bold: cardFocused, children: t('supervisor-new-session') })] }), _jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: _jsx(Text, { dimColor: true, children: `  ${truncateWidth(t('supervisor-new-session-hint', { name: selected?.title ?? t('supervisor-title') }), Math.max(8, sessionWidth - 3))}` }) })] }), _jsxs("ink-box", { style: { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, onWheel: (event) => {
+                                }, children: [_jsxs(Box, { ref: newSessionCursorRef, height: 1, flexShrink: 0, overflow: "hidden", children: [_jsx(Text, { color: cardFocused ? 'success' : 'subtle', children: cardFocused ? '❯ ' : '  ' }), _jsx(Text, { color: cardFocused ? 'success' : undefined, bold: cardFocused, children: t('supervisor-new-session') })] }), _jsx(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: _jsx(Text, { dimColor: true, children: `  ${truncateWidth(t('supervisor-new-session-hint', { name: selected?.title ?? t('supervisor-title') }), Math.max(8, sessionWidth - 3))}` }) })] }), _jsxs("ink-box", { style: { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' }, onMouseEnter: () => setFilterFocused(false), onWheel: (event) => {
+                                    setFilterFocused(false);
                                     moveSession(event.deltaY >= 0 ? 1 : -1);
                                 }, children: [loading && _jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(t('home-sessions-loading'), sessionWidth - 2)}` }), !loading && visibleSessions.length === 0 && (_jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(filtered ? t('supervisor-no-matches') : t('home-no-sessions'), sessionWidth - 2)}` })), visibleSessionRows.map((session, index) => {
                                         const state = liveStateOf(session.id);
                                         const holder = holderOf(session.id);
-                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index + 1 === sessionIndex, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, current: state?.current === true, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
+                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index + 1 === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, current: state?.current === true, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
                                                 event.stopImmediatePropagation();
                                                 setFocusSessionId(session.id);
                                                 openSession(session);
                                             }, onTogglePin: () => {
+                                                setFilterFocused(false);
                                                 setFocusSessionId(session.id);
                                                 persistPin(session.id, !pins.has(session.id));
                                             }, onContextMenu: (event) => {
@@ -439,11 +550,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
                                                 menuRef.current = next;
                                                 setMenu(next);
                                             } }, session.id));
-                                    })] }), _jsx(Box, { flexShrink: 0, flexDirection: "column", height: noticeRows.length, overflow: "hidden", children: noticeRows.map((line, index) => (_jsx(Text, { color: notice?.tone === 'error' ? 'error' : 'success', children: ` ${line}` }, index))) }), _jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: filtered ? t('supervisor-hint-filter') : withTabHint(t('supervisor-hint-list')) }) }) })] })] })), rename !== undefined && (_jsx(Box, { height: 1, flexShrink: 0, children: _jsx(SearchBox, { query: rename.draft, isFocused: true, isTerminalFocused: isTerminalFocused, placeholder: t('home-rename-placeholder'), prefix: "\u270E", borderless: true, width: "100%" }) })), confirmRemove !== undefined && (_jsx(Box, { flexShrink: 0, paddingX: 1, onClick: () => {
+                                    })] }), _jsx(Box, { flexShrink: 0, flexDirection: "column", height: noticeRows.length, overflow: "hidden", children: noticeRows.map((line, index) => (_jsx(Text, { color: notice?.tone === 'error' ? 'error' : 'success', children: ` ${line}` }, index))) }), _jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, italic: true, children: _jsx(HintLine, { text: sessionRename !== undefined ? t('supervisor-hint-session-rename') : filtered ? t('supervisor-hint-filter') : withTabHint(listHint) }) }) })] })] })), sessionRename !== undefined && (_jsx(Box, { height: 1, flexShrink: 0, children: _jsx(SearchBox, { query: sessionRename.draft, isFocused: true, isTerminalFocused: isTerminalFocused, placeholder: t('home-rename-placeholder'), prefix: "\u270E", borderless: true, width: "100%" }) })), confirmDelete !== undefined && (_jsx(Box, { flexShrink: 0, paddingX: 1, children: _jsx(Text, { color: "error", children: truncateWidth(` ${t(archiveSessions ? 'supervisor-archive-confirm' : 'supervisor-delete-confirm', { name: listedSessions.find(candidate => candidate.id === confirmDelete)?.title.text ?? confirmDelete })}`, columns - 3) }) })), rename !== undefined && (_jsx(Box, { height: 1, flexShrink: 0, children: _jsx(SearchBox, { query: rename.draft, isFocused: true, isTerminalFocused: isTerminalFocused, placeholder: t('home-rename-placeholder'), prefix: "\u270E", borderless: true, width: "100%" }) })), confirmRemove !== undefined && (_jsx(Box, { flexShrink: 0, paddingX: 1, onClick: () => {
                     const path = confirmRemove;
                     setConfirmRemove(undefined);
                     removeEntry(path);
-                }, children: _jsx(Text, { color: "error", children: truncateWidth(` ${t('home-remove-title', { name: railEntries.find(entry => samePath(entry.path, confirmRemove))?.title ?? confirmRemove })} · ${t('home-remove-detail')}`, columns - 3) }) })), menu !== undefined && (_jsx(Box, { position: "absolute", left: Math.max(0, Math.min(menu.col - inset.x + 1, Math.max(0, columns - MENU_WIDTH))), top: Math.max(0, Math.min(menu.row - inset.y + 1, Math.max(0, rows - MENU_HEIGHT))), width: MENU_WIDTH, height: MENU_HEIGHT, flexDirection: "column", flexShrink: 0, borderStyle: "round", borderColor: "permission", backgroundColor: "toolCardBackground", children: MENU_ACTIONS.map((action, index) => (_jsx(Box, { height: 1, flexShrink: 0, backgroundColor: index === menu.item ? 'userMessageBackgroundHover' : undefined, onMouseEnter: () => setMenu(current => (current === undefined ? current : { ...current, item: index })), onClick: (event) => {
+                }, children: _jsx(Text, { color: "error", children: truncateWidth(` ${t('home-remove-title', { name: railEntries.find(entry => samePath(entry.path, confirmRemove))?.title ?? confirmRemove })} · ${t('home-remove-detail')}`, columns - 3) }) })), menu !== undefined && menuEntry !== undefined && (_jsx(Box, { position: "absolute", left: Math.max(0, Math.min(menu.col - inset.x + 1, Math.max(0, columns - MENU_WIDTH))), top: Math.max(0, Math.min(menu.row - inset.y + 1, Math.max(0, rows - (menuActions.length + 2)))), width: MENU_WIDTH, height: menuActions.length + 2, flexDirection: "column", flexShrink: 0, borderStyle: "round", borderColor: "permission", backgroundColor: "toolCardBackground", children: menuActions.map((action, index) => (_jsx(Box, { height: 1, flexShrink: 0, backgroundColor: index === menu.item ? 'userMessageBackgroundHover' : undefined, onMouseEnter: () => setMenu(current => (current === undefined ? current : { ...current, item: index })), onClick: (event) => {
                         event.stopImmediatePropagation();
                         const entry = railEntries.find(candidate => samePath(candidate.path, menu.path));
                         if (entry !== undefined)

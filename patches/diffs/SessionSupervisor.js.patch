@@ -1,6 +1,6 @@
---- original/SessionSupervisor.js	2026-09-29 15:01:26.282157242 +0800
-+++ backup/SessionSupervisor.js	2026-09-29 15:01:26.284962451 +0800
-@@ -244,9 +244,9 @@
+--- original/SessionSupervisor.js	2026-10-14 14:29:06.980039825 +0800
++++ backup/SessionSupervisor.js	2026-10-14 14:25:19.470411312 +0800
+@@ -319,9 +319,9 @@
              return;
          }
          if (isMod(key) && input === 'n') {

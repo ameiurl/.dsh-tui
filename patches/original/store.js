@@ -103,6 +103,7 @@ function readEntry(value, derivedValid) {
             titleComplete,
             hasPrompt: derived['hasPrompt'] === true,
             model: typeof derived['model'] === 'string' ? derived['model'] : undefined,
+            modelComplete: derived['modelComplete'] === true,
             label: typeof derived['label'] === 'string' ? derived['label'] : undefined,
         },
     };

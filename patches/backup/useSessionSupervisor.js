@@ -13,12 +13,13 @@
  */
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { basename } from 'node:path';
+import { formatSessionRef } from '../../agent/refs.js';
 import { t } from '../../i18n.js';
 import { normalizeWorkspaceCwd } from '../../sessions/view.js';
-import { readSessionPins, setSessionPinned } from '../../sessionPins.js';
+import { readSessionPins, sessionPinsDir, setSessionPinned } from '../../sessionPins.js';
 import { readSessionOwners } from '../../sessionMounts.js';
 import { resumeFailureText } from '../../sessions/resumeFailure.js';
-import { RAIL_CHROME_ROWS, WORKSPACE_ROW_LINES, RAIL_MIN_TOTAL_COLUMNS, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX, SESSION_ROW_LINES, SESSION_PANE_CHROME_ROWS, noticeLines, MENU_ACTIONS, UNREGISTERED_RAIL_ID, message, samePath, sessionMatchesQuery } from './model.js';
+import { RAIL_CHROME_ROWS, WORKSPACE_ROW_LINES, RAIL_MIN_TOTAL_COLUMNS, RAIL_WIDTH_MIN, RAIL_WIDTH_MAX, SESSION_ROW_LINES, SESSION_PANE_CHROME_ROWS, noticeLines, menuActionsFor, UNREGISTERED_RAIL_ID, message, samePath, sessionMatchesQuery } from './model.js';
 const listingSnapshots = new WeakMap();
 /**
  * The snapshot slot for one channel, created on first use.
@@ -40,6 +41,20 @@ function snapshotSlot(channel) {
  */
 export function useSessionSupervisor(input) {
     const { channel, home, onOpenSession, onNewSession, onStopSession, liveStateOf, columns, rows } = input;
+    /**
+     * The bound backend: the screen lists ITS sessions. A DSH
+     * channel (or a partial headless one without a snapshot) keeps today's
+     * screen exactly; another backend has no workspace ledger (`/workspace` is
+     * a DSH command), keeps its pins in its own file, and its rows are
+     * renamed / deleted through its catalog.
+     */
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- runtime guard: headless hosts pass partial channels
+    const backendId = channel.backendCapabilities?.backendId ?? 'dsh';
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- runtime guard: headless hosts pass partial channels
+    const workspaceLedger = channel.backendCapabilities?.commands.includes('workspace') ?? true;
+    const dshBackend = backendId === 'dsh';
+    const archiveSessions = channel.backendCapabilities?.deleteAction === 'archive';
+    const pinsDir = sessionPinsDir(backendId);
     const [entries, setEntries] = useState([]);
     // Lazy so a non-empty snapshot from this channel's previous mount paints as
     // the first frame, including after restart; undefined alone means unknown.
@@ -84,9 +99,11 @@ export function useSessionSupervisor(input) {
         occupancyRef.current = readSessionOwners();
     }
     const holderOf = useCallback((sessionId) => {
-        const owner = occupancyRef.current.get(sessionId);
+        // The ledger keys a non-DSH session by its backend-qualified reference
+        // (`claude:<id>`); DSH ids stay bare.
+        const owner = occupancyRef.current.get(formatSessionRef({ backendId, sessionId }));
         return owner === undefined || owner.pid === process.pid ? undefined : owner.pid;
-    }, []);
+    }, [backendId]);
     /**
      * Sessions eligible for this screen, computed ONCE per listing so the rail's
      * per-workspace counts and the pane's rows always agree.
@@ -175,6 +192,44 @@ export function useSessionSupervisor(input) {
     const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
     const [railFocus, setRailFocus] = useState(0);
     /**
+     * F3 fork: the pane shows THIS terminal's working directory, always.
+     *
+     * The stock screen derives this from the rail's selection (the terminal's
+     * directory, else the first ledger record, unless the user picked a row by
+     * hand). With the rail gone there is nothing to pick and nothing to fall
+     * back to: the directory the terminal is in is the scope, and a directory
+     * with no sessions shows an empty list rather than another project's.
+     *
+     * The entry is synthesized because the screen's call sites expect one
+     * (`path` for `newSessionIn`, `title` for the headers). `path` takes the
+     * registry's spelling of the directory when it is registered, so a new
+     * session opens the same workspace record the rail would have offered.
+     */
+    const selected = useMemo(() => {
+        const registered = railEntries.find(entry => entry.from === 'registry' && samePath(entry.path, channel.cwd))?.path;
+        const path = registered ?? (channel.cwd === '' ? UNREGISTERED_RAIL_ID : channel.cwd);
+        return {
+            id: `cwd:${path}`,
+            path,
+            title: basename(channel.cwd) || t('supervisor-unregistered'),
+            present: true,
+            sessionCount: (groupedEntries.get(path) ?? []).length,
+            from: 'cwd',
+        };
+    }, [railEntries, groupedEntries, channel.cwd]);
+    // Recency chooses the default even when an older live row sorts above it.
+    const mostRecentIn = useCallback((path) => {
+        const needle = query.trim().toLowerCase();
+        let recent;
+        for (const session of groupedEntries.get(path) ?? []) {
+            if (sessionMatchesQuery(session, needle)
+                && (recent === undefined || session.updatedAt > recent.updatedAt))
+                recent = session;
+        }
+        return recent?.id;
+    }, [groupedEntries, query]);
+    const recentSessionId = useMemo(() => selected === undefined ? undefined : mostRecentIn(selected.path), [selected?.path, mostRecentIn]);
+    /**
      * The session column's cursor, as ONE fact.
      *
      * It used to be three: a `sessionFocus` index, a `sessionFocusRef` mirror and
@@ -195,18 +250,28 @@ export function useSessionSupervisor(input) {
      * {@link focusIndex} is derived from it for the render, for movement and for
      * Enter alike.
      */
-    const [focusSessionId, setFocusSessionId] = useState(undefined);
+    const [focusSessionId, setFocusSessionIdState] = useState(recentSessionId);
+    const initialFocusPending = useRef(true);
+    const setFocusSessionId = useCallback((id) => {
+        initialFocusPending.current = false;
+        setFocusSessionIdState(id);
+    }, []);
+    // Keep the workspace's default current until the user chooses a list row.
+    React.useEffect(() => {
+        if (!initialFocusPending.current)
+            return;
+        setFocusSessionIdState(recentSessionId);
+    }, [recentSessionId]);
     /**
      * Which column owns the keyboard, and therefore which column draws the `❯`
      * cursor. Exactly one at a time: two cursors mean "where does Enter go?" has
      * no answer, and ←/→ is how this screen answers it.
-     *
-     * F3 fork: the rail is not rendered at all, so the session list owns the
-     * keyboard from the first frame and nothing moves ownership away
-     * (`activateRail` is inert).
      */
     const [activePane, setActivePane] = useState('list');
-    const [pins, setPins] = useState(() => readSessionPins());
+    const [pins, setPins] = useState(() => readSessionPins(pinsDir));
+    /** A stored session being renamed / confirmed for deletion (non-DSH rows). */
+    const [sessionRename, setSessionRename] = useState(undefined);
+    const [confirmDelete, setConfirmDelete] = useState(undefined);
     const [menu, setMenu] = useState(undefined);
     const [rename, setRename] = useState(undefined);
     const [confirmRemove, setConfirmRemove] = useState(undefined);
@@ -267,11 +332,12 @@ export function useSessionSupervisor(input) {
                         slot.rows = slot.rows?.map(row => row.id === enriched.id ? enriched : row);
                         setSessions(current => current.map(row => row.id === enriched.id ? enriched : row));
                     }, partial => {
-                        // Keep a complete cached list over a partial cold scan. With no
-                        // snapshot, show useful rows now rather than waiting for every log.
-                        if (slot.requestGeneration !== generation || slot.rows !== undefined)
+                        // Fresh workspace rows supersede cached metadata immediately;
+                        // retain other cached workspaces until the full listing arrives.
+                        if (slot.requestGeneration !== generation)
                             return;
-                        setSessions(partial);
+                        setSessions(current => [...new Map([...current, ...partial].map(row => [row.id, row])).values()]
+                            .sort((left, right) => right.updatedAt - left.updatedAt));
                         setLoading(false);
                     });
                     // Recorded only after success: a failed listing keeps the previous
@@ -290,7 +356,7 @@ export function useSessionSupervisor(input) {
             })(),
             (async () => {
                 try {
-                    const registry = typeof channel.listWorkspaceRegistry === 'function'
+                    const registry = typeof channel.listWorkspaceRegistry === 'function' && workspaceLedger
                         ? await channel.listWorkspaceRegistry()
                         : [];
                     if (slot.requestGeneration !== generation)
@@ -310,7 +376,7 @@ export function useSessionSupervisor(input) {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [channel]);
+    }, [channel, workspaceLedger, channel.cwd, channel.ready]);
     React.useEffect(() => {
         void reload();
     }, [reload]);
@@ -324,44 +390,18 @@ export function useSessionSupervisor(input) {
         setRailFocus(current => Math.min(current, Math.max(0, railEntries.length - 1)));
     }, [railEntries.length]);
     /**
-     * F3 fork: the pane shows THIS terminal's working directory, always.
-     *
-     * The stock screen derives this from the rail's selection (the terminal's
-     * directory, else the first ledger record, unless the user picked a row by
-     * hand). With the rail gone there is nothing to pick and nothing to fall
-     * back to: the directory the terminal is in is the scope, and a directory
-     * with no sessions shows an empty list rather than another project's.
-     *
-     * The entry is synthesized because the screen's call sites expect one
-     * (`path` for `newSessionIn`, `title` for the headers). `path` takes the
-     * registry's spelling of the directory when it is registered, so a new
-     * session opens the same workspace record the rail would have offered.
-     */
-    const selected = useMemo(() => {
-        const registered = railEntries.find(entry => entry.from === 'registry' && samePath(entry.path, channel.cwd))?.path;
-        const path = registered ?? (channel.cwd === '' ? UNREGISTERED_RAIL_ID : channel.cwd);
-        return {
-            id: `cwd:${path}`,
-            path,
-            title: basename(channel.cwd) || t('supervisor-unregistered'),
-            present: true,
-            sessionCount: (groupedEntries.get(path) ?? []).length,
-            from: 'cwd',
-        };
-    }, [railEntries, groupedEntries, channel.cwd]);
-    /**
-     * Sessions recorded in this terminal's directory, minus the search filter.
-     * Live sessions in the directory sort above stopped ones, then by recency:
-     * what this terminal is currently running is what the user is most likely
-     * switching between.
-     *
-     * F3 fork: the rows are matched by DIRECTORY (`samePath`), not by the rail
-     * group's exact key, so a session logged under a trailing slash or another
-     * case still belongs to the directory the terminal is in.
+     * Sessions whose recorded cwd is the selected workspace, minus the search
+     * Sessions recorded in this terminal's directory, minus the search
+     * filter. Live sessions in the directory sort above stopped ones, then by
+     * recency: what this terminal is currently running is what the user is
+     * most likely switching between.
      */
     const visibleSessions = useMemo(() => {
         const needle = query.trim().toLowerCase();
         void pulse;
+        // F3 fork: rows are matched by DIRECTORY (`samePath`), not by the rail
+        // group's exact key, so a session logged under a trailing slash or
+        // another case still belongs to the directory the terminal is in.
         return listedSessions
             .filter(session => samePath(session.cwd, channel.cwd))
             .filter(session => sessionMatchesQuery(session, needle))
@@ -397,18 +437,10 @@ export function useSessionSupervisor(input) {
     const cardFocused = activePane === 'list' && sessionIndex === 0;
     /** The new-session card is the list's row 0; sessions start at 1. */
     const sessionAt = useCallback((index) => visibleSessions[index - 1], [visibleSessions]);
-    /**
-     * Enter the session column: land the cursor on the session this terminal is
-     * attached to (that is the one the user most likely means), else on the top
-     * row — which is the new-session card when the list sorted its live rows
-     * lower. A cursor that stayed put while the list scrolled elsewhere would act
-     * on a row the user never looked at.
-     */
+    /** Enter the session column without changing its selected row. */
     const activateList = useCallback(() => {
         setActivePane('list');
-        const current = visibleSessions.find(session => liveStateOf(session.id)?.current === true);
-        setFocusSessionId(current?.id);
-    }, [liveStateOf, visibleSessions]);
+    }, []);
     /**
      * F3 fork: ← used to hand the keyboard to the workspace rail. There is no
      * rail any more, so the key is deliberately inert — the list keeps the
@@ -445,13 +477,54 @@ export function useSessionSupervisor(input) {
         setNotice({ text, tone });
     }, []);
     const persistPin = useCallback((id, pinned) => {
-        const result = setSessionPinned(id, pinned);
+        const result = setSessionPinned(id, pinned, pinsDir);
         if (!result.ok) {
             report(t('resume-pin-save-failed'), 'error');
             return;
         }
         setPins(result.pins);
-    }, [report]);
+    }, [report, pinsDir]);
+    /** Rename a stored session through the backend's catalog (non-DSH rows). */
+    const renameSession = useCallback((sessionId, title) => {
+        const next = title.trim();
+        if (next === '') {
+            report(t('home-rename-empty'), 'error');
+            return;
+        }
+        void channel.renameSessionTo(sessionId, next)
+            .then((ok) => {
+            if (ok)
+                return reload();
+            report(t('rename-failed', { err: '' }), 'error');
+            return undefined;
+        })
+            .catch(error => report(t('rename-failed', { err: message(error) }), 'error'));
+    }, [channel, reload, report]);
+    /**
+     * Delete a stored session through the backend's catalog (non-DSH rows):
+     * never the one this terminal is in, never one another terminal holds.
+     */
+    const deleteSession = useCallback((session) => {
+        if (liveStateOf(session.id)?.current === true) {
+            report(t(archiveSessions ? 'supervisor-archive-current' : 'supervisor-delete-current'), 'error');
+            return;
+        }
+        const holder = holderOf(session.id);
+        if (holder !== undefined) {
+            report(t('supervisor-occupied', { pid: holder }), 'error');
+            return;
+        }
+        void channel.deleteSession(session.id)
+            .then((ok) => {
+            if (!ok) {
+                report(t(archiveSessions ? 'supervisor-archive-failed' : 'supervisor-delete-failed', { name: session.title.text }), 'error');
+                return undefined;
+            }
+            report(t(archiveSessions ? 'supervisor-archived' : 'supervisor-deleted', { name: session.title.text }), 'info');
+            return reload();
+        })
+            .catch(error => report(t(archiveSessions ? 'session-archive-failed' : 'session-delete-failed', { err: message(error) }), 'error'));
+    }, [archiveSessions, channel, holderOf, liveStateOf, reload, report]);
     /**
      * F3 fork: the stock screen selects a rail row here. The pane is pinned to
      * this terminal's directory, so the call sites that remain (a rail click,
@@ -459,7 +532,7 @@ export function useSessionSupervisor(input) {
      * the session cursor.
      */
     const selectEntry = useCallback(() => {
-        setFocusSessionId(undefined);
+        setFocusSessionIdState(undefined);
     }, []);
     /**
      * Mount a session, refusing one another terminal holds.
@@ -524,8 +597,10 @@ export function useSessionSupervisor(input) {
     const removeEntry = useCallback((path) => {
         void channel.removeWorkspace(path)
             .then((ok) => {
-            if (ok)
+            if (ok) {
+                report(t('supervisor-workspace-removed'), 'info');
                 return reload();
+            }
             report(t('workspace-remove-unknown', { target: path }), 'error');
             return undefined;
         })
@@ -552,7 +627,9 @@ export function useSessionSupervisor(input) {
     }, []);
     const activateMenu = useCallback((entry, item) => {
         closeMenu();
-        const action = MENU_ACTIONS[item] ?? 'edit';
+        const action = menuActionsFor(entry)[item];
+        if (action === undefined)
+            return;
         if (action === 'edit')
             selectEntry(entry);
         else if (action === 'new')
@@ -589,10 +666,18 @@ export function useSessionSupervisor(input) {
         // put `❯` on the first session while the user had selected the card.
         const landed = sessionAt(next);
         setFocusSessionId(landed?.id);
-    }, [visibleSessions, sessionAt, sessionIndex]);
+    }, [visibleSessions, sessionAt, sessionIndex, setFocusSessionId]);
     /** The session under the cursor, or undefined while the card (row 0) holds it. */
     const focusedSession = sessionAt(sessionIndex);
     return {
+        dshBackend,
+        archiveSessions,
+        sessionRename,
+        setSessionRename,
+        confirmDelete,
+        setConfirmDelete,
+        renameSession,
+        deleteSession,
         entries,
         sessions,
         loading,

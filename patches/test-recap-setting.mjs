@@ -76,7 +76,11 @@ check(plugin.includes("settingField('recapOnOpen')") || plugin.includes("path: [
 const definitions = readFileSync(join(TUI, 'lib/types/settings/definitions.js'), 'utf8');
 check(/^\s{4}'?recapOnOpen'?:/m.test(definitions),
   'SETTING_DEFINITIONS still lists recapOnOpen (the row metadata and EDITABLE_CONFIG_KEYS source)');
-const channel = readFileSync(join(TUI, 'lib/types/dsh-adapter/channel.js'), 'utf8');
+// 0.15.0 moved the read out of `channel.js` into the `channel/` folder, so scan
+// both: which module holds it is upstream's business, that it exists is not.
+const channel = ['lib/types/dsh-adapter/channel.js', 'lib/types/dsh-adapter/channel/extensions.js']
+  .map(relative => readFileSync(join(TUI, relative), 'utf8'))
+  .join('\n');
 check(channel.includes('ns?.value?.recapOnOpen !== false'),
   'the auto-recap read still consumes the setting');
 

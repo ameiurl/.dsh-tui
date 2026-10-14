@@ -111,9 +111,7 @@ it belongs at the end of every one.
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.2.0-rc.2`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.2.0-rc.2`,
-`@deepseek-harness-tui/dsh-tui@0.15.0` for `AssistantToolUseMessage.js`
-(F1, re-ported 2026-10-14) and `@deepseek-harness-tui/dsh-tui@0.12.0` for the
-F3/F4 files still sitting on that baseline (they are re-ported next).
+`@deepseek-harness-tui/dsh-tui@0.15.0`.
 
 | file | change |
 | --- | --- |

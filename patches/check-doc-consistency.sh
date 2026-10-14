@@ -210,7 +210,7 @@ ck "digest.js: hasPrompt counts any human message" \
 ck "digest.js: humanPrompt result is consumed as { text }" \
    "grep -q 'const human = humanPrompt(line)' '$G'"
 ck "digest.js: recovery skips an address opening" \
-   "grep -q 'found.text === undefined || isFileAddress(found.text)' '$G'"
+   "grep -q 'prompt?.text !== undefined && !isFileAddress(prompt.text)' '$G'"
 # 0.10.2 verifies a log's first line is a real `session` line before calling it
 # completely read; a fixture opening with anything else reports an empty session
 # as a full conversation (see §4's 0.10.2 row). Keep the fixture honest.
@@ -224,8 +224,10 @@ ck "digest.js: recovery returns hasPrompt"   "grep -q 'hasPrompt: opening.hasPro
 # take `title?.strong`, the appended-suffix update takes `found?.strong`.
 ck "digest.js: the placeholder is classified not-strong" \
    "grep -q \"strong: kind !== 'fallback'\" '$G'"
-ck "digest.js: three scan sites require a strong title" \
-   "[ \"\$(grep -c 'title?.strong === true' '$G')\" = 3 ]"
+# Head window, tail window, deep reverse scan and the appended suffix all
+# refuse dsh's `fallback` placeholder.
+ck "digest.js: four scan sites require a strong title" \
+   "[ \"\$(grep -c 'strong === true' '$G')\" = 4 ]"
 ck "digest.js: the suffix update requires a strong title" \
    "grep -q 'found?.strong === true' '$G'"
 # A tail holding only a placeholder must not mark the read complete: the name
@@ -305,10 +307,13 @@ ck "apply script's closing note names the profile patch (not the dropped setting
    "grep -q \"profile's cordis.patch.yml\" '$DIR/apply-diff-patches.sh'"
 ck "every target has a stored diff to fall back on" \
    "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/diffs'/*.patch | wc -l)\" ]"
-# README tells the reader to just run `dsh-patch`; assert the alias really is
-# installed in both shells instead of trusting the doc.
-ck "dsh-patch alias in ~/.zshrc"  "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.zshrc'"
-ck "dsh-patch alias in ~/.bashrc" "grep -q \"alias dsh-patch=.*apply-diff-patches.sh\" '$HOME/.bashrc'"
+# The runbook must name a command that actually exists. `dsh-patch` is only a
+# convenience alias the doc says how to add, so what is asserted is the script
+# path both files tell the reader to run.
+ck "runbook names the apply script by path" \
+   "grep -q 'bash ~/.dsh-tui/patches/apply-diff-patches.sh' '$DIR/CUSTOMIZATIONS.md'"
+ck "README points at the same script" \
+   "grep -q 'apply-diff-patches.sh' '$DIR/README.md'"
 
 echo "== §3 stored diffs are exact against the documented baseline =="
 # A re-ported baseline is exact: each diffs/<name>.patch applies to its

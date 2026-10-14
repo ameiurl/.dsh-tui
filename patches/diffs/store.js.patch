@@ -1,5 +1,5 @@
---- original/store.js	2026-10-07 16:30:30.840504383 +0800
-+++ backup/store.js	2026-10-07 16:30:40.622687735 +0800
+--- original/store.js	2026-10-14 14:29:06.991044638 +0800
++++ backup/store.js	2026-10-14 14:25:19.477295867 +0800
 @@ -34,8 +34,17 @@
   * Bumped for cached mtime. Version 3 derivations remain readable and receive
   * that field on their next listing; version 2 could cache incomplete reads as
@@ -19,7 +19,7 @@
  const INDEX_FILE = join(DATA_DIR, 'session-index.json');
  let loadedStamp;
  let loadedIndex;
-@@ -110,7 +119,9 @@
+@@ -111,7 +120,9 @@
  /**
   * Load the cache.
   * @returns The parsed index; version 3 derivations are upgraded lazily and
