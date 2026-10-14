@@ -1,5 +1,5 @@
---- original/dsh-tool-str-replace-editor.index.js	2026-09-28 20:28:44.032617849 +0800
-+++ backup/dsh-tool-str-replace-editor.index.js	2026-09-28 20:28:44.033496194 +0800
+--- original/dsh-tool-str-replace-editor.index.js	2026-09-29 09:52:19.869351403 +0800
++++ backup/dsh-tool-str-replace-editor.index.js	2026-10-14 13:21:24.608511664 +0800
 @@ -4,6 +4,7 @@
  import { truncateWithoutSplittingSurrogatePair } from "@deepseek-ai/dsh-output-retention";
  import { sandboxDenialMarker } from "@deepseek-ai/dsh-sandbox";
@@ -8,51 +8,50 @@
  //#region lib/types/index.js
  /**
  * Model-facing `str_replace_editor` over the Harness filesystem seam.
-@@ -50,6 +51,43 @@
+@@ -50,6 +51,42 @@
  		return line;
  	});
  }
-+/** One hunk diff between `before` and `after` (context: 3), carrying the
-+ *  1-based hunk start on each side so UIs can render a Claude Code style
-+ *  unified diff with real line numbers. Mirrors dsh-tool-fs
-+ *  `computeHunkDiffs`. */
++/** One file's hunks as unified patch TEXT (no file headers: the UI synthesizes
++ *  them from the diff's path and numbers every line from the `@@` starts).
++ *  Mirrors dsh-tool-fs `hunksPatch`. */
++function hunksPatch(hunks) {
++	return hunks.map((hunk) => `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`).join("\n");
++}
++/** The diff of a whole new file as patch text (`@@ -0,0 +1,N @@`, every line
++ *  added), so the UI numbers it from 1 and prints a `+N -0` stat. Mirrors
++ *  dsh-tool-fs `newFileDiff`. */
++function newFileDiff(path, content) {
++	const body = content.endsWith("\n") ? content.slice(0, -1) : content;
++	const lines = body === "" ? [] : body.split("\n");
++	return {
++		path,
++		patch: `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join("\n")}`
++	};
++}
++/** The file's change between `before` and `after` as one unified patch
++ *  (context: 3), or an empty list when the texts are identical. Mirrors
++ *  dsh-tool-fs `computeHunkDiffs`. */
 +function computeHunkDiffs(path, before, after) {
 +	const patch = structuredPatch("", "", before, after, void 0, void 0, { context: 3 });
-+	const diffs = [];
-+	for (const hunk of patch.hunks) {
-+		const oldLines = [];
-+		const newLines = [];
-+		for (const line of hunk.lines) {
-+			if (line.startsWith("\\")) continue;
-+			const text = line.slice(1);
-+			if (line.startsWith("-")) oldLines.push(text);
-+			else if (line.startsWith("+")) newLines.push(text);
-+			else {
-+				oldLines.push(text);
-+				newLines.push(text);
-+			}
-+		}
-+		diffs.push({
-+			path,
-+			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
-+			newText: newLines.join("\n"),
-+			oldStart: hunk.oldStart,
-+			newStart: hunk.newStart
-+		});
-+	}
-+	return diffs;
++	if (patch.hunks.length === 0) return [];
++	return [{
++		path,
++		patch: hunksPatch(patch.hunks)
++	}];
 +}
-+/** Whether a candidate meta diffs array carries valid FileDiff shapes. */
++/** Whether a candidate meta diffs array carries valid FileDiff shapes: unified
++ *  patch text, or the old/new-texts pair. */
 +function diffsFromMeta(meta) {
 +	if (typeof meta !== "object" || meta === null) return void 0;
 +	const diffs = meta.diffs;
-+	if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "object" && d !== null && typeof d.path === "string" && (d.oldText === null || typeof d.oldText === "string") && typeof d.newText === "string")) return void 0;
++	if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "object" && d !== null && typeof d.path === "string" && (typeof d.patch === "string" || ((d.oldText === null || typeof d.oldText === "string") && typeof d.newText === "string")))) return void 0;
 +	return diffs;
 +}
  var MutationPolicy = class {
  	policy;
  	constructor(ctx) {
-@@ -169,9 +207,10 @@
+@@ -169,9 +206,10 @@
  	const offset = offsets[0];
  	if (offset === void 0) throw new FsError(`No replacement was performed, old_str \`${oldValue}\` did not appear verbatim in ${target.displayPath}.`, "FS_EDIT_NOT_FOUND");
  	if (offsets.length > 1) throw new FsError(`No replacement was performed. Multiple occurrences of old_str \`${oldValue}\` in lines [${lineNumbersAt(before, offsets).join(", ")}]. Please ensure it is unique`, "FS_AMBIGUOUS_EDIT");
@@ -64,7 +63,7 @@
  			kind: "replaceIfVersion",
  			version: info.version
  		} : {
-@@ -185,7 +224,11 @@
+@@ -185,7 +223,11 @@
  		kind: "present",
  		version: outcome.version
  	}, exec);
@@ -77,7 +76,20 @@
  }
  async function insertInFile(ctx, policy, path, insertLine, newStr, exec) {
  	if (insertLine === void 0) throw new Error("Parameter `insert_line` is required for command: insert");
-@@ -308,11 +351,28 @@
+@@ -232,11 +274,7 @@
+ 		case "create": return {
+ 			card: "diff",
+ 			title: `create ${args.path}`,
+-			diffs: [{
+-				path: args.path,
+-				oldText: null,
+-				newText: args.file_text ?? ""
+-			}],
++			diffs: [newFileDiff(args.path, args.file_text ?? "")],
+ 			locations: [{ path: args.path }]
+ 		};
+ 		case "str_replace": return {
+@@ -308,11 +346,28 @@
  			}
  		},
  		output: {
@@ -109,7 +121,7 @@
  		},
  		async execute(args, exec) {
  			switch (args.command) {
-@@ -322,7 +382,17 @@
+@@ -322,7 +377,17 @@
  				case "insert": return insertInFile(ctx, policy, args.path, args.insert_line ?? void 0, args.new_str ?? void 0, exec);
  			}
  		},

@@ -94,28 +94,47 @@ ck "theme.json selects claude-code"        "grep -q 'claude-code' '$HOME/.dsh-tu
 ck "themes/claude-code.json exists"        "[ -f '$HOME/.dsh-tui/themes/claude-code.json' ]"
 ck "themes/claude-code-light.json exists"  "[ -f '$HOME/.dsh-tui/themes/claude-code-light.json' ]"
 
-echo "== §2 F1 diff rendering =="
+echo "== §2 F1 diff rendering (upstream numbers, our bands) =="
 A="$LIB/types/components/messages/AssistantToolUseMessage.js"
-ck "DIFF_BODY_MAX_LINES = Infinity"   "grep -q 'DIFF_BODY_MAX_LINES = Infinity' '$A'"
-ck "NEW_FILE_DIFF_MAX_LINES = 11"     "grep -q 'NEW_FILE_DIFF_MAX_LINES = 11' '$A'"
-ck "upstream hoverTint branch deleted" "! grep -q 'hoverTint' '$A'"
-# F1's tool half: without these two packages the renderer still draws a diff,
-# but with no line numbers (numbered=false) and str_replace shows no card at
-# all. They were silently missing between the 0.10.2 upgrade and the
-# 0.1.5-rc.2 re-port, so they get their own anchors.
+# 0.15.0 re-port (plan D): the tools hand the UI unified patch TEXT and the
+# stock parser (components/diffPatch.js) numbers it, so the renderer no longer
+# derives numbers itself — it only adds the Claude Code row bands, the
+# word-level segments, the never-fold cap and the hover fix on top.
+ck "renderer: unified diff bodies are never folded" \
+   "grep -q 'newFileDiff ? NEW_FILE_DIFF_MAX_LINES : Infinity' '$A'"
+ck "renderer: new-file preview cap = 11"   "grep -q 'const NEW_FILE_DIFF_MAX_LINES = 11' '$A'"
+ck "renderer: split panes keep the upstream 8" "grep -q 'const DIFF_BODY_MAX_LINES = 8' '$A'"
+ck "renderer: rows carry the CC band" \
+   "grep -q 'function diffRowBackground(tone)' '$A' && grep -q \"'diffAddedDimmed'\" '$A'"
+ck "renderer: word-level segments" \
+   "grep -q 'function wordSegments' '$A' && grep -q 'function segmentNodes' '$A'"
+ck "renderer: numbered gutters come from the parsed patch" "grep -q 'gutter: gutterOf(' '$A'"
+ck "renderer: a create is detected by its all-added hunk" \
+   "grep -q \"hunk.lines.every(line => line.kind === 'add')\" '$A'"
+ck "renderer: upstream hoverTint branch deleted" "! grep -q 'hoverTint' '$A'"
+ck "renderer: diffRows test seam exported" "grep -q 'export function diffRows' '$A'"
+# F1's tool half: the two packages carry the diff at all (str_replace has no
+# presentationMeta upstream) and now emit `@@` hunks instead of old/new texts,
+# which is what lets the STOCK parser number Edit/Write lines.
 TFS="$TOOLS/dsh-tool-fs/lib/index.js"
 TSR="$TOOLS/dsh-tool-str-replace-editor/lib/index.js"
-ck "tool-fs: hunks carry 1-based oldStart/newStart" \
-   "grep -q 'oldStart: hunk.oldStart' '$TFS' && grep -q 'newStart: hunk.newStart' '$TFS'"
-ck "tool-fs: write/edit presentationMeta forwards them" \
-   "grep -q 'map(({ path, oldText, newText, oldStart, newStart })' '$TFS'"
-ck "str-replace: computeHunkDiffs present" "grep -q 'function computeHunkDiffs' '$TSR'"
+ck "tool-fs: hunks serialized as patch text" \
+   "grep -q 'function hunksPatch' '$TFS' && grep -q 'patch: hunksPatch(patch.hunks)' '$TFS'"
+ck "tool-fs: creates render as all-added patches" \
+   "grep -q 'function newFileDiff' '$TFS' && grep -q '@@ -0,0 +1,\${lines.length} @@' '$TFS'"
+ck "tool-fs: meta validator takes patch text" "grep -q 'typeof patch === \"string\"' '$TFS'"
+# `hunk.oldStart` is jsdiff's own field, read to write the `@@` header — what
+# must be gone is OUR added property (`oldStart: …` on the emitted diff).
+ck "tool-fs: the old oldStart/newStart fields are gone" "! grep -q 'oldStart:' '$TFS'"
+ck "str-replace: same patch-text shape" \
+   "grep -q 'function hunksPatch' '$TSR' && grep -q 'typeof d.patch === \"string\"' '$TSR'"
 ck "str-replace: result diff card present"  "grep -q 'presentResult(args, result)' '$TSR'"
-# The tool patch must be exactly the line-number feature: a stale backup built
+# The tool patch must be exactly the diff feature: a stale backup built
 # on 0.1.2-rc.1 would drag removed upstream work (scope-aware prompts, the
 # REMEDIES refactor) back in.
 ck "tool-fs patch carries no upstream rollback" \
    "! grep -qE '^[-+].*(scope-aware|REMEDIES)' '$DIR/diffs/dsh-tool-fs.index.js.patch'"
+ck "F1 behaviour test passes"               "node '$DIR/test-f1-diff-rows.mjs'"
 
 echo "== §2 F2 cwd-scoped history (retired: stock upstream since 0.15.0) =="
 # F2 was a patch (history.js + PromptInput.js + Chat.js) until 0.15.0 shipped the

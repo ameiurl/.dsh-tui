@@ -51,41 +51,40 @@ function lineNumbersAt(content, offsets) {
 		return line;
 	});
 }
-/** One hunk diff between `before` and `after` (context: 3), carrying the
- *  1-based hunk start on each side so UIs can render a Claude Code style
- *  unified diff with real line numbers. Mirrors dsh-tool-fs
- *  `computeHunkDiffs`. */
+/** One file's hunks as unified patch TEXT (no file headers: the UI synthesizes
+ *  them from the diff's path and numbers every line from the `@@` starts).
+ *  Mirrors dsh-tool-fs `hunksPatch`. */
+function hunksPatch(hunks) {
+	return hunks.map((hunk) => `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`).join("\n");
+}
+/** The diff of a whole new file as patch text (`@@ -0,0 +1,N @@`, every line
+ *  added), so the UI numbers it from 1 and prints a `+N -0` stat. Mirrors
+ *  dsh-tool-fs `newFileDiff`. */
+function newFileDiff(path, content) {
+	const body = content.endsWith("\n") ? content.slice(0, -1) : content;
+	const lines = body === "" ? [] : body.split("\n");
+	return {
+		path,
+		patch: `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join("\n")}`
+	};
+}
+/** The file's change between `before` and `after` as one unified patch
+ *  (context: 3), or an empty list when the texts are identical. Mirrors
+ *  dsh-tool-fs `computeHunkDiffs`. */
 function computeHunkDiffs(path, before, after) {
 	const patch = structuredPatch("", "", before, after, void 0, void 0, { context: 3 });
-	const diffs = [];
-	for (const hunk of patch.hunks) {
-		const oldLines = [];
-		const newLines = [];
-		for (const line of hunk.lines) {
-			if (line.startsWith("\\")) continue;
-			const text = line.slice(1);
-			if (line.startsWith("-")) oldLines.push(text);
-			else if (line.startsWith("+")) newLines.push(text);
-			else {
-				oldLines.push(text);
-				newLines.push(text);
-			}
-		}
-		diffs.push({
-			path,
-			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
-			newText: newLines.join("\n"),
-			oldStart: hunk.oldStart,
-			newStart: hunk.newStart
-		});
-	}
-	return diffs;
+	if (patch.hunks.length === 0) return [];
+	return [{
+		path,
+		patch: hunksPatch(patch.hunks)
+	}];
 }
-/** Whether a candidate meta diffs array carries valid FileDiff shapes. */
+/** Whether a candidate meta diffs array carries valid FileDiff shapes: unified
+ *  patch text, or the old/new-texts pair. */
 function diffsFromMeta(meta) {
 	if (typeof meta !== "object" || meta === null) return void 0;
 	const diffs = meta.diffs;
-	if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "object" && d !== null && typeof d.path === "string" && (d.oldText === null || typeof d.oldText === "string") && typeof d.newText === "string")) return void 0;
+	if (!Array.isArray(diffs) || diffs.length === 0 || !diffs.every((d) => typeof d === "object" && d !== null && typeof d.path === "string" && (typeof d.patch === "string" || ((d.oldText === null || typeof d.oldText === "string") && typeof d.newText === "string")))) return void 0;
 	return diffs;
 }
 var MutationPolicy = class {
@@ -275,11 +274,7 @@ function presentEditorCall(args) {
 		case "create": return {
 			card: "diff",
 			title: `create ${args.path}`,
-			diffs: [{
-				path: args.path,
-				oldText: null,
-				newText: args.file_text ?? ""
-			}],
+			diffs: [newFileDiff(args.path, args.file_text ?? "")],
 			locations: [{ path: args.path }]
 		};
 		case "str_replace": return {

@@ -111,13 +111,15 @@ it belongs at the end of every one.
 
 Sources: `@deepseek-ai/dsh-tool-fs@0.2.0-rc.2`,
 `@deepseek-ai/dsh-tool-str-replace-editor@0.2.0-rc.2`,
-`@deepseek-harness-tui/dsh-tui@0.12.0`.
+`@deepseek-harness-tui/dsh-tui@0.15.0` for `AssistantToolUseMessage.js`
+(F1, re-ported 2026-10-14) and `@deepseek-harness-tui/dsh-tui@0.12.0` for the
+F3/F4 files still sitting on that baseline (they are re-ported next).
 
 | file | change |
 | --- | --- |
-| `dsh-tool-fs/lib/index.js` | `computeHunkDiffs` + `presentationMeta` now carry 1-based `oldStart`/`newStart` per hunk |
-| `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}`, result-time hunk diffs with line numbers via `presentationMeta` + new `presentResult` (model-facing output text unchanged) |
-| `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff renderer: CC-style `%Nd`+marker gutter, context lines, green/red full-row background bands (`diffAddedDimmed`/`diffRemovedDimmed`), word-level highlight (added words green-bg `diffAddedWord`, default ink, no bold; removed rows unstyled), `+N -M` change-count summary line, diff bodies never folded/hidden (`DIFF_BODY_MAX_LINES = Infinity`), new-file diffs preview only the `+N` stat + first 10 content lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest); tool-card hover keeps its background (upstream `hoverTint` branch removed) |
+| `dsh-tool-fs/lib/index.js` | every mutation's diff is emitted as **unified patch text** — `{path, patch}` with `@@ -a,b +c,d @@` + hunk lines for edits, `@@ -0,0 +1,N @@` for creations — so the TUI's own `parseFilePatch()` numbers it. The meta validator takes that shape *and* the old `oldText`/`newText` pair (replayed sessions keep rendering) |
+| `dsh-tool-str-replace-editor/lib/index.js` | `str_replace` returns `{message, before, after}` and its result-time diff card (upstream has no `presentationMeta` here at all) travels in the same patch-text shape via `presentResult`; the model-facing output text is unchanged |
+| `dsh-tui .../components/messages/AssistantToolUseMessage.js` | unified diff rows for `card: 'diff'`: **upstream numbers every line** from the parsed patch (`gutter`, right-aligned to the file's largest number; `(+N -M)` stat and `⋯` between hunks are upstream too), and this patch adds the Claude Code treatment — full-row green/red bands (`diffAddedDimmed`/`diffRemovedDimmed`) with default ink, word-level `diffAddedWord` background on the changed words of equal-length removed→added runs (`wordSegments`/`segmentNodes`), unified bodies never folded (`Infinity`; split panes keep upstream's 8), a created file previewing its diffstat plus the first 10 lines (`NEW_FILE_DIFF_MAX_LINES = 11`, Ctrl+O expands the rest), and tool-card hover keeping its background (upstream `hoverTint` branch removed). Test: `node ~/.dsh-tui/patches/test-f1-diff-rows.mjs` |
 | `dsh-tui .../screens/sessionSupervisor/useSessionSupervisor.js` | **F3 fork** (0.11.x replaced `screens/SessionBrowser.js` with this screen): the workspace rail is never rendered (`railVisible = false`), the keyboard starts in the list and `←` is inert (`activateRail` empty, `activePane` pinned to `list`), the selection is synthesized from `channel.cwd` instead of a rail row, and the rows are the sessions whose recorded cwd `samePath`-matches it — every other directory is unreachable, and the empty-registry fallback group can no longer pull in another project's history. Search, live status, rename, delete, Ctrl+N/Ctrl+X and pins stay |
 | `dsh-tui .../screens/SessionSupervisor.js` | Ctrl+N starts the session in that pinned directory (`newSessionIn(selected)`) instead of in the rail's focused workspace. Test: `node ~/.dsh-tui/patches/test-resume-flat.mjs` |
 | `dsh-tui .../i18n.js` | `supervisor-hint-list` drops the `←/→ switch pane` wording (the fork has no second pane to advertise) |

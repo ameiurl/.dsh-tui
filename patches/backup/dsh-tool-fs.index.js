@@ -400,50 +400,50 @@ function applyReadTool(ctx, caps) {
 		}
 	}));
 }
+/** One file's hunks as unified patch TEXT (no file headers: the UI synthesizes
+* them from the diff's path and numbers every line from the `@@` starts).
+* Patch-only no-newline markers stay in the text; parsers skip them. */
+function hunksPatch(hunks) {
+	return hunks.map((hunk) => `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`).join("\n");
+}
+/** The diff of a whole new file as patch text: `@@ -0,0 +1,N @@` with every
+* line added, so the UI numbers the body from 1 and prints a `+N -0` stat
+* instead of an unnumbered `-`/`+` dump of the content. */
+function newFileDiff(path, content) {
+	const body = content.endsWith("\n") ? content.slice(0, -1) : content;
+	const lines = body === "" ? [] : body.split("\n");
+	return {
+		path,
+		patch: `@@ -0,0 +1,${lines.length} @@\n${lines.map((line) => `+${line}`).join("\n")}`
+	};
+}
 /**
-* Compute one {@link FileDiff} per hunk between `before` and `after`, each carrying the
-* applied change plus {@link DIFF_CONTEXT} context lines. Pure insertions use `oldText: null`,
-* patch-only no-newline markers are omitted, and scattered replacements remain separate hunks.
+* Compute the {@link FileDiff} between `before` and `after`: the file's hunks
+* as one unified patch (context: 3), so the UI prints a single `+N -M` stat,
+* numbers every line from the hunk headers, and separates scattered hunks
+* itself.
 *
 * @param path - the path stamped on every produced diff (the model-facing `file_path`; the
 *   bridge relativizes it).
 * @param before - the file text before the change (the backend's LF-normalized diff basis).
 * @param after - the file text after the change, on the same basis.
-* @returns one diff per applied hunk, in file order; empty when the texts are identical.
+* @returns the file's diff, or an empty list when the texts are identical.
 */
 function computeHunkDiffs(path, before, after) {
 	const patch = structuredPatch("", "", before, after, void 0, void 0, { context: 3 });
-	const diffs = [];
-	for (const hunk of patch.hunks) {
-		const oldLines = [];
-		const newLines = [];
-		for (const line of hunk.lines) {
-			if (line.startsWith("\\")) continue;
-			const text = line.slice(1);
-			if (line.startsWith("-")) oldLines.push(text);
-			else if (line.startsWith("+")) newLines.push(text);
-			else {
-				oldLines.push(text);
-				newLines.push(text);
-			}
-		}
-		diffs.push({
-			path,
-			oldText: oldLines.length > 0 ? oldLines.join("\n") : null,
-			newText: newLines.join("\n"),
-			// 1-based first line of this hunk on each side — lets UIs render a
-			// Claude Code style unified diff with real line numbers.
-			oldStart: hunk.oldStart,
-			newStart: hunk.newStart
-		});
-	}
-	return diffs;
+	if (patch.hunks.length === 0) return [];
+	return [{
+		path,
+		patch: hunksPatch(patch.hunks)
+	}];
 }
-/** Whether `value` is a valid {@link FileDiff} (defensive narrowing from opaque `meta`). */
+/** Whether `value` is a valid {@link FileDiff} (defensive narrowing from opaque `meta`):
+* either unified patch text or the old/new-texts pair. */
 function isFileDiff(value) {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const { path, oldText, newText } = value;
-	return typeof path === "string" && (oldText === null || typeof oldText === "string") && typeof newText === "string";
+	const { path, oldText, newText, patch } = value;
+	if (typeof path !== "string") return false;
+	return typeof patch === "string" || ((oldText === null || typeof oldText === "string") && typeof newText === "string");
 }
 /**
 * Narrow opaque live or replayed result metadata to non-empty file diffs. Malformed metadata
@@ -573,13 +573,7 @@ function applyWriteTool(ctx, sandbox) {
 			}],
 			presentationMeta: (args, value) => ({
 				operation: value.operation,
-				diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
-					path,
-					oldText,
-					newText,
-					oldStart,
-					newStart
-				}))
+				diffs: value.before === null ? [newFileDiff(args.file_path, value.after)] : computeHunkDiffs(args.file_path, value.before, value.after)
 			})
 		},
 		async execute(args, exec) {
@@ -608,21 +602,13 @@ function applyWriteTool(ctx, sandbox) {
 			return {
 				card: "diff",
 				title: `Write ${args.file_path}`,
-				diffs: [{
-					path: args.file_path,
-					oldText: null,
-					newText: args.content
-				}],
+				diffs: [newFileDiff(args.file_path, args.content)],
 				locations: [{ path: args.file_path }]
 			};
 		},
 		presentResult(args, result) {
 			if (result.isError) return void 0;
-			const diffs = diffsFromMeta(result.meta) ?? [{
-				path: args.file_path,
-				oldText: null,
-				newText: args.content
-			}];
+			const diffs = diffsFromMeta(result.meta) ?? [newFileDiff(args.file_path, args.content)];
 			return {
 				card: "diff",
 				title: `Write ${args.file_path}`,
@@ -725,13 +711,7 @@ function applyEditTool(ctx, sandbox) {
 				type: "text",
 				text: formatEditOutput(value.path, args.replace_all ?? false)
 			}],
-			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText, oldStart, newStart }) => ({
-				path,
-				oldText,
-				newText,
-				oldStart,
-				newStart
-			})) })
+			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after) })
 		},
 		async execute(args, exec) {
 			const input = parseEditArgs(args);

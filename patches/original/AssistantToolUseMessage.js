@@ -11,10 +11,13 @@ import { useTooltip } from '../Tooltip.js';
 import { formatDuration } from '../../terminal-utils/format.js';
 import { formatClock } from '../../trajectory/format.js';
 import { foldLongLines } from '../../utils/fold-long-lines.js';
-import { getLang, t } from '../../i18n.js';
+import { getLang, t, tOr } from '../../i18n.js';
 import { revealLinesOf, snapReveal } from '../smoothReveal.js';
 import { useRevealVersion } from '../../hooks/useRevealVersion.js';
 import { primaryComboString } from '../../utils/keymap.js';
+import { agentMessageStateColor, agentMessageStateText } from './TranscriptLeaves.js';
+import { liveOutputMaxLines, liveOutputView } from './liveOutputLines.js';
+import { isPatchDiff, parseFilePatch, patchHeader } from '../diffPatch.js';
 /** Tool display names localize through the `tool-name-*` dictionary family
  *  (i18n.ts): DSH emits lowercase tool ids (`bash`), display names resolve
  *  per language — proper nouns (Bash, PowerShell) stay identical in zh.
@@ -34,7 +37,11 @@ const TOOL_NAME_KEYS = {
     subagent: 'tool-name-subagent',
     web_search: 'tool-name-web_search',
 };
-function displayName(name) {
+function displayName(name, displayKey) {
+    // A backend that names its tools its own way (Claude `Read`, `Bash`)
+    // supplies the key with the card view; the raw name is the fallback.
+    if (displayKey !== undefined)
+        return tOr(displayKey, name);
     const key = TOOL_NAME_KEYS[name];
     if (key !== undefined)
         return t(key);
@@ -52,6 +59,75 @@ function parseJsonArgs(args) {
 }
 function jsonArgsLanguage(args) {
     return parseJsonArgs(args) === undefined ? undefined : 'json';
+}
+// --- SendMessage card (the parent relaying a message to a subagent) --------
+/** The CC relay tool as the card claims it. Task* delegations already have
+ *  a first-class surface (the subagent card + waterfall), so the raw-JSON
+ *  dump this card replaces is SendMessage's alone — a second message-style
+ *  card for Task would duplicate that surface. */
+const SEND_MESSAGE_TOOL = 'SendMessage';
+const recOf = (value) => typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined;
+const strOf = (value) => typeof value === 'string' && value !== '' ? value : undefined;
+/** Parse one SendMessage call; undefined when the args are not the
+ *  recognizable relay shape (then the generic card stands). */
+function sendMessageCardOf(tool) {
+    if (tool.name !== SEND_MESSAGE_TOOL)
+        return undefined;
+    const args = recOf(parseJsonArgs(tool.argsFull ?? tool.argsText));
+    if (args === undefined)
+        return undefined;
+    const to = strOf(args.to) ?? strOf(args.recipient);
+    const text = strOf(args.message) ?? strOf(args.text);
+    if (to === undefined || text === undefined)
+        return undefined;
+    const pin = recOf(args.pin);
+    const pinName = strOf(pin?.name);
+    const target = pinName ?? (to.length > 8 ? `${to.slice(0, 8)}…` : to);
+    return {
+        target,
+        resuming: args.resuming === true || args.resume === true,
+        text,
+        ...(strOf(args.summary) === undefined ? {} : { summary: strOf(args.summary) }),
+    };
+}
+/** The delivery states a structured result may name explicitly. */
+const SEND_MESSAGE_EXPLICIT = Object.freeze({
+    delivered: 'delivered',
+    held: 'held',
+    refused: 'refused',
+    expired: 'expired',
+});
+/** The settled state of one SendMessage card — the UI-side mirror of
+ *  backends/claude/send-message.ts's rules (UI layers must not import
+ *  backends, verify:boundary): a call alone is `issued`; an error result is
+ *  a refusal fact; a structured `delivery`/`status` field naming a state
+ *  marks exactly that; any other shape — including bare success — is
+ *  `unknown`, never a guessed delivery. */
+function sendMessageCardState(tool) {
+    if (tool.status === 'running')
+        return 'issued';
+    if (tool.status === 'error')
+        return 'refused';
+    const structured = recOf(parseJsonArgs(tool.resultFull ?? tool.resultText ?? ''));
+    if (structured !== undefined) {
+        for (const key of ['delivery', 'status']) {
+            const named = SEND_MESSAGE_EXPLICIT[strOf(structured[key]) ?? ''];
+            if (named !== undefined)
+                return named;
+        }
+    }
+    return 'unknown';
+}
+/** The resumed fact of a structured result: resumedAgentId, or the pin's
+ *  agent id — displayed as「已唤醒 <短id>」. */
+function sendMessageResumedOf(tool) {
+    if (tool.status === 'running')
+        return undefined;
+    const structured = recOf(parseJsonArgs(tool.resultFull ?? tool.resultText ?? ''));
+    if (structured === undefined)
+        return undefined;
+    const resumed = strOf(structured.resumedAgentId) ?? strOf(recOf(structured.pin)?.agentId) ?? strOf(recOf(structured.pin)?.id);
+    return resumed === undefined ? undefined : resumed.length > 8 ? `${resumed.slice(0, 8)}…` : resumed;
 }
 function filePathFromTool(tool, view) {
     if (view !== undefined && 'path' in view && typeof view.path === 'string')
@@ -77,6 +153,12 @@ const DIFF_BODY_MAX_LINES = 8;
 /** Minimum terminal width for the two-pane diff: below this the panes
  *  would squeeze under ~50 columns each and the unified view reads better. */
 const SPLIT_DIFF_MIN_COLS = 110;
+/** Verbose (Ctrl+O / expanded) bodies render through a bounded line window:
+ *  a full result can be tens of thousands of lines, and laying that out in
+ *  one render builds a Yoga tree the frame budget cannot pay. The window
+ *  keeps the head readable and says exactly how much of the retained source
+ *  it is showing — the source itself keeps every line. */
+const VERBOSE_BODY_WINDOW = 400;
 const GUTTER_FIRST = ' ⎿ ';
 const GUTTER_REST = '   ';
 const add = (text) => ({ text, tone: 'add' });
@@ -89,7 +171,14 @@ const plain = (text) => ({ text, tone: 'plain' });
  *  mirrors the transcript tool-card name styling. */
 const TOOL_NAME_MUTATE = new Set(['edit', 'write', 'multiedit', 'notebookedit']);
 const TOOL_NAME_EXEC = new Set(['bash', 'bashpersistent', 'sh', 'shell', 'terminal']);
-export function toolNameColor(raw) {
+export function toolNameColor(raw, category) {
+    // A backend-declared colour family wins over the id heuristics below.
+    if (category === 'mutate')
+        return 'toolNameMutate';
+    if (category === 'exec')
+        return 'toolNameExec';
+    if (category === 'other')
+        return 'accent';
     const n = raw.toLowerCase();
     if (TOOL_NAME_MUTATE.has(n))
         return 'toolNameMutate';
@@ -108,13 +197,50 @@ function sideLines(text) {
         lines.pop();
     return lines;
 }
+/** A patch file → its header and numbered hunk rows: each line carries
+ *  its real line number (old for a removed line, new otherwise) in a gutter
+ *  as wide as the file's largest number; `⋯` separates hunks. A patch with
+ *  no readable hunk shows its own lines, coloured by their marker. */
+function patchLines(diff, multiFile) {
+    const parsed = parseFilePatch(diff);
+    const header = patchHeader(diff, parsed, multiFile);
+    const out = [header.kind === 'path'
+            ? { text: header.path, tone: 'path', target: header.target, suffix: header.suffix }
+            : dim(header.text)];
+    if (parsed.raw !== undefined) {
+        for (const line of parsed.raw)
+            out.push(line.startsWith('+') ? add(line) : line.startsWith('-') ? del(line) : plain(line));
+        return out;
+    }
+    const width = String(parsed.maxLineNo).length;
+    parsed.hunks.forEach((hunk, index) => {
+        if (index > 0)
+            out.push(dim('⋯'));
+        for (const line of hunk.lines) {
+            const no = String((line.kind === 'del' ? line.oldNo : line.newNo) ?? '').padStart(width);
+            if (line.kind === 'del')
+                out.push(del(`${no} - ${line.text}`));
+            else if (line.kind === 'add')
+                out.push(add(`${no} + ${line.text}`));
+            else
+                out.push(plain(`${no}   ${line.text}`));
+        }
+    });
+    return out;
+}
 /** Diff hunks → add/del rows. The header already carries the path for the
  *  common single-hunk case; with several hunks a path row separates files
- *  and `⋯` separates scattered hunks of one file (upstream DiffBlock). */
+ *  and `⋯` separates scattered hunks of one file (upstream DiffBlock). A
+ *  patch file (`ToolFileDiff.patch`) renders through {@link patchLines}. */
 function diffLines(diffs) {
     const out = [];
     let prevPath;
     for (const diff of diffs) {
+        if (isPatchDiff(diff)) {
+            out.push(...patchLines(diff, diffs.length > 1));
+            prevPath = diff.path;
+            continue;
+        }
         if (diffs.length > 1) {
             if (diff.path !== prevPath)
                 out.push({ text: diff.path, tone: 'path' });
@@ -146,16 +272,12 @@ function viewLines(view) {
             return diffLines(view.diffs);
         case 'terminal': {
             // The call-side terminal card has no output yet; only presentResult's
-            // does. `in` narrows the call/result union without extra types.
+            // does. `in` narrows the call/result union without extra types. The
+            // exit-code / signal lines are NOT body content: the component renders
+            // them after the line cap (see terminalExitLines) so a long output can
+            // never fold the failure verdict away.
             const out = (('output' in view ? view.output : undefined) ?? '').trimEnd();
-            const lines = out === '' ? [] : out.split('\n').map(plain);
-            if ('exitCode' in view && view.exitCode !== undefined && view.exitCode !== 0) {
-                lines.push({ text: t('tool-exit-code', { code: view.exitCode }), tone: 'error' });
-            }
-            if ('signal' in view && view.signal !== undefined) {
-                lines.push({ text: t('tool-killed-signal', { name: String(view.signal) }), tone: 'error' });
-            }
-            return lines;
+            return out === '' ? [] : out.split('\n').map(plain);
         }
         case 'read':
             return contentLines('content' in view ? view.content : undefined);
@@ -183,17 +305,45 @@ function viewLines(view) {
             return [];
     }
 }
+/** Compact char counter for fold hints (1.2k / 3.4M). */
+function compactChars(count) {
+    if (count < 10_000)
+        return String(count);
+    if (count < 10_000_000)
+        return `${(count / 1000).toFixed(1)}k`;
+    return `${(count / 1_000_000).toFixed(1)}M`;
+}
+/** Fold-hint parts: "3 行", "1.2k 字符" or "3 行 · 1.2k 字符" — one count per
+ *  fold kind that actually hid something, composed in the localized unit
+ *  words so the sentence grammar stays with i18n. */
+function foldHintParts(hiddenLines, hiddenChars) {
+    const parts = [];
+    if (hiddenLines > 0)
+        parts.push(t('tool-card-lines-unit', { n: hiddenLines }));
+    if (hiddenChars > 0)
+        parts.push(t('tool-card-chars-unit', { n: compactChars(hiddenChars) }));
+    return parts.join(' · ');
+}
 /** Collapsed bodies fold past the card's line budget; verbose (Ctrl+O) is
- *  always uncapped. Mirrors wrapText's "one extra line is shown directly". */
-function capLines(lines, max, verbose) {
+ *  always uncapped. Mirrors wrapText's "one extra line is shown directly".
+ *  A lines-only fold keeps the historical shared hint (lines-folded-expand)
+ *  byte-identical; a fold that also (or only) clipped CHARACTERS inside long
+ *  lines uses the combined indicator so the hidden volume stays honest. */
+function capLines(lines, max, verbose, hiddenChars) {
     if (verbose || lines.length <= max)
         return lines;
     if (lines.length - max === 1)
         return lines;
-    return [
-        ...lines.slice(0, max),
-        { ...dim(t('lines-folded-expand', { n: lines.length - max, key: primaryComboString('transcript') })), revealOnHover: true },
-    ];
+    const hiddenLines = lines.length - max;
+    // Chars clipped inside the VISIBLE lines carry their own inline marker
+    // (fold-long-lines); the hint aggregates what the line fold hid — the
+    // clipped characters of the sliced-away rows included — so "how much is
+    // hidden" answers in one place. A lines-only fold keeps the historical
+    // shared hint byte-identical.
+    const hint = hiddenChars > 0
+        ? { ...dim(t('tool-card-lines-hidden', { parts: foldHintParts(hiddenLines, hiddenChars), key: primaryComboString('transcript') })), revealOnHover: true }
+        : { ...dim(t('lines-folded-expand', { n: hiddenLines, key: primaryComboString('transcript') })), revealOnHover: true };
+    return [...lines.slice(0, max), hint];
 }
 /** Long-line clip for the body rows (utils/fold-long-lines.ts): the line cap
  *  above bounds how MANY rows a card paints, this bounds how many rows ONE
@@ -205,6 +355,7 @@ function capLines(lines, max, verbose) {
  *  nothing. */
 function foldBodyLines(lines) {
     let out;
+    let hiddenChars = 0;
     for (let index = 0; index < lines.length; index++) {
         const line = lines[index];
         const folded = foldLongLines(line.text);
@@ -214,8 +365,9 @@ function foldBodyLines(lines) {
         }
         out ??= lines.slice(0, index);
         out.push({ ...line, text: folded.text });
+        hiddenChars += folded.hiddenChars;
     }
-    return out ?? lines;
+    return out === undefined ? { lines, hiddenChars: 0 } : { lines: out, hiddenChars };
 }
 /** Header title from the presentation view: terminal cards keep the
  *  `Name(command)` shape; everything else renders the tool's own title
@@ -362,7 +514,7 @@ function HeaderTitle({ name, title, isTerminal, folded, displayArgs, argsLanguag
  * output, read content — instead of the raw result dump. The channel captures
  * the structured views per call.
  */
-export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, smoothReveal = false, fresh = false, revealVersion, }) {
+export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSelected = false, isExpanded = false, onClick, footnote, diffLayout = 'auto', toolBackground = 'none', onOpenFile, foldTerminalCommand = false, smoothReveal = false, fresh = false, revealVersion, sourceFolded = false, fullscreen = false, }) {
     // MessageList owns the single production subscription and passes a version
     // prop only to active reveal rows. Standalone consumers keep the fallback
     // subscription so the component contract remains self-contained.
@@ -372,20 +524,28 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
     useRevealVersion(revealVersion === undefined);
     const isRunning = tool.status === 'running';
     const isError = tool.status === 'error';
+    const sendMessage = sendMessageCardOf(tool);
+    // The send-message card's raw layer (args/result JSON) shows on verbose OR
+    // a row click — the click is the mouse user's only「看全量」path.
+    const sendMessageRawOpen = sendMessage !== undefined && (verbose || isExpanded);
     const displayArgs = verbose ? tool.argsFull ?? tool.argsText : tool.argsText;
     const result = tool.resultFull ?? tool.resultText;
-    const name = displayName(tool.name);
-    const minWidth = stringWidth(name) + 2;
     // The settled view carries the applied diff / actual output; while running,
     // the call view already shows the pending change.
     const view = tool.resultView ?? tool.callView;
+    const name = displayName(tool.name, view?.displayKey ?? tool.callView?.displayKey);
+    const minWidth = stringWidth(name) + 2;
     const filePath = filePathFromTool(tool, view);
     const syntaxLanguage = view?.card === 'read' || view?.card === 'generic' || view === undefined
         ? languageFromPath(filePath)
         : undefined;
     // presentResult may omit a title (terminal results carry output, not a
-    // command) — then the call view's title stands.
-    const headerTitle = tool.resultView?.title ?? tool.callView?.title;
+    // command) — then the call view's title stands. The SendMessage card owns
+    // its header outright: `SendMessage → <target>` (+ the resume mark), the
+    // raw args parens stay out of the header.
+    const headerTitle = sendMessage !== undefined
+        ? `${displayName(tool.name)} → ${sendMessage.target}${sendMessage.resuming ? ` · ${t('send-message-card-resuming')}` : ''}`
+        : tool.resultView?.title ?? tool.callView?.title;
     const headerIsTerminal = view?.card === 'terminal';
     // Fold the terminal header: multi-line command script (setting-gated) plus
     // the always-on long-line clip, both off once the card is verbose/expanded
@@ -432,10 +592,45 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
         - (!isRunning && elapsedText !== '' ? stringWidth(elapsedText) : 0));
     const useSplitDiff = !isError && view?.card === 'diff' &&
         (diffLayout === 'split' || (diffLayout !== 'unified' && columns >= SPLIT_DIFF_MIN_COLS));
+    // Live output of the running call: the newest lines of the bounded tail,
+    // sanitized and cut to the body width in cells (liveOutputLines.ts).
+    // Memoized on the tail itself, so the 1 s elapsed tick re-renders without
+    // rescanning; only a new chunk (a new string) recomputes.
+    const liveText = isRunning && !isError && sendMessage === undefined && !useSplitDiff ? tool.liveOutput ?? '' : '';
+    const liveDropped = tool.liveOutputDropped ?? 0;
+    const liveMaxLines = liveOutputMaxLines(verbose, fullscreen);
+    const liveWidth = Math.max(1, columns - 4);
+    const liveView = React.useMemo(() => liveText === '' ? undefined : liveOutputView(liveText, liveDropped, liveMaxLines, liveWidth), [liveText, liveDropped, liveMaxLines, liveWidth]);
     let body = [];
-    if (isError) {
+    if (sendMessage !== undefined) {
+        // 正文 = message 文本预览（长文走既有的三行折叠），summary 作副行；
+        // to/type/recipient/content 等原始字段只在 raw 层出现。
+        body = sendMessage.text.split('\n').map(plain);
+        if (sendMessage.summary !== undefined) {
+            body.push(dim(`${t('send-message-card-summary-label')}: ${sendMessage.summary}`));
+        }
+        // 失败文案不属于 raw 层：折叠态也要看得见拒绝原因。
+        if (isError && tool.errorText !== undefined && tool.errorText !== '') {
+            body.push(...tool.errorText.split('\n').map(line => ({ text: line, tone: 'error' })));
+        }
+        if (sendMessageRawOpen) {
+            const rawArgs = (verbose ? tool.argsFull : undefined) ?? tool.argsText;
+            body.push(dim(t('send-message-card-args')));
+            body.push(...rawArgs.split('\n').map(dim));
+            const rawResult = tool.resultFull ?? tool.resultText;
+            if (rawResult !== undefined && rawResult !== '') {
+                body.push(dim(t('send-message-card-result')));
+                body.push(...rawResult.split('\n').map(dim));
+            }
+        }
+    }
+    else if (isError) {
+        // Line-aware like every other body: a multi-line error (a stack trace)
+        // goes through the SAME line budget and fold hint as tool output — the
+        // verdict visibility problem the exit lines solve does not excuse an
+        // unbounded error body in a collapsed card.
         if (tool.errorText)
-            body = [{ text: tool.errorText, tone: 'error' }];
+            body = tool.errorText.split('\n').map((text) => ({ text, tone: 'error' }));
     }
     else if (!useSplitDiff) {
         if (view !== undefined)
@@ -448,16 +643,57 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
         }
     }
     const cap = view?.card === 'diff' ? DIFF_BODY_MAX_LINES : TEXT_BODY_MAX_LINES;
+    // 展开态（点击/verbose）的 SendMessage 卡不截断——raw 层就是「全量」。
+    const bodyUncapped = verbose || sendMessageRawOpen;
     // Long-line clip before anything downstream reads the body: the syntax
     // highlighter walks `bodySource` by line index, so the folded text must be
     // the single source of truth for both.
-    const bodyLines = verbose ? body : foldBodyLines(body);
+    const foldedBody = bodyUncapped ? { lines: body, hiddenChars: 0 } : foldBodyLines(body);
+    const bodyLines = foldedBody.lines;
     const bodySource = bodyLines.map(line => line.text).join('\n');
     const argsLanguage = jsonArgsLanguage(displayArgs);
+    const capped = capLines(bodyLines, cap, bodyUncapped, foldedBody.hiddenChars);
+    // Verbose bodies walk a bounded window (see VERBOSE_BODY_WINDOW): the tail
+    // stays in the retained source, and the card says what it is showing.
+    const lines = verbose && capped.length > VERBOSE_BODY_WINDOW
+        ? [
+            ...capped.slice(0, VERBOSE_BODY_WINDOW),
+            { ...dim(t('tool-card-window-shown', { shown: VERBOSE_BODY_WINDOW, total: capped.length })), revealOnHover: false },
+        ]
+        : capped;
+    // The terminal verdict rides OUTSIDE every cap (the footnote's rule): a
+    // long output must never fold the non-zero exit code or kill signal away —
+    // the settled card keeps the failure readable without the hover tooltip.
+    const terminalExitLines = [];
+    if (!isError && tool.resultView !== undefined && tool.resultView.card === 'terminal') {
+        const rv = tool.resultView;
+        if (rv.exitCode !== undefined && rv.exitCode !== 0) {
+            terminalExitLines.push({ text: t('tool-exit-code', { code: rv.exitCode }), tone: 'error' });
+        }
+        if (rv.signal !== undefined) {
+            terminalExitLines.push({ text: t('tool-killed-signal', { name: String(rv.signal) }), tone: 'error' });
+        }
+    }
+    // Full-vs-preview disclosure (expanded cards only — the collapsed card is
+    // a preview by design and its fold indicator already says so): a folded
+    // SOURCE cannot expand past its preview, and a structured-only result has
+    // no raw full text to expand into. Both say so instead of passing the
+    // visible slice off as everything.
+    const disclosure = verbose
+        ? sourceFolded
+            ? [dim(t('tool-card-source-truncated'))]
+            : tool.resultFull === undefined && tool.resultView !== undefined && !isRunning
+                ? [dim(t('tool-card-full-unavailable'))]
+                : []
+        : [];
     // The footnote rides OUTSIDE the cap: it is a pointer, not content, and a
     // long error body must not be the reason it disappears.
-    const lines = capLines(bodyLines, cap, verbose);
-    const rendered = footnote === undefined ? lines : [...lines, { text: footnote, tone: 'hint' }];
+    const rendered = [
+        ...lines,
+        ...disclosure,
+        ...terminalExitLines,
+        ...(footnote === undefined ? [] : [{ text: footnote, tone: 'hint' }]),
+    ];
     // Smooth reveal (line-unit, pending CALL body only): model-authored prose
     // (diff hunks, write content) flows in at ~30fps; the settled RESULT view,
     // error bodies, verbose/expanded cards, and replayed (non-fresh) cards all
@@ -472,7 +708,20 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
     const revealedLineCount = revealable
         ? revealLinesOf(revealKey, rendered.length, { enabled: true, active: true })
         : rendered.length;
-    const shownLines = revealedLineCount >= rendered.length ? rendered : rendered.slice(0, revealedLineCount);
+    const revealedLines = revealedLineCount >= rendered.length ? rendered : rendered.slice(0, revealedLineCount);
+    // Live output rides OUTSIDE the line cap and the smooth reveal: it is the
+    // tool's real progress (never prose), so it paints complete, right under
+    // the body (the running line), once the body itself is fully shown. The
+    // omitted header counts every older line, dropped or above the window.
+    const liveLines = liveView === undefined
+        ? []
+        : [
+            ...(liveView.omitted > 0 ? [dim(t('tool-live-omitted', { count: liveView.omitted }))] : []),
+            ...liveView.lines.map((text) => ({ text, tone: 'live' })),
+        ];
+    const shownLines = liveLines.length === 0 || revealedLines.length < rendered.length
+        ? revealedLines
+        : [...lines, ...liveLines, ...rendered.slice(lines.length)];
     // Nested split-diff context panes must also yield to interaction highlights.
     // `none` leaves them transparent so the selected/expanded root shows through.
     const ordinaryToolBackground = isSelected || isExpanded ? 'none' : toolBackground;
@@ -490,21 +739,25 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
     // body never moves.
     const [hovered, setHovered] = React.useState(false);
     const hoverTint = interactive && hovered && !isSelected;
+    // SendMessage 结果行：状态只取结果里明确给出的值；resumedAgentId/pin
+    // 显示为「已唤醒 <短id>」；没有明确状态时注明送达状态未知。
+    const sendMessageState = sendMessage === undefined ? undefined : sendMessageCardState(tool);
+    const sendMessageResumed = sendMessage === undefined ? undefined : sendMessageResumedOf(tool);
     return (_jsx(Box, { ref: viewportRef, flexDirection: "row", justifyContent: "space-between", marginTop: marginTopOnTurn ? 1 : 0, width: "100%", onClick: onClick, 
         // Only selection paints a highlight; the configured treatment applies
         // to an ordinary card. Diff line tints stay - they are content, not chrome.
-        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
+        backgroundColor: isSelected ? 'messageActionsBackground' : hoverTint ? 'toolCardBackground' : ordinaryBackground, onMouseEnter: interactive ? () => setHovered(true) : undefined, onMouseLeave: interactive ? () => setHovered(false) : undefined, children: _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsxs(Box, { flexDirection: "row", flexWrap: "nowrap", minWidth: minWidth, children: [_jsx(ToolUseLoader, { shouldAnimate: isRunning, isUnresolved: isRunning, isError: isError, toolName: tool.name }), _jsx(HeaderTitle, { name: name, title: headerTitle, isTerminal: headerIsTerminal, folded: foldedHeader, displayArgs: displayArgs, argsLanguage: argsLanguage, nameColor: toolNameColor(tool.name, view?.category ?? tool.callView?.category), filePath: filePath, onOpenFile: onOpenFile, metaTooltip: () => toolCardMetaTooltip(tool, isRunning, isError), headerTextBudget: headerTextBudget }), !isRunning && (_jsx(Box, { flexWrap: "nowrap", children: _jsx(Text, { dimColor: !hovered, children: elapsedText }) })), hovered && (_jsx(Box, { flexShrink: 0, children: _jsx(Text, { dimColor: true, children: isExpanded ? '▴' : '▾' }) }))] }), useSplitDiff && view?.card === 'diff' ? (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_FIRST }) }), _jsx(SplitDiffView, { diffs: view.diffs, width: columns - 4, maxRows: DIFF_BODY_MAX_LINES, verbose: verbose, toolBackground: ordinaryToolBackground, reveal: revealable ? { key: `${revealKey}:split` } : undefined })] })) : (shownLines.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'add'
                                     ? 'diffAddedWord'
                                     : line.tone === 'del'
                                         ? 'diffRemovedWord'
                                         : line.tone === 'path'
                                             ? 'ide'
-                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, children: line.tone === 'path' && onOpenFile !== undefined ? (_jsx(Box, { onClick: (event) => {
+                                            : undefined, dimColor: line.tone !== 'add' && line.tone !== 'del' && line.tone !== 'path', children: index === 0 ? GUTTER_FIRST : GUTTER_REST }) }), _jsx(Box, { flexGrow: 1, children: line.tone === 'path' && onOpenFile !== undefined ? (_jsxs(Box, { onClick: (event) => {
                                     // Stop propagation so the row's fold toggle does not
                                     // fire when clicking the path.
                                     event.stopImmediatePropagation();
-                                    onOpenFile(line.text);
-                                }, children: _jsx(Text, { color: "ide", underline: true, children: line.text }) })) : (_jsx(Text, { color: line.tone === 'add'
+                                    onOpenFile(line.target ?? line.text);
+                                }, children: [_jsx(Text, { color: "ide", underline: true, children: line.text }), line.suffix !== undefined && _jsx(Text, { dimColor: true, children: line.suffix })] })) : (_jsxs(Text, { color: line.tone === 'add'
                                     ? 'diffAddedWord'
                                     : line.tone === 'del'
                                         ? 'diffRemovedWord'
@@ -514,5 +767,5 @@ export function AssistantToolUseMessage({ tool, marginTopOnTurn, verbose, isSele
                                                 ? 'subtle'
                                                 : line.tone === 'path'
                                                     ? 'ide'
-                                                    : undefined, dimColor: line.tone === 'dim' && !(line.revealOnHover === true && hovered), wrap: "wrap", children: line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text) })) })] }, index)))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
+                                                    : undefined, dimColor: (line.tone === 'dim' && !(line.revealOnHover === true && hovered)) || line.tone === 'live', wrap: line.tone === 'live' ? 'truncate-end' : 'wrap', children: [line.tone === 'plain' && syntaxLanguage !== undefined ? (_jsx(SyntaxText, { text: line.text, sourceText: bodySource, lineIndex: index, language: syntaxLanguage })) : (line.text === '' ? ' ' : line.text), line.suffix !== undefined && _jsx(Text, { dimColor: true, children: line.suffix })] })) })] }, index)))), sendMessage !== undefined && sendMessageState !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: agentMessageStateColor(sendMessageState), children: agentMessageStateText(sendMessageState) }), sendMessageResumed !== undefined && (_jsx(Text, { dimColor: true, children: ` · ${t('send-message-card-resumed', { id: sendMessageResumed })}` })), sendMessageState === 'unknown' && (_jsx(Text, { dimColor: true, italic: true, children: ` · ${t('agent-message-no-delivery-fact')}` }))] })), useSplitDiff && disclosure.length > 0 && disclosure.map((line, index) => (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { dimColor: true, children: line.text })] }, `disclosure-${index}`))), useSplitDiff && footnote !== undefined && (_jsxs(Box, { flexDirection: "row", children: [_jsx(Box, { width: 3, flexShrink: 0, children: _jsx(Text, { dimColor: true, children: GUTTER_REST }) }), _jsx(Text, { color: "subtle", children: footnote })] }))] }) }));
 }

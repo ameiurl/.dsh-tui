@@ -114,28 +114,59 @@
   - `profiles/node_modules/@deepseek-ai/dsh-tool-fs/lib/index.js`
   - `profiles/node_modules/@deepseek-ai/dsh-tool-str-replace-editor/lib/index.js`
   - `…/dsh-tui/lib/types/components/messages/AssistantToolUseMessage.js`
-- **基线版本（2026-09-17 重移植）**：tool 两包补丁是对着 **0.1.5-rc.2** 重做的。
-  0.1.2-rc.1 时代的旧 `backup/` 里带着一段**已过时的上游回退**（去掉 scope-aware 提示语、
-  把 `REMEDIES` 重构倒回内联 if/else），直接盖上去 = 把上游代码降级，**别用**。
-- **三个文件必须成套**：只打 TUI 渲染器、tool 包没打 → 行号消失（渲染器
-  `numbered = typeof diff.oldStart === 'number'` 兜底成纯 `+/-`）且 `str_replace`
-  完全不出 diff 卡；只打 tool 包、渲染器没打 → 白打。
+- **0.15.0 重移植（2026-10-14，方案 D：行号交给上游，我们只加装饰）**：0.15.0 上游自己
+  有了 `diffLayout: auto|split|unified`（我们的 `cordis.patch.yml` 锁 `unified`）**和**一套
+  按 `patch` 文本编号的渲染（`components/diffPatch.js` 的 `parseFilePatch`/`patchHeader`，
+  支持**无文件头**的补丁）。所以：
+  - **tool 两包改成吐 patch 文本**：`computeHunkDiffs` 把该文件的全部 hunk 序列化成
+    `@@ -oldStart,oldLines +newStart,newLines @@` + `hunk.lines`，返回**一个**
+    `{ path, patch }`（原来是"每 hunk 一个 `{path, oldText, newText, oldStart, newStart}`"）；
+    两个包的 meta 校验器（`isFileDiff` / `diffsFromMeta`）同时接受 `patch` 与旧的
+    `oldText/newText` 两种形状（旧日志/回放仍能渲染）。新建文件走 `newFileDiff()`：
+    `@@ -0,0 +1,N @@` + 每行 `+`，于是渲染器从 **1** 开始编号、统计行是 `+N -0`。
+  - **渲染器只补 stock 画不出来的那一层**：`patchLines()` 用 `parseFilePatch()` 的
+    `hunk.lines`（**带 `oldNo`/`newNo`**）生成行，每行带 `gutter`（宽度 = 文件最大行号的
+    位数，右对齐）与 `segments`；`diffLines()` 的非 patch 分支保持 stock 不动。
+  - **不再有** `oldStart`/`newStart` 字段、也不再有我们自绘的行号逻辑（那是旧补丁里最容易
+    随上游漂移的部分）。
 - **行为**：diff 以 **unified** 呈现——真实行号 gutter、上下文行、`+`/`-` 标记、
-  绿/红**整行底色**（`diffAddedDimmed`/`diffRemovedDimmed`）、词级高亮（仅新增词绿底
-  `diffAddedWord`）、`+N -M` 变更数汇总行、diff 正文永不折叠。
-  - tool 包改动：hunk 携带 1-based `oldStart`/`newStart`（`computeHunkDiffs`/
-    `presentationMeta`）；`str_replace` 返回 `{message,before,after}` + 结果期带行号
-    hunk diff（`presentResult`，模型可见输出文本不变）。
-  - **个人偏好**（以下 diff 行为是重移植时最容易弄丢的，务必保留）：
-    - **diff 正文永不隐藏 / 不折叠**：`DIFF_BODY_MAX_LINES = Infinity` —— 编辑/删除
-      diff 全量展示，正文不出现 `… +N lines` 折叠行。
-    - **新建文件只预览前 10 行**：`NEW_FILE_DIFF_MAX_LINES = 11` —— write 建新文件时
-      只显示 `+N` stat 行 + 前 10 行内容，其余以 `… +N lines (ctrl+o to expand)` 收起；
-      Ctrl+O（verbose）展开全部。注意 0.10.1 上游新增了 `foldBodyLines`（长行裁剪），
-      new-file 上限要与它同时作用于 `bodyLines`。
-    - hover 工具卡不变底色（只有选中高亮）；0.10.1 上游的 `hoverTint` 分支已按此删除。
-- **验证**：触发一次 Edit/Write，看是否 CC 统一式（行号 + 绿红底）；NEW 文件只出
-  前 10 行（`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行。
+  `+N -M` 变更数汇总行、hunk 之间 `⋯`、多文件时路径行（**以上四项由 stock 提供**），
+  外加我们的装饰：
+  - 绿/红**整行底色**：`diffRowBackground(tone)` → `diffAddedDimmed`/`diffRemovedDimmed`，
+    行内文字用默认色（CC 的做法：底色承载增删，文字不染色）；
+  - **词级高亮**：删除段与新增段**等长**时逐行配对（`wordSegments`，先剥掉公共缩进再
+    `JsDiff.diffWords`），**仅新增行的变更词**加 `diffAddedWord` 底色，删除行不加装饰；
+  - **diff 正文永不折叠**：unified diff 卡的 `cap` 是 `Infinity`（stock 原为 8 行 +
+    `… +N lines`）；`DIFF_BODY_MAX_LINES = 8` 只留给分屏 `SplitDiffView` 的 `maxRows`；
+  - **新建文件只预览前 10 行**：`NEW_FILE_DIFF_MAX_LINES = 11` —— `isNewFileDiff()`
+    命中时按 11 行截断，即 stat 行 + 前 10 行，其余 `… +N lines (ctrl+o to expand)`，
+    Ctrl+O 展开全部。判据是"**整段全是新增行**"（解析器会把 `@@ -0,0 +1,N @@` 的
+    `oldStart` 归一成 1，所以不能靠 `oldStart === 0`；纯插入型编辑仍带上下文行，
+    不会被误判），旧形状的 `oldText === null` 也算；
+  - **hover 工具卡不变底色**：stock 的 `hoverTint` 分支已删，只有选中才高亮。
+  - `str_replace` 返回 `{message,before,after}` + 结果期 diff 卡（`presentResult`，
+    模型可见输出文本不变）——**这张卡整张是我们的**，stock 的 str-replace 工具根本没有
+    `presentationMeta`。
+- **重移植注意**：三个文件仍要成套，但分工变了——tool 包负责"产出可被上游解析的 patch 文本"，
+  渲染器负责"底色/词级/折叠/hover"。若上游把 diff 卡改成别的形状，先保住底线：
+  **Edit/Write 有真实行号 + 整行底色 + 永不折叠 + 新文件预览**。
+- **与上游 PR #1269 的关系（2026-10-14 查证）**：PR 新增 `diffStyle: 'default' | 'bars'`
+  （`▌` 竖条 + 整行底色，走新的 `UnifiedDiffView`），**尚未合并**（open + `on hold`），
+  发布的 0.15.0 里没有 `diffStyle`。等它落地后可以考虑：改用 `diffStyle: bars`、把我们的
+  底色层退役；**届时主题键要重排**——PR 用**强色** `diffAdded`/`diffRemoved` 当整行底色，
+  而我们的主题目前把强色当文字/预览色、把 `*Dimmed` 当底色、把 `*Word` 当词级底色。
+- **验证**：
+  1. 触发一次 Edit/Write：行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行
+     （`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行；
+     hover 工具卡底色不变。
+  2. 命令行无头测试（把 tool 的真实 presentation 钩子接到渲染器的 `diffRows()` 上）：
+     ```bash
+     node ~/.dsh-tui/patches/test-f1-diff-rows.mjs
+     ```
+     断言：Edit/Write 产出**一个** patch 形状的 diff；行号由 stock 解析器给出（旧行号给
+     删除行、新行号给其余行，宽度取最大行号）；等长的删除/新增段逐行配对并有词级
+     `segments`、不等长则不带；`⋯` 分隔多个 hunk；新建文件从 1 编号且统计 `+N -0`；
+     两个包的校验器同时接受 `patch` 与旧的 `oldText/newText` 形状。
 
 ### F2 — ↑/↓ 跨会话历史（按当前工作目录过滤）：**已退役（0.15.0 起回归 stock）**
 - **为什么退役**：0.15.0 上游自己把整条链做成了 stock，而且比补丁更完整——
@@ -517,9 +548,15 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 
 覆盖面：§1.1 版本表（壳 / 生态 / tool 两包都按各自基线断言，含
 `patch-base-versions.json` 可解析且与 `patch-base-version` 一致）/ §1.2 用户级设置 /
-F1 的 `DIFF_BODY_MAX_LINES` 与 `NEW_FILE_DIFF_MAX_LINES` 与 `hoverTint` 已删 **与 tool 侧
-4 个锚点（`oldStart`/`newStart` 产出、`presentationMeta` 转发、`computeHunkDiffs`、
-`presentResult`）与「tool 补丁不含上游回退」** / **F2 已退役**：上游 stock 的
+F1 的「unified diff 不折叠（`newFileDiff ? NEW_FILE_DIFF_MAX_LINES : Infinity`）、
+`NEW_FILE_DIFF_MAX_LINES = 11`、分屏仍 8（`DIFF_BODY_MAX_LINES = 8`）、
+`diffRowBackground`/段级 `diffAddedDimmed`、`wordSegments`+`segmentNodes`、
+`gutter: gutterOf(`、`hunk.lines.every(line => line.kind === 'add')` 的新文件判定、
+`hoverTint` 已删、
+`diffRows` 测试缝」**与 tool 侧「`hunksPatch` 序列化 + `patch: hunksPatch(patch.hunks)`、
+`newFileDiff` 的 `@@ -0,0 +1,N @@`、两个校验器都收 `patch`、`oldStart` 已彻底移除、
+`presentResult` 的 str_replace 卡」与「tool 补丁不含上游回退」+ 行为测试
+`test-f1-diff-rows.mjs` 通过 / **F2 已退役**：上游 stock 的
 `loadHistory(cwd)`、`loadHistoryOldestFirst(cwd)`、`appendHistory(text, cwd)`、
 `PromptInput` 的按目录播种与 `Chat.js` 的 `loadHistory(channel.cwd)` 仍在
 （契约测试 `test-history-cwd.mjs` 通过），且 `history.js`／`PromptInput.js`／`Chat.js`
@@ -540,7 +577,7 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 与逐包基线读取 / `dsh-patch` 别名在 `~/.zshrc` 与 `~/.bashrc` 里都在 /
 目标数 = `original/` = `diffs/` 且命名一致 / **每个 `diffs/*.patch` 都能在它自己的
 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**（只有真正重移植过的基线做得到；
-要靠 fuzz 才贴得上就是漂移）/ 四个测试通过（F3/F4 行为 + F2/F5 上游契约）。
+要靠 fuzz 才贴得上就是漂移）/ 五个测试通过（F3/F4 行为 + F1/F2/F5 契约）。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
 
 ---
@@ -571,6 +608,7 @@ apply 脚本的断链拷贝（`cp --remove-destination`）、**diff 直打路径
 | **0.12.0 迁移**（2026-09-30，profile & 壳 → `0.12.0`；生态 `dsh`/tool 两包 → `0.2.0-rc.2`） | `dsh-patch check` 报 **10/10 `DIFFERS`**（补丁全被升级还原），但**没有一条 `NEEDS-REPORT`**：其中 7 个目标（`AssistantToolUseMessage`/`history`/`useSessionSupervisor`/`SessionSupervisor`/`digest` 加 tool 两包）的新 stock 与 `original/` **逐字节相同** → 整文件恢复即可；上游真正动过的只有 `Chat.js`、`PromptInput.js`、`i18n.js`（鲸鱼券弹窗 `WhaleCouponPrompt`/`bonusNotices`、`channel.minimal` → `minimalUi`、`cycleMode()` 补 catch、`/resume` 一批新 key 等） | ①按 §3 对那 3 个做三方合并（`base`=0.11.2 `original`、`theirs`=0.11.2 `backup`、`ours`=0.12.0 stock）：**3/3 零冲突**，且结果与「旧 diff 直接贴在 0.12.0 上（`--fuzz=0`）」**逐字节相同** → 定制点一处没挪窝，上游改动全部保留（F2 的 `historySeedCwd` 三处、Ctrl+R 的 `loadHistory(channel.cwd)`、F3 的 `supervisor-hint-list` 文案）。②`original/` 换成 0.12.0 stock（= 已装原版）、`backup/` 换成合并结果、`diffs/` 重新生成，**10/10 都能在各自的 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/`**；`state/` 保持空。③基线 `patch-base-version` = `0.12.0`、`patch-base-versions.json` = dsh-tui `0.12.0` + tool 两包 `0.2.0-rc.2`（两包 `lib/index.js` 与 0.1.7-rc.2 **逐字节相同**，所以旧补丁原样有效，只换版本号）。④**顺手修掉 `apply-diff-patches.sh` 的两个真 bug**：GNU patch 的 hunk 报告（含 `with fuzz N`）走 **stdout**，旧脚本只重定向 stderr、又带 `-s` → 失败时 `NEEDS-REPORT` 下一行证据都打不出来、成功时 patch 的啰嗦话反倒漏进报告（列 0 那些 `File … is read-only` 就是它）；现在 stdout/stderr 两路都抓，并把 **fuzz 与 offset 分开报**（`PATCHED-FUZZ` 置 drift：fuzz 是上下文模糊匹配，可能贴到错的函数上），另加 `--read-only=ignore` 去掉 `-o` 下毫无意义的只读警告。⑤`check-doc-consistency.sh` 的 launcher 断言由硬编码 `0.1.7-rc.2` 改成**从已装树读版本 + 断言文档记的就是它**（生态每次升级不必再手改这一条，且断言更强），并补 3 条脚本锚点。⑥复验：`apply` 10/10 `applied` → `check` 10/10 `OK` exit 0，四个行为测试全过。补丁集仍 **10** 个目标，`patch-base-version` = `0.12.0` |
 | （非升级）**F4 ④：dsh 的兜底占位标题不算名字**（2026-10-07） | 用户报「resume 会只显示文件地址，导致分不清」。根因不在 Claude 链（③ 已经过滤 prompt 候选），而在 dsh 自己写进日志的 `session/title` 事件：`dsh-session-title` 的确定性兜底会把**首条 prompt 截断**后落盘（`source.kind: 'fallback'`），上游"最后写入者胜"让它排在 provider 标题之前、并整条压过 ③ 的 prompt 链 → mallphp 里 3 个会话的行标题都是 `@modules/client/controllers/v1/auction/A`（全库 232 条里 17 条有占位标题，8 条是地址形态） | ①`titleOf()` 一处判强弱：`provider`/`user`/无 source = `strong: true`，`fallback` = `false`；三处扫描（head/tail 窗口、深度反扫、增量后缀）只收 `strong`；`titleComplete` 不再跟着占位走（尾部只有占位 → 留给深度扫描，它能从"没读到的中间"取回 provider 标题）。②深度反扫顺路记下"最近一条非地址 prompt"（`recoverLatestTitle()` → `recoverLatestName()`），让深度扫描和快速路径给出同一个名字。③首条 prompt 也走 `normalizeLastPrompt()`（以前原样上报，多行首句会撑开整行）。④**`store.js` 的 `SCHEMA_VERSION` 4 → 5**：语义变了而日志一个字节没变，版本 4 索引里存着旧占位标题且会被无限命中 → 整份丢弃、自动重算（旧进程写回版本 4 也照样不认），**不需要手动删缓存**。⑤回归：231 条真实日志里 59 条标题改变（11 条露出本来被压住的 provider 标题，0 条退化成目录名）；`test-resume-title-chain.mjs` 新增 6b–6e 一节；补丁集 10 → **11** 个目标；与远端 0.12.0 迁移合并后，基线取 `0.12.0` |
 | （非升级）**F2 退役：按目录历史回归 stock**（2026-10-14） | 0.15.0 上游把整条链做成了 stock：`historyProjectKey(cwd)`（resolve 归一化 + 去尾斜杠）、`appendHistory(text, cwd)`、`loadHistory(cwd)`（Ctrl+R）、`loadHistoryOldestFirst(cwd)`（↑/↓）、`inProject()` 的空标记兜底、**按项目各自 200 条**上限、`PromptInput` 用 `historySeededProject` 按目录重播种、`Chat.js` 已读 `loadHistory(channel.cwd)`。补丁的定制点全部成为上游行为（磁盘字段由补丁的 `cwd` 变成上游的 `project`），且上游更完整。`dsh-patch check` 对这三个文件报 `NEEDS-REPORT`（旧 hunk 全部贴不上 0.15.0） | ①判定：主体一致 + 上游更完整 → **退役**，删三件套（`history.js` / `PromptInput.js` / `Chat.js` 的 `backup`+`original`+`diffs`），`TARGETS` 11 → **8**；`patch-base-version` 不变（仍 `0.12.0` —— 这次只减目标，0.15.0 重移植按 8 个目标走）。②两处剩余差异按用户决定放弃：菜单边界 ↑ 回落历史（stock 是环绕）、无标记老条目的兜底池让位（stock 是永久并集）。③`test-history-cwd.mjs` 由「补丁行为测试」改写为**上游契约守卫**（22 条断言，字段改 `project`，并显式记录那两处差异）；`check-doc-consistency.sh` 的 F2 段改成断言 stock 锚点 + 三个文件不在补丁集里。 |
+| **F1 重移植到 0.15.0：方案 D（行号交给上游）**（2026-10-14） | 0.15.0 上游自带 `diffLayout: auto\|split\|unified` 与按 `patch` 文本编号的渲染（`diffPatch.js` 的 `parseFilePatch`/`patchHeader`，连无文件头补丁都吃），但 **Edit/Write 走的仍是 `{oldText,newText}` 分支 → 无行号**；同时 `str_replace` 的 diff 卡整张是我们的。旧 F1（`oldStart`/`newStart` + 自绘编号 +179 行）在 0.15.0 上 hunk 3/6 冲突、报 `NEEDS-REPORT` | ①**tool 两包改成吐 patch 文本**：`hunksPatch()` 把全部 hunk 序列化成 `@@ -a,b +c,d @@`，`computeHunkDiffs` 返回**一个** `{path, patch}`；`newFileDiff()` 用 `@@ -0,0 +1,N @@` 表达新文件（编号从 1、统计 `+N -0`）；两个包的校验器（`isFileDiff`/`diffsFromMeta`）同时收 `patch` 与旧的 `oldText/newText`（回放兼容）；`oldStart`/`newStart` 字段**删除**。②**渲染器只留装饰层**：`patchLines()` 改用 `parseFilePatch()` 的 `hunk.lines`（天然带 `oldNo`/`newNo`）生成带 `gutter` 的行，删除/新增等长段逐行配对算 `wordSegments`；`diffRowBackground` 上整行底色、默认墨色；unified 卡 `cap = Infinity`、新文件 `NEW_FILE_DIFF_MAX_LINES = 11`、删 `hoverTint`。补丁从 +179 行降到 **+111 行**，且不再包含行号推导逻辑。③新增 `test-f1-diff-rows.mjs`（20 条断言）：真实 tool 钩子 → `diffRows()`，覆盖编号宽度/配对段/`⋯`/新文件编号/两种 meta 形状。④`check-doc-consistency.sh` 的 F1 段整段换新锚点，复验：三个目标 `dsh-patch check` 全 `OK`，diff 都能 `--fuzz=0` 复现。**注**：F3/F4 仍是 0.12.0 基线，`patch-base-version` 暂留 `0.12.0`，等它们也重移植完再统一升 `0.15.0` |
 
 **定制状态备忘（含已恢复 / 已去掉）**
 
