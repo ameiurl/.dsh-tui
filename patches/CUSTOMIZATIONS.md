@@ -159,7 +159,17 @@
   1. 触发一次 Edit/Write：行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行
      （`… +N lines` 收起）、Ctrl+O 能展开；编辑/删除 diff 永远不出现折叠行；
      hover 工具卡底色不变。
-  2. 命令行无头测试（把 tool 的真实 presentation 钩子接到渲染器的 `diffRows()` 上）：
+  2. **补丁换完必须让「会话 host」重新起**：dsh-tui 是**两个进程**——TUI 客户端
+     （`bin/dsh-tui.js`，加载渲染器）和**每会话一个的 host**
+     （`lib/types/dsh-adapter/host-entry.js`，加载 tool 包）。host **跨 TUI 重启存活**，
+     所以只重开 TUI 窗口**不够**：`dsh-tool-fs` 这类形状改动要**新开一个会话**（或把当前
+     会话连同 host 一起退出）才生效。判断当前会话用的是新代码没有：
+     `ls -l /proc/<host-pid>/fd | grep <会话id>` 看 host 启动时间是否晚于补丁时间。
+     另外两点别误判：**补丁前**产生的编辑卡永远保持旧形状（`tool/result` 事件里存的 `meta`
+     就是当时的 `{oldText,newText}`，回放照原样重画，不会补行号）；`edit` 的**调用期预览**
+     （结果回来之前）也仍是 `-old/+new`——那是 `old_string`/`new_string` 片段，没有真实
+     行号可标，结果一落地立刻换成带行号的卡。
+  3. 命令行无头测试（把 tool 的真实 presentation 钩子接到渲染器的 `diffRows()` 上）：
      ```bash
      node ~/.dsh-tui/patches/test-f1-diff-rows.mjs
      ```
@@ -524,8 +534,12 @@ cd ~/.dsh-tui && git add patches && git commit -m "change: re-port patches onto 
 `claude-code`。缺失则补回。
 
 ### Step 7 — 重启验证
-完全退出并重开 `dsh-tui`（进程会缓存已加载模块，必须重启才吃新 JS），然后按 §2 的
+完全退出并重开 `dsh-tui`（TUI 进程会缓存已加载模块，必须重启才吃新 JS），然后按 §2 的
 「验证」逐项过补丁集里的 F1/F3，并顺手确认退役成 stock 的 F2：
+> ⚠️ **tool 包的补丁要「新会话」才生效**：TUI 客户端（`bin/dsh-tui.js`）和**每会话一个的
+> host**（`lib/types/dsh-adapter/host-entry.js`）是两个进程，host 跨 TUI 重启存活。
+> 渲染器补丁重启 TUI 即可，`dsh-tool-*` 的形状改动必须新开会话（或连同 host 一起退出）。
+> 判断办法：`ps -eo pid,lstart,cmd | grep host-entry`，启动时间要晚于补丁落盘时间。
 - **F1**：触发一次 Edit/Write，看 CC 统一式 diff（行号 + 绿红底；NEW 文件只出前 10 行）。
 - **F2（已退役，按 stock 确认）**：↑/↓ 只翻到**当前目录**输过的命令（上游自带）；
   旧的**无**标记条目对每个目录都可见；菜单第 0 项再按 ↑ 是 stock 的环绕。命令行侧：

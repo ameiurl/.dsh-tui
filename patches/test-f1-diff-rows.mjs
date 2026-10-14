@@ -149,6 +149,15 @@ const accepted = write.presentResult({ file_path: 'src/x.js', content: '' },
   { meta: { diffs: editDiffs } });
 check(accepted?.diffs?.[0]?.patch === editDiffs[0].patch,
   'the write result validator accepts patch-shaped meta');
+// `defineTool` validates the ARGS before presentResult runs, so a replay of an
+// Edit needs the real argument shape — not just the meta.
+const editArgs = { file_path: 'src/x.js', old_string: 'two', new_string: 'TWO' };
+const editView = edit.presentResult(editArgs, { meta: { diffs: editDiffs }, message: 'ok' });
+check(editView?.diffs?.[0]?.patch === editDiffs[0].patch,
+  'an Edit result view carries the patch diff (replay path)');
+const editPreview = edit.presentCall(editArgs);
+check(editPreview?.diffs?.[0]?.patch === undefined && editPreview?.diffs?.[0]?.oldText === 'two',
+  'while the call-time Edit preview stays old/new fragments (no real line numbers to show yet)');
 const legacy = write.presentResult({ file_path: 'src/x.js', content: 'legacy body' },
   { meta: { diffs: [{ path: 'src/x.js', oldText: null, newText: 'legacy body' }] } });
 check(legacy?.diffs?.[0]?.newText === 'legacy body',
@@ -215,6 +224,10 @@ check(editFrame.includes(' 2 - two') && editFrame.includes(' 2 + TWO'),
 check(editFrame.includes('(+2 -2)'), 'and the diffstat row');
 check(!editFrame.includes('ctrl+o'),
   'a normal edit is never folded (no expand hint on screen)');
+
+const editViewFrame = await renderCard(editView.diffs);
+check(editViewFrame.includes(' 2 - two'),
+  'the settled Edit card (the replay/result view) is numbered too');
 
 const wideBefore = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n');
 const wideAfter = wideBefore.replace('line 30', 'LINE THIRTY');
