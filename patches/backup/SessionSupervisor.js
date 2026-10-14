@@ -128,11 +128,11 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
         const index = Math.max(0, tabs.findIndex(candidate => candidate.id === tab));
         switchTab(tabs[(index + by + tabs.length) % tabs.length].id);
     }, [tabs, tab, switchTab]);
-    useInput((input, key, event) => {
-        // F2 fork: Ctrl+J / Ctrl+K step the list on top of the arrows (see
+    useInput((input, key) => {
+        // F2 fork: Ctrl+P / Ctrl+N step the list on top of the arrows (see
         // listKeyStep). Computed once per key because the "a movement key puts
         // the caret back in the list" rule below wants the same answer.
-        const step = listKeyStep(input, key, event);
+        const step = listKeyStep(input, key);
         // Modal layers own the keyboard, in the same order they render.
         // The draft is read through a ref: keystrokes that arrive in one batch
         // (typing, then Enter) must commit everything typed, not the last render.
@@ -318,9 +318,10 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
             setQuery(text => text.slice(0, -1));
             return;
         }
-        if (isMod(key) && input === 'n') {
-            // F3 fork: the rail used to name the workspace; the pinned selection
-            // IS this terminal's directory, so Ctrl+N opens a session there.
+        if (isMod(key) && input === 't') {
+            // F2 fork: the rail used to name the workspace; the pinned selection
+            // IS this terminal's directory, so Ctrl+T opens a session there.
+            // (Ctrl+N walks the list now — see listKeyStep.)
             newSessionIn(selected);
             return;
         }
@@ -396,7 +397,7 @@ export function SessionSupervisor({ channel, home, onClose, onOpenSession, onNew
      * Keys on a source tab: the same pane model as DSH (←/→ pick the column,
      * ↑/↓ move, typing filters), with what a foreign source cannot do left out —
      * no workspace menu, no new session, no stop — and Ctrl+L rescanning the
-     * source instead of re-listing. The fork's Ctrl+J / Ctrl+K pair rides along
+     * source instead of re-listing. The fork's Ctrl+P / Ctrl+N pair rides along
      * as the `step` the caller already computed, so the movement keys are the
      * same on every tab.
      */
@@ -594,30 +595,24 @@ export function railWindowTop(focus, entryCount, capacity) {
 /** Re-exported so a regression can drive the spinner without importing ink. */
 export { SpinnerGlyph };
 /**
- * F2 fork: the session list's second movement pair — Ctrl+J steps UP, Ctrl+K
- * steps DOWN, deliberately the INVERSE of vim's j/k. The arrows stay the
- * primary keys; this pair is for hands that would rather not leave the home
- * row, and it works on every source tab because both callers share this one
- * answer.
+ * F2 fork: emacs' own two list keys — **Ctrl+P steps UP** (previous) and
+ * **Ctrl+N steps DOWN** (next) — so the list can be walked without leaving the
+ * home row, and the arrows stay the primary pair. Ctrl+T is what creates a
+ * session now that Ctrl+N belongs to the list.
  *
- * Ctrl+K is an ordinary control byte (0x0B) and Ink parses it as `k` + ctrl on
- * every terminal. Ctrl+J is not: a terminal that reports no extended keys sends
- * LF (0x0A) for it, and Ink reads LF as `enter` with NO modifier flag, so the
- * raw byte is the only signal left (PromptInput accepts the same pair for a
- * literal newline). Pasted text is excluded — a pasted "\n" is content, not a
- * keypress.
+ * Both are ordinary control bytes (0x10 / 0x0E): a terminal reports them as
+ * `p`/`n` with ctrl set, on the bare byte and on the kitty/modifyOtherKeys
+ * spellings alike, so unlike Ctrl+J (LF, which Ink reads as `enter` with no
+ * modifier at all) there is nothing to disambiguate here.
  *
  * @param input - The event's text.
  * @param key - The event's key flags.
- * @param event - The input event, for the LF spelling's `keypress.name`.
  * @returns -1 up, 1 down, 0 when this is not one of the two keys.
  */
-export function listKeyStep(input, key, event) {
-    if (isMod(key) && input === 'j')
+export function listKeyStep(input, key) {
+    if (isMod(key) && input === 'p')
         return -1;
-    if (input === '\n' && key.isPasted !== true && event?.keypress?.name === 'enter')
-        return -1;
-    if (isMod(key) && input === 'k')
+    if (isMod(key) && input === 'n')
         return 1;
     return 0;
 }

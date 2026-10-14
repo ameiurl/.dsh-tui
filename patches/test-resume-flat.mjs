@@ -15,10 +15,11 @@
 //   * no workspace rail: no `工作区` section header, no rail rows, no pane hint;
 //   * the list hint advertises only the keys this fork keeps (no ←/→ switch);
 //   * sub-agent runs stay out of the listing;
-//   * Ctrl+N starts a session in the CURRENT directory, not in a rail row;
-//   * Ctrl+J steps UP and Ctrl+K steps DOWN, in both spellings a terminal can
-//     send for Ctrl+J (the bare LF, and kitty/modifyOtherKeys `ctrl+j`), while a
-//     plain `j`/`k` is still typed into the filter;
+//   * Ctrl+T starts a session in the CURRENT directory, not in a rail row
+//     (the key moved there because Ctrl+N walks the list now);
+//   * Ctrl+P steps UP and Ctrl+N steps DOWN (emacs' own pair), on the bare
+//     control byte and on the kitty/modifyOtherKeys spelling alike, while a
+//     plain `p`/`n` is still typed into the filter;
 //   * Enter opens the FIRST row like any other (there is no new-session card);
 //   * every other row paints the zebra band that separates two-line rows.
 
@@ -129,8 +130,9 @@ const app = renderSync(
   { stdout: capture, stdin, stderr: sink() },
 );
 await new Promise(r => setTimeout(r, 150));
-// Ctrl+N: the stock screen starts a session in the rail's focused workspace.
-stdin.push('\u000e');
+// Ctrl+T: the stock screen starts a session in the rail's focused workspace,
+// and the fork keeps that action but not that key — Ctrl+N walks the list.
+stdin.push('\u0014');
 await new Promise(r => setTimeout(r, 100));
 app.unmount();
 await new Promise(r => setTimeout(r, 30));
@@ -166,13 +168,14 @@ check(!plain.includes('\u5207\u6362\u680f\u4f4d') && !plain.includes('switch pan
 check(!plain.includes('\u5168\u90e8\u5de5\u4f5c\u76ee\u5f55') && !plain.includes('All working directories'),
   'no "all directories" scope is offered');
 check(!plain.includes('\u65b0\u5efa\u4f1a\u8bdd'),
-  'no new-session row is rendered (Ctrl+N still creates one)');
+  'no new-session row is rendered (Ctrl+T still creates one)');
 check(!plain.includes('\u5f53\u524d'),
   'and no "current" badge is drawn, even with a live session in this directory');
-check(plain.includes('Ctrl+N') && plain.includes('Ctrl+X'), 'the hint still advertises the keys kept');
+check(plain.includes('Ctrl+T') && plain.includes('Ctrl+X'), 'the hint still advertises the keys kept');
+check(plain.includes('Ctrl+P/N'), 'and advertises the fork\'s movement pair');
 check(plain.includes('Enter'), 'list hint renders');
 check(newSessionCalls.length === 1 && newSessionCalls[0] === CURRENT,
-  `Ctrl+N starts a session in the current directory (got ${JSON.stringify(newSessionCalls)})`);
+  `Ctrl+T starts a session in the current directory (got ${JSON.stringify(newSessionCalls)})`);
 
 // The badge is gone from the COMPONENT, not just from the screen's call: a
 // caller that still passes `current` gets a row without it (the prop and the
@@ -266,29 +269,27 @@ process.stdout.write = realWriteForFocus;
 check(opened.length === 1 && opened[0] === 's3',
   `Enter on open targets the most recently used session, not the live one (got ${JSON.stringify(opened)})`);
 
-// F2 fork: Ctrl+J steps UP, Ctrl+K steps DOWN. Ctrl+K is one control byte, but
-// Ctrl+J has two spellings — a terminal that reports no extended keys sends LF
-// (0x0A), which Ink parses as `enter` with NO modifier, and a kitty /
-// modifyOtherKeys terminal sends `ctrl+j`. Both have to walk the list, and a
-// plain j/k must still reach the filter. Driven through the real screen, and
-// read back through Enter: ink repaints incrementally, so where `❯` sits inside
-// a captured frame is not a reliable read of the cursor.
-const listKey = (input, key = {}, event = {}) => listKeyStep(input, key, event);
-check(listKey('\u000a', {}, { keypress: { name: 'enter' } }) === -1,
-  'listKeyStep: the LF spelling of Ctrl+J steps up');
-check(listKey('j', { ctrl: true }) === -1, 'listKeyStep: kitty `ctrl+j` steps up');
-check(listKey('k', { ctrl: true }) === 1, 'listKeyStep: `ctrl+k` steps down');
-check(listKey('j') === 0 && listKey('k') === 0,
-  'listKeyStep: plain j/k are NOT movement keys (they filter)');
-check(listKey('', { return: true }, { keypress: { name: 'return' } }) === 0,
-  'listKeyStep: Enter is not Ctrl+J');
-check(listKey('\u000a', { isPasted: true }, { keypress: { name: 'enter' } }) === 0,
-  'listKeyStep: a pasted newline is content, not a keypress');
+// F2 fork: Ctrl+P steps UP (previous), Ctrl+N steps DOWN (next) — emacs' own
+// pair, the directions vim's k/j use. Both are ordinary control bytes, so the
+// bare byte and the kitty / modifyOtherKeys spelling arrive as the same `p`/`n`
+// plus ctrl, while a plain p/n must still reach the filter. Driven through the
+// real screen, and read back through Enter: ink repaints incrementally, so
+// where `❯` sits inside a captured frame is not a reliable read of the cursor.
+const listKey = (input, key = {}) => listKeyStep(input, key);
+check(listKey('p', { ctrl: true }) === -1, 'listKeyStep: `ctrl+p` steps up');
+check(listKey('n', { ctrl: true }) === 1, 'listKeyStep: `ctrl+n` steps down');
+check(listKey('p') === 0 && listKey('n') === 0,
+  'listKeyStep: plain p/n are NOT movement keys (they filter)');
+check(listKey('', { return: true }) === 0, 'listKeyStep: Enter is neither');
+check(listKey('j', { ctrl: true }) === 0 && listKey('k', { ctrl: true }) === 0,
+  'listKeyStep: the retired ctrl+j / ctrl+k pair no longer moves the list');
 
+// Titles, cwd and branch carry no `p`/`n`, so the "a plain letter filters"
+// checks below really empty the list instead of silently matching everything.
 const walkList = [
   session('w1', 'AAA first', CURRENT, 300),
-  session('w2', 'BBB second', CURRENT, 200),
-  session('w3', 'CCC third', CURRENT, 100),
+  session('w2', 'BBB middle', CURRENT, 200),
+  session('w3', 'CCC last', CURRENT, 100),
 ];
 /** Open the screen, type raw bytes, then commit with Enter. */
 async function walk(keys) {
@@ -321,31 +322,44 @@ async function walk(keys) {
   return walked;
 }
 
-// The cursor opens on the most recent session, w1. Ctrl+K walks down one row.
-const steppedDown = await walk(['\u000b', '\r']);
+// The cursor opens on the most recent session, w1. Ctrl+N walks down one row.
+const steppedDown = await walk(['\u000e', '\r']);
 check(steppedDown.opened.length === 1 && steppedDown.opened[0] === 'w2',
-  `Ctrl+K steps to the next row down (got ${JSON.stringify(steppedDown.opened)})`);
-// Down then UP is back on w1: if the LF spelling did nothing, Enter would land
-// on w2 and this check would read it.
-const steppedBack = await walk(['\u000b', '\u000a', '\r']);
+  `Ctrl+N steps to the next row down (got ${JSON.stringify(steppedDown.opened)})`);
+check(steppedDown.created.length === 0,
+  `Ctrl+N moves instead of creating a session now (got ${JSON.stringify(steppedDown.created)})`);
+// Down then UP is back on w1: if Ctrl+P did nothing, Enter would land on w2 and
+// this check would read it.
+const steppedBack = await walk(['\u000e', '\u0010', '\r']);
 check(steppedBack.opened.length === 1 && steppedBack.opened[0] === 'w1',
-  `the LF spelling of Ctrl+J steps back up (got ${JSON.stringify(steppedBack.opened)})`);
-// The extended-keys spelling of the same key, on a terminal that reports it.
-const steppedKitty = await walk(['\u000b', '\u001b[106;5u', '\r']);
+  `Ctrl+P steps back up (got ${JSON.stringify(steppedBack.opened)})`);
+// The extended-keys spellings, on a terminal that reports modifiers: CSI-u for
+// `ctrl+n` (codepoint 110) and `ctrl+p` (112), modifier 5 = ctrl.
+const steppedKitty = await walk(['\u001b[110;5u', '\u001b[112;5u', '\r']);
 check(steppedKitty.opened.length === 1 && steppedKitty.opened[0] === 'w1',
-  `kitty \`ctrl+j\` steps back up (got ${JSON.stringify(steppedKitty.opened)})`);
-// A plain j is a filter character, never a movement key: the query matches no
-// session, so the list empties and Enter has no row to act on.
-const typedPlain = await walk(['j', '\r']);
+  `kitty \`ctrl+n\` / \`ctrl+p\` walk down and back up (got ${JSON.stringify(steppedKitty.opened)})`);
+// A plain p/n is a filter character, never a movement key: the query matches no
+// session, so the list empties and Enter has no row to act on. Had the ctrl
+// requirement been dropped, the query would stay empty, all three rows would
+// remain and Enter would open w1.
+const typedPlain = await walk(['n', '\r']);
 check(typedPlain.opened.length === 0,
-  `a plain j filters instead of moving (got ${JSON.stringify(typedPlain.opened)})`);
+  `a plain n filters instead of moving (got ${JSON.stringify(typedPlain.opened)})`);
+const typedPlainP = await walk(['p', '\r']);
+check(typedPlainP.opened.length === 0,
+  `a plain p filters instead of moving (got ${JSON.stringify(typedPlainP.opened)})`);
 // The fork has no new-session card: row 0 is an ordinary session, so Enter on
 // it resumes that session (the stock branch started a NEW one instead).
 const enteredFirst = await walk(['\r']);
 check(enteredFirst.opened.length === 1 && enteredFirst.opened[0] === 'w1',
   `Enter on the FIRST row opens it (got ${JSON.stringify(enteredFirst.opened)})`);
 check(enteredFirst.created.length === 0,
-  `Enter never creates a session — Ctrl+N is what creates (got ${JSON.stringify(enteredFirst.created)})`);
+  `Enter never creates a session (got ${JSON.stringify(enteredFirst.created)})`);
+// Ctrl+T is the create key, and it is the ONLY thing that creates from here.
+const madeOne = await walk(['\u0014']);
+check(madeOne.created.length === 1 && madeOne.created[0] === CURRENT,
+  `Ctrl+T starts a session in this directory (got ${JSON.stringify(madeOne.created)})`);
+check(madeOne.opened.length === 0, 'and opens nothing while it does');
 
 // F2 fork: a record that never held a conversation is not a session this pane
 // offers. The catalog keeps one for every terminal that ever started (and for

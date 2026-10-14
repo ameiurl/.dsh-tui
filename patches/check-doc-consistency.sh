@@ -177,13 +177,15 @@ ck "hook: rail is never rendered"          "grep -q 'const railVisible = false' 
 ck "hook: rows matched by directory"    "grep -q 'filter(session => samePath(session.cwd, channel.cwd))' '$SUP'"
 ck "hook: the list owns the keyboard"      "grep -q \"useState('list')\" '$SUP'"
 # The F3 fork also drops the new-session row and the "当前" badge: the list is
-# sessions only, and Ctrl+N (advertised in the hint) is the way to create one.
+# sessions only, and Ctrl+T (advertised in the hint) is the way to create one.
 ck "screen: no new-session row"             "! grep -q \"t('supervisor-new-session')\" '$SS'"
 ck "screen: no current badge"               "! grep -q 'current: state?.current' '$SS'"
 # The badge is gone WHOLE: prop, budget term, JSX and its i18n string.
 ROW="$LIB/types/components/sessions/SessionListRow.js"
 ck "row: the current badge is gone from the component" "! grep -q 'current' '$ROW'"
-ck "i18n: the badge string is gone too" "! grep -q \"'supervisor-current'\" '$LIB/i18n.js'"
+# (the path is $LIB/types/i18n.js — $LIB/i18n.js does not exist, and `! grep` on a
+# missing file passes vacuously, which is how this line guarded nothing at all)
+ck "i18n: the badge string is gone too" "! grep -q \"'supervisor-current'\" '$LIB/types/i18n.js'"
 ck "targets: SessionListRow.js is a patch target" \
    "grep -q 'SessionListRow.js|SessionListRow.js' '$DIR/apply-diff-patches.sh'"
 ck "hook: the cursor space is sessions only" "! grep -q 'cardFocused' '$SUP'"
@@ -196,23 +198,25 @@ ck "hook: artifact-less records are not listed" \
    "grep -q 'session.title?.source !== .fallback. || session.bytes !== undefined' '$SUP'"
 ck "hook: no rail-picked selection state left" \
    "! grep -qE 'selectedPath|selectedUnregistered|selectionManual' '$SUP'"
-ck "screen: Ctrl+N uses the pinned directory" "grep -q 'newSessionIn(selected)' '$SS'"
 ck "i18n.js: no '全部项目' left anywhere"      "! grep -rq '全部项目' '$LIB'"
 # The doc says the i18n patch is exactly the one hint key this screen renders
 # (no rail, so no ←/→ pane switch to advertise). A stray hunk is drift.
 ck "i18n diff touches only the keys this fork owns" \
    "! grep -E \"^[-+].*'supervisor-\" '$DIR/diffs/i18n.js.patch' | grep -qvE \"'supervisor-(hint-list|current)\""
-# The fork's own additions to that list: a movement pair that survives BOTH
-# spellings of Ctrl+J, a zebra band on every other row, and an Enter that opens
-# the row it stands on (the stock new-session card branch is gone).
-ck "screen: Ctrl+J/Ctrl+K are answered once per key" \
-   "grep -q 'const step = listKeyStep(input, key, event)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
-ck "screen: listKeyStep accepts the bare LF spelling" \
-   "grep -qF \"key.isPasted !== true && event?.keypress?.name === 'enter'\" '$SS'"
-ck "screen: listKeyStep accepts kitty ctrl+j" \
-   "grep -qF \"isMod(key) && input === 'j'\" '$SS'"
-ck "screen: the movement pair rides the foreign lists too" \
-   "grep -q 'foreignKey(input, key, step)' '$SS'"
+# The fork's own additions to that list: emacs' Ctrl+P/N movement pair, a zebra
+# band on every other row, and an Enter that opens the row it stands on (the
+# stock new-session card branch is gone; creating moved off Ctrl+N to Ctrl+T
+# precisely because Ctrl+N walks the list now).
+ck "screen: Ctrl+P/Ctrl+N are answered once per key" \
+   "grep -q 'const step = listKeyStep(input, key)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
+ck "screen: listKeyStep is Ctrl+P up / Ctrl+N down" \
+   "grep -qF \"isMod(key) && input === 'p'\" '$SS' && grep -qF \"isMod(key) && input === 'n'\" '$SS'"
+ck "screen: the retired Ctrl+J/Ctrl+K pair is gone" \
+   "! grep -qF \"input === 'j'\" '$SS' && ! grep -qF \"input === 'k'\" '$SS'"
+ck "screen: Ctrl+T is what creates now" \
+   "grep -qF \"isMod(key) && input === 't'\" '$SS' && grep -q 'newSessionIn(selected)' '$SS'"
+ck "i18n: the hint advertises Ctrl+P/N and Ctrl+T" \
+   "grep -q 'Ctrl+P/N 移动 · Ctrl+T 新建' '$LIB/types/i18n.js'"
 ck "screen: every other row is striped by ABSOLUTE index" \
    "grep -q 'striped: (sessionTop + index) % 2 === 1' '$SS'"
 ck "screen: Enter on row 0 opens it, never creates" \
@@ -223,9 +227,9 @@ ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,'
 ck "test-resume-flat.mjs covers the keys and the band" \
    "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs'"
 ck "CUSTOMIZATIONS.md documents the pair and the band" \
-   "grep -q 'Ctrl+J 向上 / Ctrl+K 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md'"
+   "grep -q 'Ctrl+P 向上 / Ctrl+N 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md'"
 ck "README.md documents the pair and the band" \
-   "grep -q 'Ctrl+J / Ctrl+K' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md'"
+   "grep -q 'Ctrl+P / Ctrl+N' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"

@@ -557,7 +557,7 @@ const dict = {
     'supervisor-no-matches': { zh: '没有匹配的会话 · Esc 清空筛选', en: 'No sessions match · Esc clears the filter' },
     'supervisor-subtitle': { zh: '本终端托管多个会话 · 切换不中断', en: 'This terminal hosts several sessions · switching does not stop them' },
     'supervisor-filter-placeholder': { zh: '输入以搜索会话…', en: 'Type to search sessions…' },
-    'supervisor-hint-list': { zh: '**Enter** 进入会话 · Ctrl+N 新建 · Ctrl+X 停止 · Esc 返回', en: '**Enter** enter · Ctrl+N new · Ctrl+X stop · Esc back' },
+    'supervisor-hint-list': { zh: '**Enter** 进入会话 · Ctrl+P/N 移动 · Ctrl+T 新建 · Ctrl+X 停止 · Esc 返回', en: '**Enter** enter · Ctrl+P/N move · Ctrl+T new · Ctrl+X stop · Esc back' },
     'supervisor-hint-filter': { zh: '输入过滤会话 · **Enter** 进入 · Esc 清空', en: 'Type to filter · **Enter** enter · Esc clears' },
     'supervisor-occupied': { zh: '被其他 TUI 终端占用（pid {{pid}}），无法进入', en: 'Held by another TUI terminal (pid {{pid}}) — cannot enter' },
     'supervisor-occupied-badge': { zh: '占用 pid {{pid}}', en: 'held by pid {{pid}}' },
