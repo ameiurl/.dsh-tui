@@ -1,6 +1,6 @@
 --- original/useSessionSupervisor.js	2026-10-14 14:29:06.977427649 +0800
-+++ backup/useSessionSupervisor.js	2026-10-14 14:44:57.396536570 +0800
-@@ -192,26 +192,31 @@
++++ backup/useSessionSupervisor.js	2026-10-14 15:22:03.347696832 +0800
+@@ -192,38 +192,54 @@
      const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
      const [railFocus, setRailFocus] = useState(0);
      /**
@@ -37,6 +37,8 @@
 -            return railEntries.find(entry => entry.id === selectedUnregisteredId);
 -        return railEntries.find(entry => samePath(entry.path, channel.cwd)) ?? railEntries[0];
 -    }, [railEntries, selectedPath, selectedUnregisteredId, channel.cwd]);
+-    // Recency chooses the default even when an older live row sorts above it.
+-    const mostRecentIn = useCallback((path) => {
 +        const registered = railEntries.find(entry => entry.from === 'registry' && samePath(entry.path, channel.cwd))?.path;
 +        const path = registered ?? (channel.cwd === '' ? UNREGISTERED_RAIL_ID : channel.cwd);
 +        return {
@@ -48,10 +50,38 @@
 +            from: 'cwd',
 +        };
 +    }, [railEntries, groupedEntries, channel.cwd]);
-     // Recency chooses the default even when an older live row sorts above it.
-     const mostRecentIn = useCallback((path) => {
++    /**
++     * The session the cursor opens on: the most recently used one in THIS
++     * directory, which is row 0 of the pane's own order only while no live
++     * session sorts above it.
++     *
++     * F2 fork: derived from the same list the pane shows (`listedSessions` by
++     * `samePath`) instead of the rail's grouping key. The rail key exists only
++     * for directories the workspace ledger knows, and with the pane pinned to a
++     * directory that may never have been registered, the lookup came back empty
++     * — the cursor then fell to whatever row sorted first (an older session that
++     * merely happened to be live), not to the session the user had just used.
++     */
++    const recentSessionId = useMemo(() => {
          const needle = query.trim().toLowerCase();
-@@ -378,57 +383,6 @@
+         let recent;
+-        for (const session of groupedEntries.get(path) ?? []) {
+-            if (sessionMatchesQuery(session, needle)
+-                && (recent === undefined || session.updatedAt > recent.updatedAt))
++        for (const session of listedSessions) {
++            if (!samePath(session.cwd, channel.cwd) || !sessionMatchesQuery(session, needle))
++                continue;
++            if (recent === undefined || session.updatedAt > recent.updatedAt)
+                 recent = session;
+         }
+         return recent?.id;
+-    }, [groupedEntries, query]);
+-    const recentSessionId = useMemo(() => selected === undefined ? undefined : mostRecentIn(selected.path), [selected?.path, mostRecentIn]);
++    }, [listedSessions, channel.cwd, query]);
+     /**
+      * The session column's cursor, as ONE fact.
+      *
+@@ -378,57 +394,6 @@
      React.useEffect(() => () => {
          snapshotSlot(channel).requestGeneration++;
      }, [channel]);
@@ -109,7 +139,7 @@
      // The cursor indexes the entry list directly (there is no `+` row in front of
      // it), so a shrinking ledger has to pull it back inside or the last row would
      // highlight nothing.
-@@ -437,16 +391,19 @@
+@@ -437,16 +402,19 @@
      }, [railEntries.length]);
      /**
       * Sessions whose recorded cwd is the selected workspace, minus the search
@@ -133,7 +163,7 @@
              .filter(session => sessionMatchesQuery(session, needle))
              .slice()
              .sort((left, right) => {
-@@ -454,44 +411,40 @@
+@@ -454,44 +422,40 @@
              const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0;
              return rightLive - leftLive || right.updatedAt - left.updatedAt;
          });
@@ -195,7 +225,7 @@
      const sessionWidth = Math.max(20, columns - (railVisible ? railWidth + 1 : 0));
      const railListHeight = Math.max(1, rows - RAIL_CHROME_ROWS);
      /**
-@@ -564,18 +517,15 @@
+@@ -564,18 +528,15 @@
          })
              .catch(error => report(t(archiveSessions ? 'session-archive-failed' : 'session-delete-failed', { err: message(error) }), 'error'));
      }, [archiveSessions, channel, holderOf, liveStateOf, reload, report]);
@@ -223,7 +253,7 @@
      /**
       * Mount a session, refusing one another terminal holds.
       *
-@@ -698,18 +648,16 @@
+@@ -698,18 +659,16 @@
              selectEntry(entry);
      }, [railEntries, selectEntry]);
      const moveSession = useCallback((by) => {
@@ -248,7 +278,7 @@
      const focusedSession = sessionAt(sessionIndex);
      return {
          dshBackend,
-@@ -751,7 +699,6 @@
+@@ -751,7 +710,6 @@
          selected,
          visibleSessions,
          sessionIndex,
