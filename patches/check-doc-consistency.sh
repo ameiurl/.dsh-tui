@@ -225,13 +225,13 @@ ck "screen: Enter on row 0 opens it, never creates" \
    "! grep -q 'if (sessionIndex === 0)' '$SS'"
 ck "row: striped paints the surface" \
    "grep -q 'striped = false' '$ROW' && grep -qF 'striped ? STRIPE_BACKGROUND' '$ROW'"
-ck "row: the band is the quiet 256 index, not a theme surface" \
-   "grep -qF \"const STRIPE_BACKGROUND = 'ansi256(236)'\" '$ROW' && ! grep -qF \"STRIPE_BACKGROUND = 'toolCardBackground\" '$ROW'"
+ck "row: the band is an explicit 256 index, not a theme surface" \
+   "grep -qF \"const STRIPE_BACKGROUND = 'ansi256(240)'\" '$ROW' && ! grep -qF \"STRIPE_BACKGROUND = 'toolCardBackground\" '$ROW'"
 ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,' '$ROW'"
 ck "test-resume-flat.mjs covers the keys and the band" \
-   "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs' && grep -q '48;5;236' '$DIR/test-resume-flat.mjs'"
+   "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs' && grep -q '48;5;240' '$DIR/test-resume-flat.mjs'"
 ck "CUSTOMIZATIONS.md documents the pair and the band" \
-   "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'ansi256(236)' '$DIR/CUSTOMIZATIONS.md' && grep -q '塌成同一个 59 号中灰' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md' && grep -q 'LF（0x0A）' '$DIR/CUSTOMIZATIONS.md'"
+   "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'ansi256(240)' '$DIR/CUSTOMIZATIONS.md' && grep -q '塌成同一个 59 号中灰' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md' && grep -q 'LF（0x0A）' '$DIR/CUSTOMIZATIONS.md'"
 ck "README.md documents the keys and the band" \
    "grep -q 'Ctrl+P / Ctrl+K' '$DIR/README.md' && grep -q 'Ctrl+N / Ctrl+J' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
 
