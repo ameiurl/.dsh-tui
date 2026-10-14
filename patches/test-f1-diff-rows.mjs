@@ -244,6 +244,37 @@ check(createFrame.includes('10 + content 10') && !createFrame.includes('11 + con
 check(createFrame.includes('ctrl+o'),
   'and folds the rest behind the expand hint');
 
+// ── the TUI's own translation: what the transcript actually renders ────────
+// The settled card comes from the TUI's `presentResultView` (the tool's
+// presentResult over the host's meta), NOT from the host payload directly, so
+// drive the real translator with the real tool objects.
+const { createDshTranslator } = await import(join(TUI, 'lib/types/dsh-adapter/backend/translate.js'));
+const byName = new Map([...fsTools, ...editorTools]);
+const translator = createDshTranslator({
+  tools: () => ({ get: (name) => byName.get(name) }),
+  scope: () => undefined,
+  attachments: {},
+  cwd: () => '/tmp',
+  sessionId: () => 'f1-test',
+});
+const callEvents = translator.translateEvent({
+  type: 'tool/call', seq: 1, time: 0,
+  data: { turn: 1, step: 1, callId: 'c1', name: 'edit', arguments: JSON.stringify(editArgs) },
+});
+const resultEvents = translator.translateEvent({
+  type: 'tool/result', seq: 2, time: 0,
+  data: {
+    turn: 1, step: 1,
+    message: { role: 'tool', source: { kind: 'tool', callId: 'c1' }, toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] },
+    meta: { diffs: editDiffs },
+  },
+});
+const translatedView = resultEvents.find(event => event.type === 'tool.result')?.presentation;
+check(translatedView?.diffs?.[0]?.patch === editDiffs[0].patch,
+  'the transcript translator settles the card on the PATCH view (the numbered one)');
+check(callEvents[0]?.presentation?.diffs?.[0]?.patch === undefined,
+  'while the in-flight call view stays fragments (no numbers until the result lands)');
+
 report(failures === 0
   ? '\nPASS: F1 diffs travel as patch text, stock numbers them, our layout decorates them.'
   : `\n${failures} check(s) failed.`);
