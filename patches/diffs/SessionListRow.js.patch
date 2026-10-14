@@ -1,6 +1,6 @@
 --- original/SessionListRow.js	2026-10-14 14:52:07.408860585 +0800
-+++ backup/SessionListRow.js	2026-10-14 16:41:18.720708420 +0800
-@@ -41,8 +41,35 @@
++++ backup/SessionListRow.js	2026-10-14 16:43:28.207240600 +0800
+@@ -41,8 +41,34 @@
   * Widths are resolved here rather than delegated to flexbox: the row must
   * stay exactly two lines at every terminal width, and a row that wraps
   * destroys the alignment that lets the eye scan a list at all.
@@ -25,19 +25,18 @@
 + * nothing at all there, which is how the band came out so bright.
 + *
 + * An explicit `ansi256` index survives EVERY colour level, so the band is the
-+ * same tone in tmux, in a truecolor terminal and in VSCode. 238 (#444444) is
-+ * the tone being tried now: a faint grey-white — a step below the index the
-+ * palette collapsed to (59, #5f5f5f) and above the 236 (#303030) that read as
-+ * a dark stripe. The whole ramp is 232 (#080808) … 255 (#eeeeee) — head for
-+ * 243/245 to go whiter, 236 to go fainter; a LIGHT palette wants the other end
-+ * (e.g. `ansi256(253)`).
++ * same tone in tmux, in a truecolor terminal and in VSCode. 236 (#303030) is
++ * the tone being tried now: the faintest grey that still separates two rows —
++ * well below the index the palette collapsed to (59, #5f5f5f). The whole ramp
++ * is 232 (#080808) … 255 (#eeeeee) — head for 238/240 to go brighter, 234 to go
++ * fainter; a LIGHT palette wants the other end (e.g. `ansi256(253)`).
 + */
-+const STRIPE_BACKGROUND = 'ansi256(238)';
++const STRIPE_BACKGROUND = 'ansi256(236)';
 +export function SessionListRow({ session, width, depth, focused, declareCursor = false, pinned, now, onClick, onContextMenu, onTogglePin, liveStatus, occupiedPid, spinner, striped = false, }) {
      const indent = depth * 2;
      const nativeCursor = useNativeCursor();
      const cursorRef = useDeclaredCursor({ line: 0, column: indent, active: focused && declareCursor, visible: nativeCursor, hideOnIdle: true });
-@@ -71,9 +98,8 @@
+@@ -71,9 +97,8 @@
              ? undefined
              : LIVE_STATUS_COLOR[liveStatus];
      const occupiedText = occupied ? ` ${t('supervisor-occupied-badge', { pid: occupiedPid })}` : '';
@@ -48,7 +47,7 @@
      const shownTitle = truncateWidth(titleText, Math.max(4, titleBudget));
      const titleTooltip = useTooltip(() => {
          const parts = [];
-@@ -97,15 +123,19 @@
+@@ -97,15 +122,19 @@
      if (session.childCount > 0 && depth === 0) {
          facts.push(t('session-children', { n: session.childCount }));
      }
