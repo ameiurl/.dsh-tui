@@ -209,10 +209,10 @@ ck "i18n diff touches only the keys this fork owns" \
 # precisely because Ctrl+N walks the list now).
 ck "screen: Ctrl+P/Ctrl+N are answered once per key" \
    "grep -q 'const step = listKeyStep(input, key)' '$SS' && grep -q 'step === -1' '$SS' && grep -q 'step === 1' '$SS'"
-ck "screen: listKeyStep is Ctrl+P up / Ctrl+N down" \
-   "grep -qF \"isMod(key) && input === 'p'\" '$SS' && grep -qF \"isMod(key) && input === 'n'\" '$SS'"
-ck "screen: the retired Ctrl+J/Ctrl+K pair is gone" \
-   "! grep -qF \"input === 'j'\" '$SS' && ! grep -qF \"input === 'k'\" '$SS'"
+ck "screen: listKeyStep is Ctrl+P/K up, Ctrl+N/F down" \
+   "grep -qF \"isMod(key) && (input === 'p' || input === 'k')\" '$SS' && grep -qF \"isMod(key) && (input === 'n' || input === 'f')\" '$SS'"
+ck "screen: Ctrl+J stays unbound" \
+   "! grep -qF \"input === 'j'\" '$SS'"
 ck "screen: Ctrl+T is what creates now" \
    "grep -qF \"isMod(key) && input === 't'\" '$SS' && grep -q 'newSessionIn(selected)' '$SS'"
 ck "i18n: the hint advertises Ctrl+P/N and Ctrl+T" \
@@ -227,9 +227,9 @@ ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,'
 ck "test-resume-flat.mjs covers the keys and the band" \
    "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs'"
 ck "CUSTOMIZATIONS.md documents the pair and the band" \
-   "grep -q 'Ctrl+P 向上 / Ctrl+N 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md'"
-ck "README.md documents the pair and the band" \
-   "grep -q 'Ctrl+P / Ctrl+N' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
+   "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+F 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md'"
+ck "README.md documents the keys and the band" \
+   "grep -q 'Ctrl+P / Ctrl+K' '$DIR/README.md' && grep -q 'Ctrl+N / Ctrl+F' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"

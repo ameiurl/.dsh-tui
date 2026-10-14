@@ -17,9 +17,9 @@
 //   * sub-agent runs stay out of the listing;
 //   * Ctrl+T starts a session in the CURRENT directory, not in a rail row
 //     (the key moved there because Ctrl+N walks the list now);
-//   * Ctrl+P steps UP and Ctrl+N steps DOWN (emacs' own pair), on the bare
-//     control byte and on the kitty/modifyOtherKeys spelling alike, while a
-//     plain `p`/`n` is still typed into the filter;
+//   * Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+F step DOWN, on the bare
+//     control byte and on the kitty/modifyOtherKeys spelling alike, while the
+//     unmodified letters are still typed into the filter;
 //   * Enter opens the FIRST row like any other (there is no new-session card);
 //   * every other row paints the zebra band that separates two-line rows.
 
@@ -269,27 +269,31 @@ process.stdout.write = realWriteForFocus;
 check(opened.length === 1 && opened[0] === 's3',
   `Enter on open targets the most recently used session, not the live one (got ${JSON.stringify(opened)})`);
 
-// F2 fork: Ctrl+P steps UP (previous), Ctrl+N steps DOWN (next) — emacs' own
-// pair, the directions vim's k/j use. Both are ordinary control bytes, so the
-// bare byte and the kitty / modifyOtherKeys spelling arrive as the same `p`/`n`
-// plus ctrl, while a plain p/n must still reach the filter. Driven through the
-// real screen, and read back through Enter: ink repaints incrementally, so
-// where `❯` sits inside a captured frame is not a reliable read of the cursor.
+// F2 fork: Ctrl+P / Ctrl+K step UP and Ctrl+N / Ctrl+F step DOWN. All four are
+// ordinary control bytes, so the bare byte and the kitty / modifyOtherKeys
+// spelling arrive as the same letter plus ctrl, while the unmodified letters
+// must still reach the filter. Driven through the real screen, and read back
+// through Enter: ink repaints incrementally, so where `❯` sits inside a
+// captured frame is not a reliable read of the cursor.
 const listKey = (input, key = {}) => listKeyStep(input, key);
-check(listKey('p', { ctrl: true }) === -1, 'listKeyStep: `ctrl+p` steps up');
-check(listKey('n', { ctrl: true }) === 1, 'listKeyStep: `ctrl+n` steps down');
-check(listKey('p') === 0 && listKey('n') === 0,
-  'listKeyStep: plain p/n are NOT movement keys (they filter)');
-check(listKey('', { return: true }) === 0, 'listKeyStep: Enter is neither');
-check(listKey('j', { ctrl: true }) === 0 && listKey('k', { ctrl: true }) === 0,
-  'listKeyStep: the retired ctrl+j / ctrl+k pair no longer moves the list');
+check(listKey('p', { ctrl: true }) === -1 && listKey('k', { ctrl: true }) === -1,
+  'listKeyStep: `ctrl+p` and `ctrl+k` both step up');
+check(listKey('n', { ctrl: true }) === 1 && listKey('f', { ctrl: true }) === 1,
+  'listKeyStep: `ctrl+n` and `ctrl+f` both step down');
+check(['p', 'n', 'k', 'f'].every(plain => listKey(plain) === 0),
+  'listKeyStep: plain p/n/k/f are NOT movement keys (they filter)');
+check(listKey('', { return: true }) === 0, 'listKeyStep: Enter is none of them');
+check(listKey('j', { ctrl: true }) === 0 && listKey('b', { ctrl: true }) === 0,
+  'listKeyStep: ctrl+j / ctrl+b are not bound');
 
-// Titles, cwd and branch carry no `p`/`n`, so the "a plain letter filters"
-// checks below really empty the list instead of silently matching everything.
+// Titles, cwd and branch carry none of `p`/`n`/`k`/`f`, so the "a plain letter
+// filters" checks below really empty the list instead of quietly matching a row
+// (the first draft used "AAA first" and a plain `f` matched it, which read as a
+// movement bug).
 const walkList = [
-  session('w1', 'AAA first', CURRENT, 300),
-  session('w2', 'BBB middle', CURRENT, 200),
-  session('w3', 'CCC last', CURRENT, 100),
+  session('w1', 'AAA red', CURRENT, 300),
+  session('w2', 'BBB blue', CURRENT, 200),
+  session('w3', 'CCC gold', CURRENT, 100),
 ];
 /** Open the screen, type raw bytes, then commit with Enter. */
 async function walk(keys) {
@@ -333,11 +337,21 @@ check(steppedDown.created.length === 0,
 const steppedBack = await walk(['\u000e', '\u0010', '\r']);
 check(steppedBack.opened.length === 1 && steppedBack.opened[0] === 'w1',
   `Ctrl+P steps back up (got ${JSON.stringify(steppedBack.opened)})`);
+// The alias pair: Ctrl+F is down (0x06), Ctrl+K is up (0x0B) — note this is the
+// opposite of what Ctrl+K meant before the pair was remapped.
+const steppedAlias = await walk(['\u0006', '\u000b', '\r']);
+check(steppedAlias.opened.length === 1 && steppedAlias.opened[0] === 'w1',
+  `Ctrl+F walks down and Ctrl+K walks back up (got ${JSON.stringify(steppedAlias.opened)})`);
+check(steppedAlias.created.length === 0, 'neither alias creates a session');
 // The extended-keys spellings, on a terminal that reports modifiers: CSI-u for
 // `ctrl+n` (codepoint 110) and `ctrl+p` (112), modifier 5 = ctrl.
 const steppedKitty = await walk(['\u001b[110;5u', '\u001b[112;5u', '\r']);
 check(steppedKitty.opened.length === 1 && steppedKitty.opened[0] === 'w1',
   `kitty \`ctrl+n\` / \`ctrl+p\` walk down and back up (got ${JSON.stringify(steppedKitty.opened)})`);
+// ... and the same for the alias pair: `ctrl+f` (102) down, `ctrl+k` (107) up.
+const steppedAliasKitty = await walk(['\u001b[102;5u', '\u001b[107;5u', '\r']);
+check(steppedAliasKitty.opened.length === 1 && steppedAliasKitty.opened[0] === 'w1',
+  `kitty \`ctrl+f\` / \`ctrl+k\` walk down and back up (got ${JSON.stringify(steppedAliasKitty.opened)})`);
 // A plain p/n is a filter character, never a movement key: the query matches no
 // session, so the list empties and Enter has no row to act on. Had the ctrl
 // requirement been dropped, the query would stay empty, all three rows would
@@ -345,9 +359,12 @@ check(steppedKitty.opened.length === 1 && steppedKitty.opened[0] === 'w1',
 const typedPlain = await walk(['n', '\r']);
 check(typedPlain.opened.length === 0,
   `a plain n filters instead of moving (got ${JSON.stringify(typedPlain.opened)})`);
-const typedPlainP = await walk(['p', '\r']);
-check(typedPlainP.opened.length === 0,
-  `a plain p filters instead of moving (got ${JSON.stringify(typedPlainP.opened)})`);
+const typedPlainK = await walk(['k', '\r']);
+check(typedPlainK.opened.length === 0,
+  `a plain k filters instead of moving (got ${JSON.stringify(typedPlainK.opened)})`);
+const typedPlainF = await walk(['f', '\r']);
+check(typedPlainF.opened.length === 0,
+  `a plain f filters instead of moving (got ${JSON.stringify(typedPlainF.opened)})`);
 // The fork has no new-session card: row 0 is an ordinary session, so Enter on
 // it resumes that session (the stock branch started a NEW one instead).
 const enteredFirst = await walk(['\r']);

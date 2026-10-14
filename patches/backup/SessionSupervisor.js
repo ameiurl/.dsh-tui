@@ -595,24 +595,25 @@ export function railWindowTop(focus, entryCount, capacity) {
 /** Re-exported so a regression can drive the spinner without importing ink. */
 export { SpinnerGlyph };
 /**
- * F2 fork: emacs' own two list keys — **Ctrl+P steps UP** (previous) and
- * **Ctrl+N steps DOWN** (next) — so the list can be walked without leaving the
- * home row, and the arrows stay the primary pair. Ctrl+T is what creates a
- * session now that Ctrl+N belongs to the list.
+ * F2 fork: the session list's movement keys besides the arrows — **Ctrl+P /
+ * Ctrl+K step UP** and **Ctrl+N / Ctrl+F step DOWN**. `p`/`n` are emacs' own
+ * previous/next pair; `k`/`f` are the second pair, kept because hands reach for
+ * them. Ctrl+T is what creates a session, since Ctrl+N belongs to the list.
  *
- * Both are ordinary control bytes (0x10 / 0x0E): a terminal reports them as
- * `p`/`n` with ctrl set, on the bare byte and on the kitty/modifyOtherKeys
- * spellings alike, so unlike Ctrl+J (LF, which Ink reads as `enter` with no
- * modifier at all) there is nothing to disambiguate here.
+ * All four are ordinary control bytes (0x10 / 0x0E / 0x0B / 0x06): a terminal
+ * reports them as `p`/`n`/`k`/`f` with ctrl set, on the bare byte and on the
+ * kitty/modifyOtherKeys spellings alike, so unlike Ctrl+J (LF, which Ink reads
+ * as `enter` with no modifier at all) there is nothing to disambiguate here.
+ * The `isMod` gate is what keeps a plain `p`/`n`/`k`/`f` in the filter.
  *
  * @param input - The event's text.
  * @param key - The event's key flags.
- * @returns -1 up, 1 down, 0 when this is not one of the two keys.
+ * @returns -1 up, 1 down, 0 when this is not one of these keys.
  */
 export function listKeyStep(input, key) {
-    if (isMod(key) && input === 'p')
+    if (isMod(key) && (input === 'p' || input === 'k'))
         return -1;
-    if (isMod(key) && input === 'n')
+    if (isMod(key) && (input === 'n' || input === 'f'))
         return 1;
     return 0;
 }
