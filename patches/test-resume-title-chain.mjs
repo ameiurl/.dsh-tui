@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-resume-title-chain.mjs — behaviour check for customization F4
+// test-resume-title-chain.mjs — behaviour check for customization F3
 // ("a /resume row is named the way Claude Code names a session, and a
 // filesystem address never becomes that name").
 //

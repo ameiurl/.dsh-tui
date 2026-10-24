@@ -53,7 +53,12 @@ function fakeCtx(captured) {
     waterfall: async (...args) => (typeof args[args.length - 1] === 'function' ? args[args.length - 1]() : undefined),
   };
 }
-const FS_CONFIG = { readLimit: 2000, readMaxLineLength: 2000, readMaxBytes: 262144, readStreamMinSize: 65536 };
+// 0.2.1's `apply` reads the booleans directly (the runtime hands it a parsed
+// Config), so the bare caps no longer imply "register every tool".
+const FS_CONFIG = {
+  read: true, readImage: false, write: true, edit: true,
+  readLimit: 2000, readMaxLineLength: 2000, readMaxBytes: 262144, readStreamMinSize: 65536,
+};
 
 /** Load a tool package and return its registered tools, by name. */
 async function toolsOf(pkg) {
@@ -82,7 +87,7 @@ const statOf = rows => rows[0]?.text;
 // ── an Edit: one update, two hunks, one paired line ─────────────────────────
 const before = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'].join('\n');
 const after = ['one', 'TWO', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'ELEVEN', 'twelve'].join('\n');
-const editDiffs = edit.output.presentationMeta({ file_path: 'src/x.js' }, { before, after }).diffs;
+const editDiffs = edit.output.presentationMeta({ file_path: 'src/x.js' }, { path: 'src/x.js', before, after }).diffs;
 check(editDiffs.length === 1 && typeof editDiffs[0].patch === 'string',
   'an edit carries one unified patch diff (not per-hunk old/new texts)');
 check(editDiffs[0].patch.startsWith('@@ -'), 'and the patch is hunk text the stock parser reads');
@@ -110,7 +115,7 @@ check(editRows.every(row => row.text !== 'eleven' || row.segments !== undefined)
 
 // ── an unpaired run keeps its lines but gets no segments ────────────────────
 const grew = edit.output.presentationMeta({ file_path: 'src/y.js' },
-  { before: 'a\nb\n', after: 'a\nb\nc\nd\n' }).diffs;
+  { path: 'src/y.js', before: 'a\nb\n', after: 'a\nb\nc\nd\n' }).diffs;
 const grewRows = diffRows(grew);
 check(grewRows.some(row => row.text === 'c') && grewRows.some(row => row.text === 'd'),
   'an added run longer than its removed run lists both new lines');
@@ -118,13 +123,13 @@ check(grewRows.filter(row => row.tone === 'add').every(row => row.segments === u
   'and leaves them unsegmented (nothing to pair against)');
 
 // ── a Write update uses the same shape ─────────────────────────────────────
-const writeDiffs = write.output.presentationMeta({ file_path: 'src/z.js' }, { operation: 'update', before, after }).diffs;
+const writeDiffs = write.output.presentationMeta({ file_path: 'src/z.js' }, { path: 'src/z.js', operation: 'update', before, after }).diffs;
 check(JSON.stringify(diffRows(writeDiffs)) === JSON.stringify(editRows),
   'Write (update) renders through the identical path as Edit');
 
 // ── creating a file: numbered from 1, stat +N -0 ───────────────────────────
 const createDiffs = write.output.presentationMeta({ file_path: 'src/new.js' },
-  { operation: 'create', before: null, after: 'alpha\nbeta\n' }).diffs;
+  { path: 'src/new.js', operation: 'create', before: null, after: 'alpha\nbeta\n' }).diffs;
 const createRows = diffRows(createDiffs);
 check(statOf(createRows) === '(+2 -0)', `a created file stats +N -0 (${statOf(createRows)})`);
 check(gutters(createRows).join(' ') === '1 + alpha 2 + beta',
@@ -232,13 +237,13 @@ check(editViewFrame.includes(' 2 - two'),
 const wideBefore = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n');
 const wideAfter = wideBefore.replace('line 30', 'LINE THIRTY');
 const wideFrame = await renderCard(edit.output.presentationMeta({ file_path: 'src/wide.js' },
-  { before: wideBefore, after: wideAfter }).diffs);
+  { path: 'src/wide.js', before: wideBefore, after: wideAfter }).diffs);
 check(!wideFrame.includes('ctrl+o') && wideFrame.includes('30 - line 30'),
   'a long edit renders every row too (unified bodies are uncapped)');
 
 const many = Array.from({ length: 30 }, (_, i) => `content ${i + 1}`).join('\n');
 const createFrame = await renderCard(write.output.presentationMeta({ file_path: 'src/big.js' },
-  { operation: 'create', before: null, after: `${many}\n` }).diffs);
+  { path: 'src/big.js', operation: 'create', before: null, after: `${many}\n` }).diffs);
 check(createFrame.includes('10 + content 10') && !createFrame.includes('11 + content 11'),
   'a created file previews the diffstat plus its first 10 lines');
 check(createFrame.includes('ctrl+o'),

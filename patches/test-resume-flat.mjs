@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-resume-flat.mjs — behaviour check for customization F3 on dsh-tui 0.11.x
+// test-resume-flat.mjs — behaviour check for customization F2 on dsh-tui 0.17.x
 // ("/resume lists THIS working directory's sessions, flat and rail-free").
 //
 //   node ~/.dsh-tui/patches/test-resume-flat.mjs

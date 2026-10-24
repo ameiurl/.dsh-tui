@@ -1,6 +1,6 @@
---- original/dsh-tool-fs.index.js	2026-09-29 09:52:19.869351403 +0800
-+++ backup/dsh-tool-fs.index.js	2026-10-14 13:21:14.876538141 +0800
-@@ -400,46 +400,50 @@
+--- /home/amei/.dsh-tui/patches/original/dsh-tool-fs.index.js	2026-10-24 21:36:33.227393302 +0800
++++ /home/amei/.dsh-tui/patches/backup/dsh-tool-fs.index.js	2026-10-24 21:36:33.228482325 +0800
+@@ -390,46 +390,50 @@
  		}
  	}));
  }
@@ -79,20 +79,20 @@
  }
  /**
  * Narrow opaque live or replayed result metadata to non-empty file diffs. Malformed metadata
-@@ -569,11 +573,7 @@
- 			}],
- 			presentationMeta: (args, value) => ({
+@@ -593,11 +597,7 @@
+ 			presentationMeta: (_args, value) => ({
  				operation: value.operation,
--				diffs: value.before === null ? [] : computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
+ 				path: value.path,
+-				diffs: value.before === null ? [] : computeHunkDiffs(value.path, value.before, value.after).map(({ path, oldText, newText }) => ({
 -					path,
 -					oldText,
 -					newText
 -				}))
-+				diffs: value.before === null ? [newFileDiff(args.file_path, value.after)] : computeHunkDiffs(args.file_path, value.before, value.after)
++				diffs: value.before === null ? [newFileDiff(value.path, value.after)] : computeHunkDiffs(value.path, value.before, value.after)
  			})
  		},
  		async execute(args, exec) {
-@@ -602,21 +602,13 @@
+@@ -617,21 +617,13 @@
  			return {
  				card: "diff",
  				title: `Write ${args.file_path}`,
@@ -108,24 +108,24 @@
  		presentResult(args, result) {
  			if (result.isError) return void 0;
 -			const diffs = diffsFromMeta(result.meta) ?? [{
--				path: args.file_path,
+-				path: pathFromMeta(result.meta) ?? args.file_path,
 -				oldText: null,
 -				newText: args.content
 -			}];
-+			const diffs = diffsFromMeta(result.meta) ?? [newFileDiff(args.file_path, args.content)];
++			const diffs = diffsFromMeta(result.meta) ?? [newFileDiff(pathFromMeta(result.meta) ?? args.file_path, args.content)];
  			return {
  				card: "diff",
  				title: `Write ${args.file_path}`,
-@@ -719,11 +711,7 @@
- 				type: "text",
- 				text: formatEditOutput(value.path, args.replace_all ?? false)
+@@ -737,11 +729,7 @@
  			}],
--			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after).map(({ path, oldText, newText }) => ({
--				path,
--				oldText,
--				newText
--			})) })
-+			presentationMeta: (args, value) => ({ diffs: computeHunkDiffs(args.file_path, value.before, value.after) })
+ 			presentationMeta: (_args, value) => ({
+ 				path: value.path,
+-				diffs: computeHunkDiffs(value.path, value.before, value.after).map(({ path, oldText, newText }) => ({
+-					path,
+-					oldText,
+-					newText
+-				}))
++				diffs: computeHunkDiffs(value.path, value.before, value.after)
+ 			})
  		},
  		async execute(args, exec) {
- 			const input = parseEditArgs(args);

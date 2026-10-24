@@ -17,12 +17,12 @@
 ### 1.1 版本
 | 组件 | 位置 | 版本 |
 | --- | --- | --- |
-| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.15.0` |
-| delegating 壳（`dsh-tui` / `dst` 命令） | 全局 | `0.15.0` |
-| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.2.0-rc.2` |
-| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…`（软链向 launcher 树） | `0.2.0-rc.2` |
-| 补丁基线 `patches/patch-base-version` | 文档/检查脚本引用 | `0.15.0` |
-| 逐包基线 `patches/patch-base-versions.json` | apply 脚本据此**分目标**放行 | dsh-tui `0.15.0`／tool 两包 `0.2.0-rc.2` |
+| `@deepseek-harness-tui/dsh-tui`（实际运行的 TUI） | `~/.dsh/profiles/dsh-tui/node_modules/…` | `0.17.0` |
+| delegating 壳（`dsh-tui` / `dst` 命令） | 全局 | `0.17.0` |
+| launcher / 生态 `@deepseek-ai/dsh` | 全局 | `0.2.1-rc.2` |
+| tool 包 `dsh-tool-fs` / `dsh-tool-str-replace-editor` | `~/.dsh/profiles/node_modules/@deepseek-ai/…`（软链向 launcher 树） | `0.2.1-rc.2` |
+| 补丁基线 `patches/patch-base-version` | 文档/检查脚本引用 | `0.17.0` |
+| 逐包基线 `patches/patch-base-versions.json` | apply 脚本据此**分目标**放行 | dsh-tui `0.17.0`／tool 两包 `0.2.1-rc.2` |
 
 **版本关系（每次都要确认）：**
 - 壳与 profile 应同版本；**profile 的 pin 才是权威**：`dsh` 每次启动按
@@ -56,6 +56,12 @@
 - **分工**：tool 两包把改动序列化成 **unified patch 文本**（`{path, patch}`，多个 hunk 合成一个
   diff；新建文件用 `@@ -0,0 +1,N @@`），**行号/统计/`⋯`/路径行交给上游**的
   `components/diffPatch.js`（`parseFilePatch`/`patchHeader`）；渲染器只补上游画不出来的部分。
+- **0.17 的 tool 接口（0.2.1-rc.2，已适配）**：`presentationMeta` 现在拿 result 里的
+  **canonical path**，即 `value.path`，不再用 `args.file_path`；所以补丁是
+  `computeHunkDiffs(value.path, value.before, value.after)`，新建文件是
+  `newFileDiff(value.path, value.after)`。`write` 的 `presentResult` 兜底改成
+  `pathFromMeta(result.meta) ?? args.file_path`（上游新增了 `pathFromMeta`），
+  `meta` 里因此也带 `path`。`isFileDiff` 同时认 `{patch}` 与旧的 `{oldText,newText}` 两种形状。
 - **行为**：
   - 真实行号 gutter（stock 解析 + 编号，宽度按最大行号右对齐）+ `(+N -M)` 统计行；
   - 绿/红**整行底色**（`diffAddedDimmed`/`diffRemovedDimmed`），行内文字用默认色；
@@ -78,13 +84,20 @@
   - `…/dsh-tui/lib/types/screens/sessionSupervisor/useSessionSupervisor.js`（主补丁）
   - `…/dsh-tui/lib/types/screens/SessionSupervisor.js`（删「＋ 新建会话」行；Ctrl+T 新建用钉死目录；
     Enter 只开光标行；Ctrl+P/K 上、Ctrl+N/J 下；按绝对行号传 `striped`）
-  - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标；新增 `striped` 隔行底色）
+  - `…/dsh-tui/lib/types/components/sessions/SessionListRow.js`（删「当前」徽标；新增 `striped` 隔行底色；
+    上游 0.17 的 `WorkingGlyph` 行内 spinner 保留 —— 父屏不再传 `spinner`）
   - `…/dsh-tui/lib/types/i18n.js`（两个 key：`supervisor-hint-list` 去掉 `←/→ 切换栏位`、
     改成 `Ctrl+P/N 移动 · Ctrl+T 新建`；删除 `supervisor-current`）
-- **行为**（三条底线）：
+- **行为**（底线）：
   - **无 rail**：`railVisible = false`，两侧 rail JSX 不渲染，面板占满宽度；键盘一开始就归列表，
     `activateRail()` 置空（`←` 不抢键盘）。
+  - **顶部路径栏是上游的，保留**：0.17 在列表上方加了按宽度折行的当前目录栏
+    （`wrapPathWidth` + `useTooltip` + `clearTooltip`），DSH 页显示 `selected.path`（即本终端 cwd），
+    外来后端页显示自己的 `foreign.selected.path`。`pathRows` 要在算会话窗口前先从
+    `sessionListHeight` 里扣掉；`cwd` 为空（`UNREGISTERED_RAIL_ID`）时不画这一栏。
   - **范围=本终端的工作目录**：`selected` 由 `channel.cwd` 合成（cwd 已注册则取 registry 的拼写），
+    `listedSessions` 先走上游 0.17 抽出的 `visibleWorkspaceSessions(sessions, agentId)`（已含
+    archived/hasPrompt/subagent/ancestor 过滤），再链 F2 的"无日志记录"过滤；
     `visibleSessions` 对 `listedSessions` 用 `samePath(session.cwd, channel.cwd)` 过滤
     —— 比 stock 的"rail 分组 key 精确相等"更稳（尾斜杠/大小写不同仍算同目录）。
   - **列表只有会话行**：**没有**「＋ 新建会话」行（Ctrl+T 新建），光标空间因此只有会话
@@ -134,10 +147,14 @@
   - 代价（已接受）：**没有切换工作区的入口**；要看别的目录的会话，就在那个目录启动 dsh-tui。
 - **重移植注意**：stock 的 rail 选择状态（`selectedPath`/`selectedUnregisteredId`/
   `selectionManual`）与「按 cwd 自动选 rail 行」的 effect 在新结构里没有位置，**整块删掉**；
-  上游新增的 `mostRecentIn`/`recentSessionId`（默认聚焦最近会话）**保留**，它吃 `selected.path`。
+  0.17 的 `mostRecentIn`/`recentSessionId` 也不再接回 rail 分组（`groupedEntries.get(selected.path)`
+  对未登记目录没有 key），直接改成扫 `listedSessions` + `samePath`。
+  0.17 仍保留 stock 的「＋ 新建会话」卡片，所以 `sessionCapacity = Math.max(1, capacity - 1)`、
+  `sessionTop` 里的 `sessionIndex - 1`、`sessionTop + index + 1 === sessionIndex` 都是卡片残留；
+  重移植时全部去掉偏移（卡片已被本补丁删除），并把 `pathRows` 记进容量公式。
 - **验证**：`/resume` 只列本目录的会话、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、
   Ctrl+T 落在本目录、隔行有底色而相邻两行分得开、Ctrl+P/K 上移、Ctrl+N/J 下移、Enter 落在第一行
-  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（45 条断言，真渲染该屏 + 单独
+  也能打开；命令行：`node ~/.dsh-tui/patches/test-resume-flat.mjs`（28 条断言，真渲染该屏 + 单独
   渲染行组件验证 `current` prop 已被忽略、`striped` 才铺底色且色调是 `ansi256 237` + 按 Enter 验证默认落在最近会话、
   首行可开、四个移动键（Ctrl+J 的 **LF** 与 kitty 拼写各走一遍）真的移动、普通 p/n/k/j 只过滤、
   Ctrl+F 已不绑定、Ctrl+T 才是新建）。
@@ -145,6 +162,7 @@
 ### F3 — `/resume` 标题按 Claude Code 的取名链；文件地址与 dsh 兜底占位都不当标题
 - **涉及文件（2 个）**：`…/dsh-tui/lib/types/dsh-adapter/sessions/digest.js`、
   `…/dsh-tui/lib/types/dsh-adapter/sessions/store.js`（只有 `SCHEMA_VERSION` 4 → 5）。
+  0.17 没动这两个文件（上游 `store.js` 仍是 4），重移植时 diff 会整块落在标题逻辑上。
 - **取名链**（对应 Claude 的 `customTitle || aiTitle || lastPrompt || firstPrompt`）：
   1. 最近一条**真名字** `session/title`（`provider`=auto／`user` 或旧式 rename=renamed）
      —— 人和模型写下的名字照用；
@@ -173,8 +191,9 @@
 
 ### 仍 stock（别再打补丁）
 vim 默认关且指示在输入框内（`/vim` 开启）；
-`ToolFileDiff.d.ts`（`oldStart`/`newStart` 由 JS 产出与读取，`.d.ts` 只影响 `tsc`——
-需要类型时在自己工程里 `declare module` 增强）。
+所有 `.d.ts` 都保持 stock（`ToolFileDiff.d.ts` 的 `oldStart`/`newStart`、
+`SessionListRow.d.ts` 的 `current`、`useSessionSupervisor.d.ts` 的 `cardFocused` 都还在）——
+运行时读的是 JS，`.d.ts` 只影响 `tsc`；需要类型时在自己工程里 `declare module` 增强。
 
 ---
 
@@ -201,15 +220,15 @@ node -p "require('$HOME/.dsh/profiles/node_modules/@deepseek-ai/dsh-tool-fs/pack
 # 1) 全局 launcher —— 这里【不要】加 --legacy-peer-deps（会跳过 peer 自动安装，
 #    缺 @deepseek-ai/cordis-plugin-group，dsh --version 直接 ERR_MODULE_NOT_FOUND）
 env -u https_proxy -u http_proxy -u all_proxy \
-  npm install -g @deepseek-ai/dsh@0.2.0-rc.2
+  npm install -g @deepseek-ai/dsh@0.2.1-rc.2
 
 # 2) 全局壳（瘦壳，逻辑永远来自 profile）
 env -u https_proxy -u http_proxy -u all_proxy \
-  npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@0.15.0
+  npm install -g --legacy-peer-deps @deepseek-harness-tui/dsh-tui@0.17.0
 
 # 3) profile 的 pin + node_modules（生态包会被一起带到同一版本）
 env -u https_proxy -u http_proxy -u all_proxy \
-  pnpm add -C ~/.dsh/profiles/dsh-tui @deepseek-harness-tui/dsh-tui@0.15.0
+  pnpm add -C ~/.dsh/profiles/dsh-tui @deepseek-harness-tui/dsh-tui@0.17.0
 ```
 - 升级后**第一次**跑 `dsh` 会 reconcile profile 的 `node_modules`，把 tool 两包换回 stock
   （一次性）。先随便跑一次 `dsh --version` 让它 reconcile 完，**再**执行 Step 1。
@@ -276,8 +295,8 @@ bash apply-diff-patches.sh apply                # 写入 + 语法门禁
 rm -f state/*.sha1                              # 重移植后旧指纹作废
 bash apply-diff-patches.sh check                # 期望全 OK（exit 0）
 node resolve-patch-targets.mjs | wc -l          # = original/ 里的文件数
-echo "0.15.0" > patch-base-version              # 上面都过了再写
-node -e "const f='patch-base-versions.json',j=require('./'+f);j['@deepseek-harness-tui/dsh-tui']='0.15.0';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+echo "0.17.0" > patch-base-version              # 上面都过了再写
+node -e "const f='patch-base-versions.json',j=require('./'+f);j['@deepseek-harness-tui/dsh-tui']='0.17.0';j['@deepseek-ai/dsh-tool-fs']='0.2.1-rc.2';j['@deepseek-ai/dsh-tool-str-replace-editor']='0.2.1-rc.2';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 # tool 两包换版本时同理改 j['@deepseek-ai/dsh-tool-fs'] / j['@deepseek-ai/dsh-tool-str-replace-editor']
 ```
 
@@ -315,9 +334,9 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 逐项验证：
 - **F1**：Edit/Write 有行号 + 绿红整行底色 + `(+N -M)`；NEW 文件只出前 10 行、Ctrl+O 展开；
   hover 不变底色。`node ~/.dsh-tui/patches/test-f1-diff-rows.mjs`
-- **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、`←` 不改光标、Ctrl+T 落在本目录、
-  相邻行底色隔开（上下分得清）、Ctrl+P/K 上移与 Ctrl+N/J 下移、Enter 在第一行也开会话。
-  `node ~/.dsh-tui/patches/test-resume-flat.mjs`
+- **F2**：`/resume` 只列本目录、无 rail、无新建会话行与「当前」徽标、顶部路径栏显示当前目录、
+  `←` 不改光标、Ctrl+T 落在本目录、相邻行底色隔开（上下分得清）、Ctrl+P/K 上移与 Ctrl+N/J 下移、
+  Enter 在第一行也开会话。`node ~/.dsh-tui/patches/test-resume-flat.mjs`
 - **F3**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
   `node ~/.dsh-tui/patches/test-resume-title-chain.mjs`
 - 仍是 stock：会话标题按宽度截断；vim 默认关、指示在输入框内。
@@ -330,15 +349,18 @@ bash ~/.dsh-tui/patches/check-doc-consistency.sh    # 全过则 exit 0
 覆盖面：§1.1 版本表（壳/生态/tool 两包各按基线，含 `patch-base-versions.json` 可解析且与
 `patch-base-version` 一致）/ §1.2 用户级设置 / F1 的渲染器锚点（不折叠、整行底色、词级
 segments、编号来自解析、旧形状兼容、新文件判定、`hoverTint` 已删、测试缝）与 tool 侧
-（`hunksPatch`、`newFileDiff`、校验器收 `patch`、`oldStart` 字段已删、`presentResult`）与
-行为测试 / 已退役的历史（`historyProjectKey`、`appendHistory(cwd)`、
-`loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/ F2 的 `railVisible = false`、
-无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、无日志记录不列、
-`samePath(session.cwd, channel.cwd)` 过滤、rail 选择状态已删、Ctrl+T 用钉死目录、i18n 只动
+（`hunksPatch`、`newFileDiff`、校验器收 `patch`、`oldStart` 字段已删、`presentResult`、
+0.2.1 的 `value.path` canonical 路径、`pathFromMeta` 兜底、测试夹具的显式 config 布尔与
+带 `path` 的 `presentationMeta` 入参）与行为测试 / 已退役的历史（`historyProjectKey`、
+`appendHistory(cwd)`、`loadHistoryOldestFirst(cwd)`、并集语义、三个文件不在补丁集里）/
+F2 的 `railVisible = false`、无新建会话行、徽标整块已删（prop/JSX/i18n）、默认选中最近会话、
+无日志记录不列、`visibleWorkspaceSessions` 前置、`samePath(session.cwd, channel.cwd)` 过滤、
+rail 选择状态已删、Ctrl+T 用钉死目录、i18n 只动
 `supervisor-hint-list`、`SessionListRow.js` 已无 `current`、`supervisor-current` 文案已删、
 `listKeyStep` 就是 Ctrl+P/K 上、Ctrl+N/J 下（Ctrl+J 还要认 LF 拼写、Ctrl+F 未绑定）、
 `striped` 隔行底色按绝对行号传入且是写死的 `ansi256(237)`（不是主题键）、
-Enter 的 `sessionIndex === 0` 新建分支已删 /
+`WorkingGlyph` 行内 spinner（父屏已无 `spinner` prop）、顶部路径栏的 `pathRows` 先从高度扣除、
+`sessionCapacity` 不再减新建卡片、Enter 的 `sessionIndex === 0` 新建分支已删 /
 F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
 占位标题判 `strong: false`（四处扫描）、`titleComplete` 不跟占位走、`store.js` 的

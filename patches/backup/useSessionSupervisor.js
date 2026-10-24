@@ -16,6 +16,7 @@ import { basename } from 'node:path';
 import { formatSessionRef } from '../../agent/refs.js';
 import { t } from '../../i18n.js';
 import { normalizeWorkspaceCwd } from '../../sessions/view.js';
+import { visibleWorkspaceSessions } from '../../sessions/workspaceCounts.js';
 import { readSessionPins, sessionPinsDir, setSessionPinned } from '../../sessionPins.js';
 import { readSessionOwners } from '../../sessionMounts.js';
 import { resumeFailureText } from '../../sessions/resumeFailure.js';
@@ -123,33 +124,19 @@ export function useSessionSupervisor(input) {
      * the current row already represents. `buildView` hides the current id as
      * well because its list has no live-state column to mark it with.
      */
-    const listedSessions = useMemo(() => {
-        const byId = new Map(sessions.map(session => [session.id, session]));
-        const ancestors = new Set();
-        let cursor = byId.get(channel.agentId);
-        while (cursor?.kind.kind === 'fork') {
-            const parent = cursor.kind.parent;
-            if (parent === undefined || ancestors.has(parent))
-                break;
-            ancestors.add(parent);
-            cursor = byId.get(parent);
-        }
-        return sessions.filter(session => session.hasPrompt
-            && session.kind.kind !== 'subagent'
-            && !ancestors.has(session.id)
-            // F2 fork: a record with no artifact behind it is not a session this
-            // pane should offer. Every terminal start registers one, and its log
-            // may never land at all; with nothing to name it, it renders as the
-            // directory basename ("☆ ∙ .dsh-tui") and reads like a directory row
-            // rather than a conversation — including the session the terminal is
-            // IN, which is the one this pane is opened from (you do not need a
-            // row to resume the session you are already in). `bytes` is the
-            // artifact's size and stays undefined while no log exists; a real
-            // title or a real artifact keeps a row listed, so a conversation
-            // whose opening prompt was an address and a session that just
-            // started (log written, no prompt yet) both stay.
-            && (session.title?.source !== 'fallback' || session.bytes !== undefined));
-    }, [sessions, channel.agentId, liveStateOf]);
+    const listedSessions = useMemo(() => visibleWorkspaceSessions(sessions, channel.agentId)
+        // F2 fork: a record with no artifact behind it is not a session this
+        // pane should offer. Every terminal start registers one, and its log
+        // may never land at all; with nothing to name it, it renders as the
+        // directory basename ("☆ ∙ .dsh-tui") and reads like a directory row
+        // rather than a conversation — including the session the terminal is
+        // IN, which is the one this pane is opened from (you do not need a
+        // row to resume the session you are already in). `bytes` is the
+        // artifact's size and stays undefined while no log exists; a real
+        // title or a real artifact keeps a row listed, so a conversation
+        // whose opening prompt was an address and a session that just
+        // started (log written, no prompt yet) both stay.
+        .filter(session => session.title?.source !== 'fallback' || session.bytes !== undefined), [sessions, channel.agentId]);
     /**
      * The rail's rows: the durable registry, plus rows for sessions that live in
      * a directory the registry does not know (or while it cannot be read at all).
@@ -342,6 +329,9 @@ export function useSessionSupervisor(input) {
         // rows the newer listing has already corrected.
         const slot = snapshotSlot(channel);
         const generation = ++slot.requestGeneration;
+        const bindingGeneration = channel.agentBindingGeneration;
+        const current = () => slot.requestGeneration === generation
+            && channel.agentBindingGeneration === bindingGeneration;
         setRefreshing(true);
         // The two reads are independent, and the session listing is the half this
         // screen cannot work without: a registry that rejects (bare composition,
@@ -352,14 +342,14 @@ export function useSessionSupervisor(input) {
             (async () => {
                 try {
                     const fresh = await channel.listSessions(enriched => {
-                        if (slot.requestGeneration !== generation)
+                        if (!current())
                             return;
                         slot.rows = slot.rows?.map(row => row.id === enriched.id ? enriched : row);
                         setSessions(current => current.map(row => row.id === enriched.id ? enriched : row));
                     }, partial => {
                         // Fresh workspace rows supersede cached metadata immediately;
                         // retain other cached workspaces until the full listing arrives.
-                        if (slot.requestGeneration !== generation)
+                        if (!current())
                             return;
                         setSessions(current => [...new Map([...current, ...partial].map(row => [row.id, row])).values()]
                             .sort((left, right) => right.updatedAt - left.updatedAt));
@@ -367,14 +357,14 @@ export function useSessionSupervisor(input) {
                     });
                     // Recorded only after success: a failed listing keeps the previous
                     // snapshot, and only the newest reload may write it.
-                    if (slot.requestGeneration !== generation)
+                    if (!current())
                         return;
                     slot.rows = fresh;
                     setSessions(fresh);
                     setNotice(current => (current?.tone === 'error' ? undefined : current));
                 }
                 catch (error) {
-                    if (slot.requestGeneration !== generation)
+                    if (!current())
                         return;
                     setNotice({ text: t('home-sessions-failed', { err: message(error) }), tone: 'error' });
                 }
@@ -384,24 +374,24 @@ export function useSessionSupervisor(input) {
                     const registry = typeof channel.listWorkspaceRegistry === 'function' && workspaceLedger
                         ? await channel.listWorkspaceRegistry()
                         : [];
-                    if (slot.requestGeneration !== generation)
+                    if (!current())
                         return;
                     setEntries(registry.map(entry => ({ ...entry, from: 'registry' })));
                 }
                 catch {
                     // An unreadable registry is not an empty history: the sessions stay
                     // listed (and resumable) under the cwd-derived fallback groups.
-                    if (slot.requestGeneration !== generation)
+                    if (!current())
                         return;
                     setEntries([]);
                 }
             })(),
         ]);
-        if (slot.requestGeneration === generation) {
+        if (current()) {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [channel, workspaceLedger, channel.cwd, channel.ready]);
+    }, [channel, workspaceLedger, channel.cwd, channel.ready, channel.agentBindingGeneration]);
     React.useEffect(() => {
         void reload();
     }, [reload]);
@@ -415,7 +405,6 @@ export function useSessionSupervisor(input) {
         setRailFocus(current => Math.min(current, Math.max(0, railEntries.length - 1)));
     }, [railEntries.length]);
     /**
-     * Sessions whose recorded cwd is the selected workspace, minus the search
      * Sessions recorded in this terminal's directory, minus the search
      * filter. Live sessions in the directory sort above stopped ones, then by
      * recency: what this terminal is currently running is what the user is
@@ -441,7 +430,7 @@ export function useSessionSupervisor(input) {
      * Cursor identity: rows reorder on every reload and filter, so the cursor
      * follows an ID rather than an index.
      *
-     * F3 fork: the new-session row is gone (`Ctrl+N` still creates one), so row
+     * F3 fork: the new-session row is gone (`Ctrl+T` still creates one), so row
      * 0 IS the first session and an empty list has no row to stand on.
      */
     const sessionIndex = useMemo(() => {

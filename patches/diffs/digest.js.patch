@@ -1,5 +1,5 @@
---- original/digest.js	2026-10-14 14:29:06.988075243 +0800
-+++ backup/digest.js	2026-10-14 14:28:44.455911938 +0800
+--- /home/amei/.dsh-tui/patches/original/digest.js	2026-10-24 21:36:33.259303089 +0800
++++ /home/amei/.dsh-tui/patches/backup/digest.js	2026-10-24 21:36:33.259958576 +0800
 @@ -40,6 +40,8 @@
  const TITLE_ANCHOR_BYTES = 256;
  /** Longest preview excerpt kept per message, in characters. */

@@ -1,5 +1,5 @@
---- original/SessionSupervisor.js	2026-10-14 14:29:06.980039825 +0800
-+++ backup/SessionSupervisor.js	2026-10-14 16:25:37.255167371 +0800
+--- /home/amei/.dsh-tui/patches/original/SessionSupervisor.js	2026-10-24 21:36:33.245312777 +0800
++++ /home/amei/.dsh-tui/patches/backup/SessionSupervisor.js	2026-10-24 21:36:33.245997156 +0800
 @@ -54,7 +54,7 @@
      const { columns, rows } = useTerminalSize();
      const inset = React.useContext(PageInsetContext);
@@ -87,7 +87,7 @@
 -            // Row 0 of the list is the new-session card, so it starts a session
 -            // instead of opening one.
 +            // F2 fork: the new-session card that used to BE row 0 is gone, so row 0 is
-+            // an ordinary session and Enter opens it. Creating one is Ctrl+N — and an
++            // an ordinary session and Enter opens it. Creating one is Ctrl+T — and an
 +            // empty list (no sessions, or a filter with no match) does nothing, because
 +            // there is no row for Enter to act on.
              if (activePane === 'list') {
@@ -99,7 +99,7 @@
                  // `sessionIndex` is derived from the SAME focus fact the render draws
                  // `❯` from, so Enter can only ever open the row the user is looking at.
                  const session = sessionAt(sessionIndex);
-@@ -399,9 +397,11 @@
+@@ -395,9 +393,11 @@
       * Keys on a source tab: the same pane model as DSH (←/→ pick the column,
       * ↑/↓ move, typing filters), with what a foreign source cannot do left out —
       * no workspace menu, no new session, no stop — and Ctrl+L rescanning the
@@ -113,7 +113,7 @@
          if (key.leftArrow) {
              foreign.activateRail();
              return;
-@@ -410,7 +410,7 @@
+@@ -406,7 +406,7 @@
              foreign.activateList();
              return;
          }
@@ -122,17 +122,15 @@
          if (by !== 0) {
              if (foreign.pane === 'rail')
                  foreign.moveRail(by);
-@@ -477,15 +477,13 @@
-     // Scroll window over the session rows, keeping the focused row visible
-     // without re-shuffling the list under a stationary cursor.
-     //
--    // The new-session card is a permanent row above this window, so the window is
--    // one card shorter and the cursor is expressed in the FULL list's space (card =
--    // 0): without that offset the window kept its old height and the cursor could
--    // land on a row that never made it on screen — a `❯` on an invisible row.
-+    // F3 fork: the new-session row is gone, so the window holds the whole pane
-+    // and the cursor indexes the sessions directly.
-     const capacity = Math.max(1, Math.floor(sessionListHeight / SESSION_ROW_LINES));
+@@ -487,13 +487,13 @@
+     const visibleRailCapacity = Math.max(1, railEntryCapacity - Math.ceil(pathRows / WORKSPACE_ROW_LINES));
+     const railWindowTopIndex = railWindowTop(railFocus, railEntries.length, visibleRailCapacity);
+     const visibleRailRows = railEntries.slice(railWindowTopIndex, railWindowTopIndex + visibleRailCapacity);
+-    // The new-session card is row 0; reserve its space and the path bar before
+-    // deriving the visible session window, so the focused row never gets clipped.
++    // F3 fork: the new-session row is gone, so the window holds everything under
++    // the path bar and the cursor indexes the sessions directly.
+     const capacity = Math.max(1, Math.floor((sessionListHeight - pathRows) / SESSION_ROW_LINES));
 -    const sessionCapacity = Math.max(1, capacity - 1);
 -    let sessionTop = Math.min(Math.max(0, sessionIndex - 1 - sessionCapacity + 1), Math.max(0, visibleSessions.length - sessionCapacity));
 -    if (sessionIndex - 1 < sessionTop)
@@ -144,7 +142,7 @@
      const visibleSessionRows = visibleSessions.slice(sessionTop, sessionTop + sessionCapacity);
      const liveCount = listedSessions.filter(session => liveStateOf(session.id)?.live === true).length;
      return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, onClick: menu !== undefined ? closeMenu : tabMenu !== undefined ? closeTabMenu : undefined, children: [_jsxs(Box, { height: 1, flexShrink: 0, overflow: "hidden", children: [_jsxs(Box, { flexGrow: 1, flexShrink: 1, overflow: "hidden", children: [_jsx(Text, { color: "remember", bold: true, children: titleText }), showSubtitle && _jsx(Text, { dimColor: true, children: subtitleText })] }), tabs.length > 0 && (_jsx(Box, { flexShrink: 0, marginRight: 1, children: _jsx(SourceTabs, { layout: tabLayout, active: tab, leadId: DSH_TAB, onSelect: switchTab, onOverflow: (event) => {
-@@ -523,17 +521,17 @@
+@@ -533,17 +533,17 @@
                                      if (activePane !== 'list')
                                          activateList();
                                      setFilterFocused(true);
@@ -159,16 +157,16 @@
                                  }, children: [loading && _jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(t('home-sessions-loading'), sessionWidth - 2)}` }), !loading && visibleSessions.length === 0 && (_jsx(Text, { dimColor: true, italic: true, children: ` ${truncateWidth(filtered ? t('supervisor-no-matches') : t('home-no-sessions'), sessionWidth - 2)}` })), visibleSessionRows.map((session, index) => {
                                          const state = liveStateOf(session.id);
                                          const holder = holderOf(session.id);
--                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index + 1 === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, current: state?.current === true, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
+-                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, focused: activePane === 'list' && sessionTop + index + 1 === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, current: state?.current === true, occupiedPid: holder, onClick: (event) => {
 +                                        return (_jsx(SessionListRow, { session: session, width: sessionWidth, depth: 0, 
 +                                            // F2 fork: the zebra band follows the row's ABSOLUTE
 +                                            // index, so scrolling cannot re-stripe the list under
 +                                            // a stationary eye — the row that was filled stays filled.
-+                                            striped: (sessionTop + index) % 2 === 1, focused: activePane === 'list' && sessionTop + index === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, occupiedPid: holder, spinner: { frame: spinnerFrame, time: spinnerTime }, onClick: (event) => {
++                                            striped: (sessionTop + index) % 2 === 1, focused: activePane === 'list' && sessionTop + index === sessionIndex, declareCursor: cursorActive && !searchCursor, pinned: pins.has(session.id), now: now, liveStatus: state?.live === true ? state.status : undefined, occupiedPid: holder, onClick: (event) => {
                                                  event.stopImmediatePropagation();
                                                  setFocusSessionId(session.id);
                                                  openSession(session);
-@@ -596,3 +594,35 @@
+@@ -606,3 +606,35 @@
  }
  /** Re-exported so a regression can drive the spinner without importing ink. */
  export { SpinnerGlyph };

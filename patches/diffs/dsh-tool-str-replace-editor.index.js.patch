@@ -1,5 +1,5 @@
---- original/dsh-tool-str-replace-editor.index.js	2026-09-29 09:52:19.869351403 +0800
-+++ backup/dsh-tool-str-replace-editor.index.js	2026-10-14 13:21:24.608511664 +0800
+--- /home/amei/.dsh-tui/patches/original/dsh-tool-str-replace-editor.index.js	2026-10-24 21:36:33.233446801 +0800
++++ /home/amei/.dsh-tui/patches/backup/dsh-tool-str-replace-editor.index.js	2026-10-24 21:36:33.234900630 +0800
 @@ -4,6 +4,7 @@
  import { truncateWithoutSplittingSurrogatePair } from "@deepseek-ai/dsh-output-retention";
  import { sandboxDenialMarker } from "@deepseek-ai/dsh-sandbox";

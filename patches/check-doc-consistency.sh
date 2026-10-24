@@ -139,7 +139,15 @@ ck "str-replace: result diff card present"  "grep -q 'presentResult(args, result
 # REMEDIES refactor) back in.
 ck "tool-fs patch carries no upstream rollback" \
    "! grep -qE '^[-+].*(scope-aware|REMEDIES)' '$DIR/diffs/dsh-tool-fs.index.js.patch'"
-ck "F1 behaviour test passes"               "node '$DIR/test-f1-diff-rows.mjs'"
+# 0.2.1 moved the path source from `args.file_path` to the canonical result
+# path (`value.path`), and added `pathFromMeta` for the empty-diff write case.
+ck "tool-fs: the canonical value.path feeds the diff" \
+   "grep -q 'computeHunkDiffs(value.path' '$TFS' && grep -q 'newFileDiff(value.path' '$TFS'"
+ck "tool-fs: presentResult falls back through pathFromMeta" \
+   "grep -q 'pathFromMeta(result.meta)' '$TFS'"
+ck "F1 fixtures use 0.2.1's explicit config booleans and canonical path" \
+   "grep -q 'read: true, readImage: false, write: true, edit: true' '$DIR/test-f1-diff-rows.mjs' && grep -qF \"{ path: 'src/x.js', before, after }\" '$DIR/test-f1-diff-rows.mjs'"
+ck "F1 behaviour test passes"               "DSH_TUI_PKG='$TUI_PKG' DSH_TOOLS_DIR='$TOOLS' node '$DIR/test-f1-diff-rows.mjs'"
 
 echo "== §2 retired: cwd-scoped history is stock upstream (0.15.0) =="
 # F2 was a patch (history.js + PromptInput.js + Chat.js) until 0.15.0 shipped the
@@ -228,12 +236,27 @@ ck "row: striped paints the surface" \
 ck "row: the band is an explicit 256 index, not a theme surface" \
    "grep -qF \"const STRIPE_BACKGROUND = 'ansi256(237)'\" '$ROW' && ! grep -qF \"STRIPE_BACKGROUND = 'toolCardBackground\" '$ROW'"
 ck "row: the band reaches the pane edge" "grep -q 'flexShrink: 0, width: width,' '$ROW'"
+# 0.17 extracted the stock listing predicate into visibleWorkspaceSessions and
+# added a wrapped cwd bar above the list; the fork chains its artifact filter on
+# the former and reserves the latter's rows before sizing the session window.
+ck "hook: upstream visibleWorkspaceSessions is the base list" \
+   "grep -q 'visibleWorkspaceSessions(sessions, channel.agentId)' '$SUP'"
+ck "screen: the path bar's rows are reserved before the window" \
+   "grep -q 'Math.floor((sessionListHeight - pathRows) / SESSION_ROW_LINES)' '$SS'"
+ck "screen: the new-session card's capacity offset is gone" \
+   "grep -q 'const sessionCapacity = Math.max(1, capacity);' '$SS' && ! grep -q 'capacity - 1' '$SS'"
+ck "row: upstream WorkingGlyph retained, the spinner prop is gone" \
+   "grep -q 'function WorkingGlyph' '$ROW' && ! grep -q 'spinner' '$ROW'"
 ck "test-resume-flat.mjs covers the keys and the band" \
    "grep -q 'listKeyStep' '$DIR/test-resume-flat.mjs' && grep -q 'striped: true' '$DIR/test-resume-flat.mjs' && grep -q '48;5;237' '$DIR/test-resume-flat.mjs'"
 ck "CUSTOMIZATIONS.md documents the pair and the band" \
    "grep -q 'Ctrl+P / Ctrl+K 向上，Ctrl+N / Ctrl+J 向下' '$DIR/CUSTOMIZATIONS.md' && grep -q '上下分得清' '$DIR/CUSTOMIZATIONS.md' && grep -q 'ansi256(237)' '$DIR/CUSTOMIZATIONS.md' && grep -q '塌成同一个 59 号中灰' '$DIR/CUSTOMIZATIONS.md' && grep -q 'Ctrl+T 新建会话' '$DIR/CUSTOMIZATIONS.md' && grep -q 'LF（0x0A）' '$DIR/CUSTOMIZATIONS.md'"
 ck "README.md documents the keys and the band" \
    "grep -q 'Ctrl+P / Ctrl+K' '$DIR/README.md' && grep -q 'Ctrl+N / Ctrl+J' '$DIR/README.md' && grep -q 'zebra band' '$DIR/README.md' && grep -q 'Ctrl+T' '$DIR/README.md'"
+ck "CUSTOMIZATIONS.md documents 0.17's path bar and row spinner" \
+   "grep -q '顶部路径栏' '$DIR/CUSTOMIZATIONS.md' && grep -q 'WorkingGlyph' '$DIR/CUSTOMIZATIONS.md' && grep -q 'pathRows' '$DIR/CUSTOMIZATIONS.md'"
+ck "CUSTOMIZATIONS.md documents 0.2.1's canonical path contract" \
+   "grep -q 'canonical path' '$DIR/CUSTOMIZATIONS.md' && grep -q 'pathFromMeta' '$DIR/CUSTOMIZATIONS.md' && grep -q 'value.path' '$DIR/CUSTOMIZATIONS.md'"
 
 echo "== §2 F3 title chain (Claude Code's order) =="
 G="$LIB/types/dsh-adapter/sessions/digest.js"
@@ -296,6 +319,8 @@ S="$LIB/types/dsh-adapter/sessions/store.js"
 ck "store.js: cache epoch bumped to 5"     "grep -q 'const SCHEMA_VERSION = 5' '$S'"
 ck "store.js: a version 4 index is discarded" \
    "grep -q \"file\\['version'\\] !== SCHEMA_VERSION && file\\['version'\\] !== 3 && file\\['version'\\] !== 2\" '$S'"
+ck "F3: 0.17's upstream store is still schema 4" \
+   "grep -q 'const SCHEMA_VERSION = 4' '$DIR/original/store.js'"
 ck "store.js is a patch target" \
    "grep -q 'sessions/store.js|store.js' '$DIR/apply-diff-patches.sh'"
 ck "the title-chain test covers the placeholder" \
@@ -311,13 +336,13 @@ ck "ToolFileDiff .d.ts has no oldStart" "! grep -q 'oldStart' '$LIB/types/compon
 ck "F5 recapOnOpen stays stock (dsh-adapter/index.js not a target)" \
    "! node '$DIR/resolve-patch-targets.mjs' | grep -q 'dsh-adapter.index.js'"
 ck "test-recap-setting.mjs passes (F5 stock contract)" \
-   "node '$DIR/test-recap-setting.mjs'"
+   "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-recap-setting.mjs'"
 
 echo "== §2/§3 scripts and tests referenced by the docs =="
 ck "resolve-patch-targets.mjs runs"  "node '$DIR/resolve-patch-targets.mjs'"
-ck "test-resume-flat.mjs passes"     "node '$DIR/test-resume-flat.mjs'"
-ck "test-history-cwd.mjs passes (F2 stock contract)" "node '$DIR/test-history-cwd.mjs'"
-ck "test-resume-title-chain.mjs passes" "node '$DIR/test-resume-title-chain.mjs'"
+ck "test-resume-flat.mjs passes"     "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-resume-flat.mjs'"
+ck "test-history-cwd.mjs passes (F2 stock contract)" "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-history-cwd.mjs'"
+ck "test-resume-title-chain.mjs passes" "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-resume-title-chain.mjs'"
 ck "TARGETS count == original/ count" \
    "[ \"\$(node '$DIR/resolve-patch-targets.mjs' | wc -l)\" = \"\$(ls '$DIR/original' | wc -l)\" ]"
 ck "TARGETS count == diffs/ count" \

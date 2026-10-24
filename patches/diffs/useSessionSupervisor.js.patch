@@ -1,31 +1,27 @@
---- original/useSessionSupervisor.js	2026-10-14 14:29:06.977427649 +0800
-+++ backup/useSessionSupervisor.js	2026-10-14 15:42:05.032514612 +0800
-@@ -134,8 +134,22 @@
-             ancestors.add(parent);
-             cursor = byId.get(parent);
-         }
--        return sessions.filter(session => session.hasPrompt && session.kind.kind !== 'subagent' && !ancestors.has(session.id));
--    }, [sessions, channel.agentId]);
-+        return sessions.filter(session => session.hasPrompt
-+            && session.kind.kind !== 'subagent'
-+            && !ancestors.has(session.id)
-+            // F2 fork: a record with no artifact behind it is not a session this
-+            // pane should offer. Every terminal start registers one, and its log
-+            // may never land at all; with nothing to name it, it renders as the
-+            // directory basename ("☆ ∙ .dsh-tui") and reads like a directory row
-+            // rather than a conversation — including the session the terminal is
-+            // IN, which is the one this pane is opened from (you do not need a
-+            // row to resume the session you are already in). `bytes` is the
-+            // artifact's size and stays undefined while no log exists; a real
-+            // title or a real artifact keeps a row listed, so a conversation
-+            // whose opening prompt was an address and a session that just
-+            // started (log written, no prompt yet) both stay.
-+            && (session.title?.source !== 'fallback' || session.bytes !== undefined));
-+    }, [sessions, channel.agentId, liveStateOf]);
+--- /home/amei/.dsh-tui/patches/original/useSessionSupervisor.js	2026-10-24 21:36:33.241787949 +0800
++++ /home/amei/.dsh-tui/patches/backup/useSessionSupervisor.js	2026-10-24 21:36:33.242498897 +0800
+@@ -124,7 +124,19 @@
+      * the current row already represents. `buildView` hides the current id as
+      * well because its list has no live-state column to mark it with.
+      */
+-    const listedSessions = useMemo(() => visibleWorkspaceSessions(sessions, channel.agentId), [sessions, channel.agentId]);
++    const listedSessions = useMemo(() => visibleWorkspaceSessions(sessions, channel.agentId)
++        // F2 fork: a record with no artifact behind it is not a session this
++        // pane should offer. Every terminal start registers one, and its log
++        // may never land at all; with nothing to name it, it renders as the
++        // directory basename ("☆ ∙ .dsh-tui") and reads like a directory row
++        // rather than a conversation — including the session the terminal is
++        // IN, which is the one this pane is opened from (you do not need a
++        // row to resume the session you are already in). `bytes` is the
++        // artifact's size and stays undefined while no log exists; a real
++        // title or a real artifact keeps a row listed, so a conversation
++        // whose opening prompt was an address and a session that just
++        // started (log written, no prompt yet) both stay.
++        .filter(session => session.title?.source !== 'fallback' || session.bytes !== undefined), [sessions, channel.agentId]);
      /**
       * The rail's rows: the durable registry, plus rows for sessions that live in
       * a directory the registry does not know (or while it cannot be read at all).
-@@ -192,38 +206,54 @@
+@@ -181,38 +193,54 @@
      const countOf = useCallback((entry) => (groupedEntries.get(entry.path) ?? []).length, [groupedEntries]);
      const [railFocus, setRailFocus] = useState(0);
      /**
@@ -106,7 +102,7 @@
      /**
       * The session column's cursor, as ONE fact.
       *
-@@ -378,57 +408,6 @@
+@@ -370,57 +398,6 @@
      React.useEffect(() => () => {
          snapshotSlot(channel).requestGeneration++;
      }, [channel]);
@@ -164,10 +160,11 @@
      // The cursor indexes the entry list directly (there is no `+` row in front of
      // it), so a shrinking ledger has to pull it back inside or the last row would
      // highlight nothing.
-@@ -437,16 +416,19 @@
+@@ -428,17 +405,19 @@
+         setRailFocus(current => Math.min(current, Math.max(0, railEntries.length - 1)));
      }, [railEntries.length]);
      /**
-      * Sessions whose recorded cwd is the selected workspace, minus the search
+-     * Sessions whose recorded cwd is the selected workspace, minus the search
 -     * filter. Live sessions in this workspace sort above stopped ones, then by
 +     * Sessions recorded in this terminal's directory, minus the search
 +     * filter. Live sessions in the directory sort above stopped ones, then by
@@ -188,7 +185,7 @@
              .filter(session => sessionMatchesQuery(session, needle))
              .slice()
              .sort((left, right) => {
-@@ -454,44 +436,40 @@
+@@ -446,44 +425,40 @@
              const rightLive = liveStateOf(right.id)?.live === true ? 1 : 0;
              return rightLive - leftLive || right.updatedAt - left.updatedAt;
          });
@@ -202,7 +199,7 @@
 -     * action that still works when the list is empty.
 +     * follows an ID rather than an index.
 +     *
-+     * F3 fork: the new-session row is gone (`Ctrl+N` still creates one), so row
++     * F3 fork: the new-session row is gone (`Ctrl+T` still creates one), so row
 +     * 0 IS the first session and an empty list has no row to stand on.
       */
      const sessionIndex = useMemo(() => {
@@ -250,7 +247,7 @@
      const sessionWidth = Math.max(20, columns - (railVisible ? railWidth + 1 : 0));
      const railListHeight = Math.max(1, rows - RAIL_CHROME_ROWS);
      /**
-@@ -564,18 +542,15 @@
+@@ -556,18 +531,15 @@
          })
              .catch(error => report(t(archiveSessions ? 'session-archive-failed' : 'session-delete-failed', { err: message(error) }), 'error'));
      }, [archiveSessions, channel, holderOf, liveStateOf, reload, report]);
@@ -278,7 +275,7 @@
      /**
       * Mount a session, refusing one another terminal holds.
       *
-@@ -698,18 +673,16 @@
+@@ -690,18 +662,16 @@
              selectEntry(entry);
      }, [railEntries, selectEntry]);
      const moveSession = useCallback((by) => {
@@ -303,7 +300,7 @@
      const focusedSession = sessionAt(sessionIndex);
      return {
          dshBackend,
-@@ -751,7 +724,6 @@
+@@ -743,7 +713,6 @@
          selected,
          visibleSessions,
          sessionIndex,

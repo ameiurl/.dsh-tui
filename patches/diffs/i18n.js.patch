@@ -1,6 +1,6 @@
---- original/i18n.js	2026-10-14 14:29:06.984485851 +0800
-+++ backup/i18n.js	2026-10-14 16:06:51.606398026 +0800
-@@ -557,11 +557,10 @@
+--- /home/amei/.dsh-tui/patches/original/i18n.js	2026-10-24 21:36:33.255164742 +0800
++++ /home/amei/.dsh-tui/patches/backup/i18n.js	2026-10-24 21:36:33.256046463 +0800
+@@ -576,11 +576,10 @@
      'supervisor-no-matches': { zh: '没有匹配的会话 · Esc 清空筛选', en: 'No sessions match · Esc clears the filter' },
      'supervisor-subtitle': { zh: '本终端托管多个会话 · 切换不中断', en: 'This terminal hosts several sessions · switching does not stop them' },
      'supervisor-filter-placeholder': { zh: '输入以搜索会话…', en: 'Type to search sessions…' },
