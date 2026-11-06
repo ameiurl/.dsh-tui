@@ -1,0 +1,13 @@
+--- /home/amei/.dsh-tui/patches/original/plugin.js	2026-11-06 16:39:36.128996196 +0800
++++ /home/amei/.dsh-tui/patches/backup/plugin.js	2026-11-06 16:40:52.268537396 +0800
+@@ -1243,8 +1243,8 @@
+             notificationMethod: Schema.union(['auto', 'osc9', 'bel', 'windows']),
+             // Same no-default rule: applyDisplay resolves `?? config.mermaidDiagrams ?? true`.
+             mermaidDiagrams: Schema.boolean(),
+-            // Code-frame shape; unset keeps the light rail frame.
+-            codeFrameStyle: Schema.union(['light', 'full']),
++            // Code-frame shape (F6 adds `plain`; unset resolves to plain).
++            codeFrameStyle: Schema.union(['plain', 'light', 'full']),
+             // Same no-default rule: resolveMathRendering falls back to cordis.yml.
+             mathRendering: Schema.union(['auto', 'image', 'unicode', 'source']),
+             // Display-formula image size; unset keeps the base (text) scale.

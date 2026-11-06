@@ -326,6 +326,32 @@ ck "store.js is a patch target" \
 ck "the title-chain test covers the placeholder" \
    "grep -q 'a placeholder does not bury the provider title' '$DIR/test-resume-title-chain.mjs'"
 
+echo "== §2 F6 code frame: plain by default (no frame to copy) =="
+# A fenced block draws no frame: the frame's NoSelect columns only hide the
+# glyphs from the in-app copy, while a terminal-level copy (mouse selection,
+# tmux copy-mode) reads the screen and carried `┌─ php`/`│ ` into the snippet.
+CBF="$LIB/types/components/CodeBlockFrame.js"
+ck "renderer: plain returns before every frame branch" \
+   "grep -q \"frameStyle === 'plain'\" '$CBF' && grep -qF 'children: body });' '$CBF'"
+ck "renderer: the frame still exists for light/full" \
+   "grep -q \"frameStyle === 'full'\" '$CBF' && grep -q 'function CodeBlockFrameHybrid' '$CBF'"
+ck "prefs: plain is the default style" \
+   "grep -qF \"createLiveSetting('plain', normalizeCodeFrameStyle)\" '$LIB/types/tuiDisplayPrefs.js'"
+ck "prefs: plain/light/full are the accepted styles" \
+   "grep -qF \"new Set(['plain', 'light', 'full'])\" '$LIB/types/tuiDisplayPrefs.js'"
+ck "/settings: the Plain option exists" \
+   "grep -qF \"{ value: 'plain', label: 'Plain'\" '$LIB/types/settings/definitions.js'"
+ck "config schema accepts plain" \
+   "grep -qF \"codeFrameStyle: Schema.union(['plain', 'light', 'full'])\" '$LIB/types/dsh-adapter/index.js'"
+ck "channel method schema accepts plain" \
+   "grep -qF \"codeFrameStyle: Schema.union(['plain', 'light', 'full'])\" '$LIB/types/dsh-adapter/plugin.js'"
+ck "the code-frame behaviour test passes" \
+   "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-code-frame-plain.mjs'"
+ck "CUSTOMIZATIONS.md documents F6" \
+   "grep -q 'F6 — 代码块不画框' '$DIR/CUSTOMIZATIONS.md' && grep -q '终端层面的复制' '$DIR/CUSTOMIZATIONS.md'"
+ck "README.md documents F6" \
+   "grep -q 'Code fences are plain text' '$DIR/README.md'"
+
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"
 ck "ToolFileDiff .d.ts has no oldStart" "! grep -q 'oldStart' '$LIB/types/components/messages/ToolFileDiff.d.ts'"
@@ -333,8 +359,11 @@ ck "ToolFileDiff .d.ts has no oldStart" "! grep -q 'oldStart' '$LIB/types/compon
 # and makes it volatile on its own; the patch was retired, so the file must stay
 # out of TARGETS and the stock contract (key + volatility + writability) is
 # asserted by the test instead of by a diff.
-ck "F5 recapOnOpen stays stock (dsh-adapter/index.js not a target)" \
-   "! node '$DIR/resolve-patch-targets.mjs' | grep -q 'dsh-adapter.index.js'"
+# F6 took `dsh-adapter/index.js` back into the patch set (the codeFrameStyle
+# union), so the F5 proxy is now the PATCH's contents: the only hunk there is
+# the wider value set, and recapOnOpen stays the stock volatile boolean.
+ck "F5 recapOnOpen stays stock (the F6 schema hunk never touches it)" \
+   "! grep -qE '^[-+].*recapOnOpen' '$DIR/diffs/dsh-adapter.index.js.patch' && grep -q 'recapOnOpen: Schema.boolean()' '$LIB/types/dsh-adapter/index.js'"
 ck "test-recap-setting.mjs passes (F5 stock contract)" \
    "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-recap-setting.mjs'"
 

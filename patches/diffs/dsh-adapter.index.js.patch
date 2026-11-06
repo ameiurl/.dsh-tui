@@ -1,0 +1,12 @@
+--- /home/amei/.dsh-tui/patches/original/dsh-adapter.index.js	2026-11-06 16:39:36.135876876 +0800
++++ /home/amei/.dsh-tui/patches/backup/dsh-adapter.index.js	2026-11-06 16:40:52.271259617 +0800
+@@ -86,7 +86,8 @@
+     taskNotifications: Schema.union(['off', 'unfocused', 'always']),
+     notificationMethod: Schema.union(['auto', 'osc9', 'bel', 'windows']),
+     mermaidDiagrams: Schema.boolean().default(true),
+-    codeFrameStyle: Schema.union(['light', 'full']),
++    // F6 adds `plain` (no frame); the renderer's default is plain too.
++    codeFrameStyle: Schema.union(['plain', 'light', 'full']),
+     mathRendering: Schema.union(['auto', 'image', 'unicode', 'source']),
+     mathImageScale: Schema.union(['auto', 'large', 'xlarge']),
+     mathImageBacking: Schema.union(['transparent', 'terminal']),

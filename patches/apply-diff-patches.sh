@@ -111,6 +111,17 @@ declare -a TARGETS=(
   # would keep serving it on every cache hit) must be unreadable. Bumping the
   # schema version drops it whole and re-derives titles through the new chain.
   "$TUI_PKG/lib/types/dsh-adapter/sessions/store.js|store.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  # F6 code frame: a fenced block draws NO frame by default — no `┌─ lang`
+  # header, no left rail, no right wall, no bottom edge. The frame's NoSelect
+  # columns only keep the glyphs out of the in-app copy; a terminal-level copy
+  # (mouse selection, tmux copy-mode) reads the screen and used to carry them.
+  # `plain` is the default in the store, and the value set below is widened so
+  # /settings and cordis.yml can still pick `light`/`full`.
+  "$TUI_PKG/lib/types/components/CodeBlockFrame.js|CodeBlockFrame.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  "$TUI_PKG/lib/types/tuiDisplayPrefs.js|tuiDisplayPrefs.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  "$TUI_PKG/lib/types/settings/definitions.js|settings-definitions.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  "$TUI_PKG/lib/types/dsh-adapter/plugin.js|plugin.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
+  "$TUI_PKG/lib/types/dsh-adapter/index.js|dsh-adapter.index.js|$TUI_PKG|@deepseek-harness-tui/dsh-tui"
 )
 
 # Baseline version for a package name, from ./patch-base-versions.json.

@@ -1,0 +1,27 @@
+--- /home/amei/.dsh-tui/patches/original/CodeBlockFrame.js	2026-11-06 16:39:36.112093341 +0800
++++ /home/amei/.dsh-tui/patches/backup/CodeBlockFrame.js	2026-11-06 16:40:52.252219509 +0800
+@@ -30,6 +30,12 @@
+  * Header and rail are excluded from selection, the body is selectable.
+  * Below a net body width of 8 the block falls back to the plain ANSI
+  * fence, where a frame would only squeeze the code.
++ *
++ * The `plain` style (settings `dsh-tui.codeFrameStyle`, default in this fork)
++ * draws no frame at all: no corner, no language label, no rail. The frame's
++ * NoSelect columns only keep the glyphs out of the in-app copy; a
++ * terminal-level copy (mouse selection, tmux copy-mode) reads the screen and
++ * would carry them. Plain emits the code alone, so that copy is the source.
+  */
+ /** Same viewport slack MarkdownTable/MermaidDiagram keep for gutters and
+  *  message insets: the content column is the terminal width minus this. */
+@@ -100,6 +106,11 @@
+             },
+         };
+     }, [headerText, headerFill, emptyBody, theme.subtle]);
++    if (frameStyle === 'plain') {
++        // No corner, no label, no rail: what shows (and what a terminal-level
++        // copy grabs) is the code itself. Highlighting still applies.
++        return _jsx(Text, { dimColor: dimColor, children: body });
++    }
+     if (contentWidth - FRAME_OVERHEAD < MIN_NET_BODY_WIDTH) {
+         // Too narrow to frame: the plain ANSI fence.
+         return _jsx(Text, { dimColor: dimColor, children: formatToken(token, 0, null, null, highlight).trimEnd() });

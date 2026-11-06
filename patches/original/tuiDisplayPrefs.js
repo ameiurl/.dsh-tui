@@ -1,0 +1,607 @@
+/** Where a plugin footer field joins the status row, in the list order the
+ *  user's `statusBar.pluginFieldsOrder` groups map onto by index. Kept
+ *  structurally identical to `TuiStatusFieldSlot` in `dsh-adapter/status.ts`
+ *  (a script compares the two literal sets). */
+export const STATUS_FIELD_SLOTS = ['left-tail', 'right-head', 'right-tail'];
+/** `statusBar.pluginFieldsOrder`'s "show everything" token — the default. */
+export const ALL_PLUGIN_FIELDS = '*';
+/** The key grammar `tuiStatus.setField` admits, so the settings layer can
+ *  never write a key the admission would reject. Kept in step with
+ *  KEY_PATTERN in `dsh-adapter/status.ts` (a script compares the sources). */
+const PLUGIN_FIELD_KEY = /^[a-z][a-z0-9_-]*(:[a-z][a-z0-9_-]*)*$/u;
+/** Defaults keep the essential route/context information visible. */
+export const DEFAULT_STATUS_BAR = Object.freeze({
+    compact: true,
+    model: true,
+    thinking: true,
+    cwd: true,
+    contextUsage: true,
+    cache: true,
+    tokens: false,
+    cost: true,
+    tps: false,
+    gitBranch: false,
+    sessionTitle: false,
+    sessionId: false,
+    goal: true,
+    mode: false,
+    // On by default (2026-09-10, user ask): the segmented bar is the only place
+    // the per-segment context breakdown shows, so users who never open
+    // /settings were missing it entirely. `/settings → statusBar.contextBar`
+    // (or cordis.yml `contextBar: false`) still turns it off.
+    contextBar: true,
+    activity: false,
+    trajectory: false,
+    shortcutHint: false,
+    // Third-party text in permanent chrome: on by default (a plugin that
+    // registered a field asked to be seen), with one switch to silence all of
+    // them without disabling the plugins.
+    pluginFields: true,
+    // The per-field layer under `pluginFields`: `*` is "all of them, each in its
+    // plugin-declared slot, registration order" — i.e. the behaviour before this
+    // key existed, so an upgrade changes nothing.
+    pluginFieldsOrder: ALL_PLUGIN_FIELDS,
+});
+const TOOL_BACKGROUNDS = new Set(['none', 'subtle', 'strong']);
+const JOB_GROUP_FOLDS = new Set(['auto', 'always', 'never']);
+const SCROLL_GUTTERS = new Set(['timeline', 'scrollbar', 'hidden']);
+const STATUS_BAR_BOOLEAN_KEYS = Object.keys(DEFAULT_STATUS_BAR).filter((key) => key !== 'pluginFieldsOrder');
+/** Strict parse of one `statusBar.pluginFieldsOrder` value:
+ *  - `*` — every plugin field (the default);
+ *  - `''` (or three empty groups) — none;
+ *  - otherwise exactly three `;`-separated groups of comma-separated keys, the
+ *    group index picking the slot and the group order the sequence.
+ *  Any other shape is `invalid`: the settings screen blocks the save, and the
+ *  renderer falls back to `all` so a hand-edited typo can only ever show MORE
+ *  than asked, never hide a plugin silently. */
+export function parsePluginFieldsOrder(value) {
+    const trimmed = value.trim();
+    if (trimmed === ALL_PLUGIN_FIELDS)
+        return { mode: 'all' };
+    if (trimmed === '')
+        return { mode: 'none' };
+    const parts = trimmed.split(';');
+    if (parts.length !== STATUS_FIELD_SLOTS.length)
+        return { mode: 'invalid', reason: 'groups' };
+    // The sentinel is a whole-value form: `*;a;b` must not read as a key list.
+    if (parts.some(part => part.includes(ALL_PLUGIN_FIELDS)))
+        return { mode: 'invalid', reason: 'sentinel' };
+    const seen = new Set();
+    const groups = [];
+    for (const part of parts) {
+        const body = part.trim();
+        if (body === '') {
+            groups.push([]);
+            continue;
+        }
+        const group = [];
+        for (const raw of body.split(',')) {
+            const key = raw.trim().toLowerCase();
+            // An empty token is a typing error (`a,,b`, `a,`), not a silent no-op.
+            if (key === '' || !PLUGIN_FIELD_KEY.test(key))
+                return { mode: 'invalid', reason: 'token' };
+            // A key in two groups would make "move it here" a silent no-op when the
+            // old position was not removed; refuse the write instead.
+            if (seen.has(key))
+                return { mode: 'invalid', reason: 'duplicate' };
+            seen.add(key);
+            group.push(key);
+        }
+        groups.push(group);
+    }
+    // `;;` is structurally fine and means the same as `''`.
+    return seen.size === 0 ? { mode: 'none' } : { mode: 'groups', groups };
+}
+/** Render parsed groups back to their canonical text (trimmed, lower-cased,
+ *  one separator between groups). */
+export function formatPluginFieldsOrder(groups) {
+    return groups.map(group => group.join(',')).join(';');
+}
+/** Normalize a settings/config-layer value: valid values land in canonical
+ *  form, an invalid string is kept (so the settings screen can show and fix
+ *  it), and anything that is not a string becomes the default `*`. */
+export function normalizePluginFieldsOrder(value) {
+    if (typeof value !== 'string')
+        return ALL_PLUGIN_FIELDS;
+    const parsed = parsePluginFieldsOrder(value);
+    if (parsed.mode === 'invalid')
+        return value.trim();
+    if (parsed.mode === 'all')
+        return ALL_PLUGIN_FIELDS;
+    if (parsed.mode === 'none')
+        return '';
+    return formatPluginFieldsOrder(parsed.groups);
+}
+const NO_ORDERED_FIELDS = Object.freeze([]);
+/** Apply the user's list to the live field registry. `all` (and any invalid
+ *  value) returns the input array itself — the default mode allocates nothing;
+ *  `none` returns the shared empty array; `groups` returns new entries in list
+ *  order with the slot taken from the group index (the user's group overrides
+ *  the plugin-declared slot). Unknown keys are skipped. */
+export function applyPluginFieldsOrder(fields, order) {
+    const parsed = parsePluginFieldsOrder(order);
+    if (parsed.mode === 'all' || parsed.mode === 'invalid')
+        return fields;
+    if (parsed.mode === 'none')
+        return NO_ORDERED_FIELDS;
+    const byKey = new Map(fields.map(field => [field.key, field]));
+    const ordered = [];
+    parsed.groups.forEach((group, index) => {
+        const slot = STATUS_FIELD_SLOTS[index];
+        for (const key of group) {
+            const field = byKey.get(key);
+            if (field === undefined)
+                continue;
+            // One entry per key: the parser rejects duplicates, this only keeps a
+            // defensive double render impossible.
+            byKey.delete(key);
+            ordered.push({ ...field, slot });
+        }
+    });
+    return ordered;
+}
+/** Normalize untrusted/config-layer values without mutating the input. */
+export function normalizeToolBackground(value) {
+    return typeof value === 'string' && TOOL_BACKGROUNDS.has(value)
+        ? value
+        : 'none';
+}
+/** Same normalize contract as toolBackground; `auto` is the default. */
+export function normalizeJobGroupFold(value) {
+    return typeof value === 'string' && JOB_GROUP_FOLDS.has(value)
+        ? value
+        : 'auto';
+}
+/** Same normalize contract as toolBackground; `timeline` is the default. */
+export function normalizeScrollGutter(value) {
+    return typeof value === 'string' && SCROLL_GUTTERS.has(value)
+        ? value
+        : 'timeline';
+}
+/** Merge a partial settings value over the stable status-bar defaults. */
+export function normalizeStatusBar(value) {
+    const normalized = { ...DEFAULT_STATUS_BAR };
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+        return normalized;
+    const input = value;
+    for (const key of STATUS_BAR_BOOLEAN_KEYS) {
+        if (typeof input[key] === 'boolean')
+            normalized[key] = input[key];
+    }
+    // The one non-boolean member: a hand-written invalid list stays verbatim so
+    // the settings screen can show it, and the renderer reads it as `all`.
+    normalized.pluginFieldsOrder = normalizePluginFieldsOrder(input.pluginFieldsOrder ?? DEFAULT_STATUS_BAR.pluginFieldsOrder);
+    return normalized;
+}
+function formatTokenCount(value) {
+    const rounded = Math.max(0, Math.round(value));
+    if (rounded < 1_000)
+        return String(rounded);
+    if (rounded < 1_000_000)
+        return `${(rounded / 1_000).toFixed(rounded < 10_000 ? 1 : 0)}k`;
+    return `${(rounded / 1_000_000).toFixed(rounded < 10_000_000 ? 1 : 0)}m`;
+}
+/**
+ * Format context-window usage for future status-line consumers.
+ * Invalid or unavailable inputs intentionally produce no field.
+ */
+export function formatContextUsage(used, contextWindow, compact = true) {
+    if (!Number.isFinite(used) || !Number.isFinite(contextWindow) || used === undefined || contextWindow === undefined || contextWindow <= 0) {
+        return undefined;
+    }
+    const safeUsed = Math.max(0, used);
+    const percent = Math.min(999, (safeUsed / contextWindow) * 100);
+    const percentText = `${percent < 10 ? percent.toFixed(1) : Math.round(percent)}%`;
+    const counts = `${formatTokenCount(safeUsed)}/${formatTokenCount(contextWindow)}`;
+    return compact ? `${percentText} (${counts})` : `${counts} (${percentText})`;
+}
+/** Page inset per preset: `{ x }` = blank columns per side, `{ y }` = blank
+ *  rows top/bottom. `normal` is the default and matches the original
+ *  hard-coded inset (2 columns / 1 row). */
+export const PAGE_MARGIN_PRESETS = Object.freeze({
+    none: { x: 0, y: 0 },
+    slim: { x: 1, y: 1 },
+    normal: { x: 2, y: 1 },
+    roomy: { x: 4, y: 2 },
+});
+export const DEFAULT_PAGE_MARGIN = 'normal';
+/** Custom-spec bounds: beyond this a layout is either useless (a 40-col
+ *  terminal would starve) or pure waste. */
+export const PAGE_MARGIN_MAX_X = 8;
+export const PAGE_MARGIN_MAX_Y = 4;
+const PAGE_MARGIN_MODES = new Set(['none', 'slim', 'normal', 'roomy']);
+// `N` (rows default to 1) or `NxN` / `N×N` / `N,N` — the settings field and
+// cordis.yml both write through this; CJK 全角逗号/乘号 also accepted for
+// zh users typing without switching layouts.
+const PAGE_MARGIN_SPEC_RE = /^(\d{1,2})(?:[x×,，](\d{1,2}))?$/u;
+export function isPageMarginMode(value) {
+    return PAGE_MARGIN_MODES.has(value);
+}
+/** Parse a custom spec (canonicalizes `N` → `Nx1`); undefined when invalid
+ *  or out of bounds. */
+export function parsePageMarginSpec(text) {
+    const match = PAGE_MARGIN_SPEC_RE.exec(text.trim().toLowerCase());
+    if (match === null)
+        return undefined;
+    const x = Number.parseInt(match[1], 10);
+    const y = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
+    if (x > PAGE_MARGIN_MAX_X || y > PAGE_MARGIN_MAX_Y)
+        return undefined;
+    return `${x}x${y}`;
+}
+/** Normalize untrusted/config-layer values without mutating the input:
+ *  preset names and valid custom specs pass through, everything else falls
+ *  back to the default preset. */
+export function normalizePageMargin(value) {
+    if (typeof value === 'string') {
+        if (isPageMarginMode(value))
+            return value;
+        const spec = parsePageMarginSpec(value);
+        if (spec !== undefined)
+            return spec;
+    }
+    return DEFAULT_PAGE_MARGIN;
+}
+/** Resolve a stored setting to its geometry (presets via the table, custom
+ *  specs via their numbers; anything unparseable → the default preset). */
+export function resolvePageMargin(setting) {
+    if (isPageMarginMode(setting))
+        return PAGE_MARGIN_PRESETS[setting];
+    const spec = parsePageMarginSpec(setting);
+    if (spec !== undefined) {
+        const [x, y] = spec.split('x');
+        return {
+            x: Number.parseInt(x, 10),
+            y: Number.parseInt(y, 10),
+        };
+    }
+    return PAGE_MARGIN_PRESETS[DEFAULT_PAGE_MARGIN];
+}
+function createLiveSetting(initial, normalize) {
+    const listeners = new Set();
+    let state = initial;
+    return {
+        subscribe(listener) {
+            listeners.add(listener);
+            return () => { listeners.delete(listener); };
+        },
+        get: () => state,
+        apply(value) {
+            const next = normalize(value);
+            if (next !== state) {
+                state = next;
+                for (const listener of [...listeners])
+                    listener();
+            }
+            return next;
+        },
+    };
+}
+const pageMarginStore = createLiveSetting(DEFAULT_PAGE_MARGIN, normalizePageMargin);
+export const subscribePageMargin = pageMarginStore.subscribe;
+export const getPageMarginSetting = pageMarginStore.get;
+/** Returns the value that ended up applied — the plugin mirrors it into the channel. */
+export const applyPageMargin = pageMarginStore.apply;
+/** Whether ```mermaid fences render as box-drawing diagrams (settings
+ *  `dsh-tui.mermaidDiagrams`, default on). Only an explicit `false` keeps
+ *  the fenced source. */
+const mermaidDiagramsStore = createLiveSetting(true, value => value !== false);
+export const subscribeMermaidDiagrams = mermaidDiagramsStore.subscribe;
+export const getMermaidDiagrams = mermaidDiagramsStore.get;
+export const applyMermaidDiagrams = mermaidDiagramsStore.apply;
+const CODE_FRAME_STYLES = new Set(['light', 'full']);
+export function normalizeCodeFrameStyle(value) {
+    return typeof value === 'string' && CODE_FRAME_STYLES.has(value)
+        ? value
+        : 'light';
+}
+/** Read at render time, so settled code blocks re-render on change. */
+const codeFrameStyleStore = createLiveSetting('light', normalizeCodeFrameStyle);
+export const subscribeCodeFrameStyle = codeFrameStyleStore.subscribe;
+export const getCodeFrameStyle = codeFrameStyleStore.get;
+export const applyCodeFrameStyle = codeFrameStyleStore.apply;
+const MATH_RENDERING_MODES = new Set(['auto', 'image', 'unicode', 'source']);
+export function normalizeMathRendering(value) {
+    return typeof value === 'string' && MATH_RENDERING_MODES.has(value)
+        ? value
+        : 'auto';
+}
+/**
+ * Resolve the effective mode across the settings user layer and cordis.yml.
+ * `latexMath` predates `mathRendering` (unreleased main builds wrote it): at a
+ * layer without `mathRendering`, `false` means `source` and `true` means
+ * `auto`, and either one overrides the layers below.
+ */
+export function resolveMathRendering(user, config) {
+    for (const layer of [user, config]) {
+        if (layer.mathRendering !== undefined)
+            return normalizeMathRendering(layer.mathRendering);
+        // An explicit legacy switch overrides lower layers either way: a user who
+        // turned math back on over a cordis.yml `false` keeps it on.
+        if (typeof layer.latexMath === 'boolean')
+            return layer.latexMath ? 'auto' : 'source';
+    }
+    return 'auto';
+}
+/** Read at render time, so settled transcript blocks re-render on change. */
+const mathRenderingStore = createLiveSetting('auto', normalizeMathRendering);
+export const subscribeMathRendering = mathRenderingStore.subscribe;
+export const getMathRendering = mathRenderingStore.get;
+export const applyMathRendering = mathRenderingStore.apply;
+const MATH_IMAGE_SCALES = new Set(['auto', 'large', 'xlarge']);
+export function normalizeMathImageScale(value) {
+    return typeof value === 'string' && MATH_IMAGE_SCALES.has(value)
+        ? value
+        : 'auto';
+}
+/** Read at render time, so settled transcript blocks re-render on change. */
+const mathImageScaleStore = createLiveSetting('auto', normalizeMathImageScale);
+export const subscribeMathImageScale = mathImageScaleStore.subscribe;
+export const getMathImageScale = mathImageScaleStore.get;
+export const applyMathImageScale = mathImageScaleStore.apply;
+const MATH_IMAGE_BACKINGS = new Set(['transparent', 'terminal']);
+export function normalizeMathImageBacking(value) {
+    return typeof value === 'string' && MATH_IMAGE_BACKINGS.has(value)
+        ? value
+        : 'transparent';
+}
+const mathImageBackingStore = createLiveSetting('transparent', normalizeMathImageBacking);
+export const subscribeMathImageBacking = mathImageBackingStore.subscribe;
+export const getMathImageBacking = mathImageBackingStore.get;
+export const applyMathImageBacking = mathImageBackingStore.apply;
+const IMAGE_BACKINGS = new Set(['transparent', 'terminal']);
+export function normalizeImageBacking(value) {
+    return typeof value === 'string' && IMAGE_BACKINGS.has(value)
+        ? value
+        : 'transparent';
+}
+const imageBackingStore = createLiveSetting('transparent', normalizeImageBacking);
+export const subscribeImageBacking = imageBackingStore.subscribe;
+export const getImageBacking = imageBackingStore.get;
+export const applyImageBacking = imageBackingStore.apply;
+// ── Side panel (侧栏) ────────────────────────────────────────────────
+// Settings `dsh-tui.sidePanel.*`. These are module-level live stores (not
+// channel state): the layout needs them above the channel's version bump —
+// a Ctrl+B toggle must re-render Chat even though nothing about the
+// session changed — and /settings + cordis.yml write through the same
+// apply* functions (plugin's applyDisplay mirrors them here, exactly like
+// pageMargin). Key toggles are session-level: they move the live store but
+// never write the user settings layer, so a restart returns to the
+// configured default.
+/** Panel id grammar (plugins register under a `plugin:sub` namespace). */
+export const SIDE_PANEL_ID_PATTERN = /^[a-z][a-z0-9_-]*(:[a-z][a-z0-9_-]*)*$/;
+/** Anonymous activations have no durable identity. Three segments cannot
+ * collide with a verified Component's two-segment panel address. */
+export function isTemporarySidePanelId(id) {
+    return /^session:act[0-9]+:[a-z][a-z0-9_-]*$/u.test(id);
+}
+/** Old anonymous addresses cannot be attributed to a past activation. */
+export function isLegacyAnonymousSidePanelId(id) {
+    return /^act[0-9]+:[a-z][a-z0-9_-]*$/u.test(id);
+}
+/** Encode only verified registered Component ids when writing preferences.
+ * Runtime addresses remain unchanged; bare actN CSV entries stay unclaimed. */
+export function persistentSidePanelId(id) {
+    return isLegacyAnonymousSidePanelId(id) ? 'component:' + id : id;
+}
+/** Every built-in panel's id in the order the default lays them out. This is
+ *  the ordering skeleton of `ALL_SIDE_PANELS`, not a snapshot of what is
+ *  enabled: the resolver drops the ids that are not registered. */
+export const DEFAULT_SIDE_PANEL_IDS = 'todo,jobs,agents,info,trajectory,workspace,btw,companion';
+/** `sidePanel.panels`'s "show everything" token — the default. Under it the
+ *  enabled set follows the registry: plugin panels registered later appear
+ *  (and unregistered ones leave) without any settings write, and the picker
+ *  reads the same value as "all checked". */
+export const ALL_SIDE_PANELS = '*';
+function normalizeBoolean(value, fallback) {
+    return typeof value === 'boolean' ? value : fallback;
+}
+/** Chat fraction of the content width; junk collapses to the default and
+ *  the value is sanity-clamped (geometry clamps further per width). */
+export function normalizeSidePanelRatio(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value))
+        return 0.68;
+    return Math.min(0.95, Math.max(0.1, value));
+}
+/** Strict parse of one `sidePanel.panels` value (the settings save gate). */
+export function parseSidePanelPanels(value) {
+    const trimmed = value.trim();
+    if (trimmed === ALL_SIDE_PANELS)
+        return { mode: 'all' };
+    if (trimmed === '')
+        return { mode: 'empty' };
+    // The sentinel is a whole-value form: `*,todo` must not read as an id list.
+    if (trimmed.split(',').some(token => token.trim() === ALL_SIDE_PANELS)) {
+        return { mode: 'invalid', reason: 'sentinel' };
+    }
+    const ids = [];
+    const seen = new Set();
+    for (const raw of trimmed.split(',')) {
+        const id = raw.trim().toLowerCase();
+        // Tolerate `a,,b` / a trailing comma: the old gate did, and the store
+        // canonicalizes the same way.
+        if (id === '')
+            continue;
+        // A temporary address passes the grammar but has no durable identity, so
+        // saving one would persist a name no later run can honour (issue #1695).
+        if (SIDE_PANEL_ID_PATTERN.test(id) && isTemporarySidePanelId(id)) {
+            return { mode: 'invalid', reason: 'temporary' };
+        }
+        if (!SIDE_PANEL_ID_PATTERN.test(id))
+            return { mode: 'invalid', reason: 'token' };
+        if (seen.has(id))
+            continue;
+        seen.add(id);
+        ids.push(id);
+    }
+    // `,` names nothing: refuse the write instead of folding it into a clear
+    // (which would silently re-enable the default set).
+    return ids.length > 0 ? { mode: 'list', ids } : { mode: 'invalid', reason: 'empty' };
+}
+/** Tolerant normalization for the config/store entry points: `*`, a
+ *  non-string, a blank or an all-malformed value fold to `*`; otherwise
+ *  tokens are lower-cased, de-duped and order-preserved. Unlike the picker's
+ *  strict gate, a malformed token is dropped here — a typo must never wedge
+ *  the layout — while unknown-but-well-formed ids survive, because a plugin
+ *  may register them later in the session. A temporary address is dropped
+ *  too: it is session state, and a stored value may never claim one. */
+export function normalizeSidePanelPanels(value) {
+    if (typeof value !== 'string')
+        return ALL_SIDE_PANELS;
+    const trimmed = value.trim();
+    if (trimmed === ALL_SIDE_PANELS)
+        return ALL_SIDE_PANELS;
+    const seen = new Set();
+    for (const token of trimmed.split(',')) {
+        const id = token.trim().toLowerCase();
+        if (id === '' || id === ALL_SIDE_PANELS)
+            continue;
+        if (!SIDE_PANEL_ID_PATTERN.test(id) || isTemporarySidePanelId(id))
+            continue;
+        seen.add(id);
+    }
+    return seen.size > 0 ? [...seen].join(',') : ALL_SIDE_PANELS;
+}
+/** Which temporary panels this run is hiding.
+ *
+ *  A temporary panel (`session:actN:…`) has no durable identity, so its
+ *  checkbox cannot write the stored value — and the stored value cannot name
+ *  it either. Its on/off is session state instead: hiding one moves this set,
+ *  which every apply leaves alone, so replaying `sidePanel.panels` (boot, a
+ *  settings save, a live watch snapshot) never revives or buries one. */
+let hiddenTemporarySidePanelIds = Object.freeze([]);
+const hiddenTemporarySidePanelListeners = new Set();
+export function getHiddenTemporarySidePanels() {
+    return hiddenTemporarySidePanelIds;
+}
+export function subscribeHiddenTemporarySidePanels(listener) {
+    hiddenTemporarySidePanelListeners.add(listener);
+    return () => void hiddenTemporarySidePanelListeners.delete(listener);
+}
+/** Hide or restore one temporary panel for this run (`hidden` true = off the
+ *  bar, i.e. its checkbox is clear). Returns whether anything changed. */
+export function setTemporarySidePanelHidden(id, hidden) {
+    const present = hiddenTemporarySidePanelIds.includes(id);
+    if (present === hidden)
+        return false;
+    hiddenTemporarySidePanelIds = Object.freeze(hidden ? [...hiddenTemporarySidePanelIds, id] : hiddenTemporarySidePanelIds.filter(candidate => candidate !== id));
+    for (const listener of hiddenTemporarySidePanelListeners)
+        listener();
+    return true;
+}
+/** Map one persisted id back to the runtime id it names. A `component:`-encoded
+ *  address resolves only for a registered legacy-anonymous panel: the encoding
+ *  exists so that a bare `actN:x` left over in an old value stays an unclaimed
+ *  placeholder instead of being attributed to this run's activation. */
+function runtimeSidePanelId(id, registered) {
+    const prefix = 'component:';
+    if (!id.startsWith(prefix))
+        return id;
+    const runtimeId = id.slice(prefix.length);
+    return isLegacyAnonymousSidePanelId(runtimeId) && registered.has(runtimeId) ? runtimeId : id;
+}
+/** The one derivation of "which panels are enabled", given the stored value
+ *  and the live registry (ids in registry order).
+ *
+ *  - `*` (and a raw invalid value): the built-ins in their default order,
+ *    then every other registered panel in registry order — the same
+ *    tail order the old registration-time append produced, so an upgrade
+ *    changes no visible tab order.
+ *  - an explicit list: its ids, in its order — a `component:`-encoded one
+ *    decoded to the panel it names, an id nothing claims yet left as is (it
+ *    stays a placeholder until a plugin registers it). A bare `actN:x` is
+ *    never honoured: an old anonymous address cannot be attributed to this
+ *    run's activation (#1695), so it enables nothing even when a panel
+ *    happens to answer to that runtime id. Registered temporary panels join
+ *    at the tail unless `hiddenTemporary` names them: a stored value cannot
+ *    speak for a panel it cannot name. */
+export function resolveSidePanelIds(configured, registered, hiddenTemporary = []) {
+    const parsed = parseSidePanelPanels(configured ?? ALL_SIDE_PANELS);
+    if (parsed.mode === 'list') {
+        const claimed = new Set(registered);
+        const ids = parsed.ids
+            .filter(id => !isLegacyAnonymousSidePanelId(id))
+            .map(id => runtimeSidePanelId(id, claimed));
+        for (const id of registered) {
+            if (!isTemporarySidePanelId(id) || hiddenTemporary.includes(id) || ids.includes(id))
+                continue;
+            ids.push(id);
+        }
+        return ids;
+    }
+    const remaining = new Set(registered);
+    const ids = [];
+    for (const id of DEFAULT_SIDE_PANEL_IDS.split(',')) {
+        if (!remaining.delete(id))
+            continue;
+        ids.push(id);
+    }
+    for (const id of registered) {
+        if (!remaining.delete(id))
+            continue;
+        if (hiddenTemporary.includes(id))
+            continue;
+        ids.push(id);
+    }
+    return ids;
+}
+const sidePanelSplitEnabledStore = createLiveSetting(true, value => normalizeBoolean(value, true));
+export const subscribeSidePanelSplitEnabled = sidePanelSplitEnabledStore.subscribe;
+export const getSidePanelSplitEnabled = sidePanelSplitEnabledStore.get;
+export const applySidePanelSplitEnabled = sidePanelSplitEnabledStore.apply;
+const sidePanelOpenStore = createLiveSetting(false, value => normalizeBoolean(value, false));
+export const subscribeSidePanelOpen = sidePanelOpenStore.subscribe;
+export const getSidePanelOpen = sidePanelOpenStore.get;
+export const applySidePanelOpen = sidePanelOpenStore.apply;
+const sidePanelRatioStore = createLiveSetting(0.68, normalizeSidePanelRatio);
+export const subscribeSidePanelRatio = sidePanelRatioStore.subscribe;
+export const getSidePanelRatio = sidePanelRatioStore.get;
+export const applySidePanelRatio = sidePanelRatioStore.apply;
+const sidePanelPanelsStore = createLiveSetting(ALL_SIDE_PANELS, normalizeSidePanelPanels);
+export const subscribeSidePanelPanels = sidePanelPanelsStore.subscribe;
+export const getSidePanelPanels = sidePanelPanelsStore.get;
+export const applySidePanelPanels = sidePanelPanelsStore.apply;
+/**
+ * btw 线程上下文设置（设置 `dsh-tui.btw.*`）：追问携带的最近完成轮数
+ * 与总字符预算。clamp 规则与线程 store 的防御性钳制（sidePanel/btw/
+ * threads.ts 的 normalizeRecentTurnsLimit / selectContextTurns）一致——
+ * 两道闸门同规则，先到者生效；这里管 /settings 与 cordis.yml 的入口，
+ * store 侧兜住不经设置的直接调用。
+ */
+export const BTW_CONTEXT_TURNS_MIN = 1;
+export const BTW_CONTEXT_TURNS_MAX = 8;
+export const BTW_CONTEXT_TURNS_DEFAULT = 4;
+/** 总预算下限护住单答派生（perAnswer = min(8k, budget/2)）：再小就只剩
+ *  当前问句本身，上下文功能名存实亡。 */
+export const BTW_CONTEXT_BUDGET_MIN = 1_000;
+export const BTW_CONTEXT_BUDGET_MAX = 200_000;
+export const BTW_CONTEXT_BUDGET_DEFAULT = 24_000;
+export function normalizeBtwContextTurns(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value))
+        return BTW_CONTEXT_TURNS_DEFAULT;
+    return Math.min(BTW_CONTEXT_TURNS_MAX, Math.max(BTW_CONTEXT_TURNS_MIN, Math.round(value)));
+}
+export function normalizeBtwContextBudget(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value))
+        return BTW_CONTEXT_BUDGET_DEFAULT;
+    return Math.min(BTW_CONTEXT_BUDGET_MAX, Math.max(BTW_CONTEXT_BUDGET_MIN, Math.round(value)));
+}
+const btwContextTurnsStore = createLiveSetting(BTW_CONTEXT_TURNS_DEFAULT, normalizeBtwContextTurns);
+export const subscribeBtwContextTurns = btwContextTurnsStore.subscribe;
+export const getBtwContextTurns = btwContextTurnsStore.get;
+export const applyBtwContextTurns = btwContextTurnsStore.apply;
+const btwContextBudgetStore = createLiveSetting(BTW_CONTEXT_BUDGET_DEFAULT, normalizeBtwContextBudget);
+export const subscribeBtwContextBudget = btwContextBudgetStore.subscribe;
+export const getBtwContextBudget = btwContextBudgetStore.get;
+export const applyBtwContextBudget = btwContextBudgetStore.apply;
+export const COMPANION_SKIN_IDS = ['deepy', 'whaleGirl', 'whale'];
+export const DEFAULT_COMPANION_SKIN = 'deepy';
+export function normalizeCompanionSkin(value) {
+    if (typeof value === 'string' && COMPANION_SKIN_IDS.includes(value))
+        return value;
+    return DEFAULT_COMPANION_SKIN;
+}
+const companionSkinStore = createLiveSetting(DEFAULT_COMPANION_SKIN, normalizeCompanionSkin);
+export const subscribeCompanionSkin = companionSkinStore.subscribe;
+export const getCompanionSkin = companionSkinStore.get;
+export const applyCompanionSkin = companionSkinStore.apply;

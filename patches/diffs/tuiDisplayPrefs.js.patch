@@ -1,0 +1,23 @@
+--- /home/amei/.dsh-tui/patches/original/tuiDisplayPrefs.js	2026-11-06 16:39:36.119267407 +0800
++++ /home/amei/.dsh-tui/patches/backup/tuiDisplayPrefs.js	2026-11-06 16:40:52.254509349 +0800
+@@ -289,14 +289,17 @@
+ export const subscribeMermaidDiagrams = mermaidDiagramsStore.subscribe;
+ export const getMermaidDiagrams = mermaidDiagramsStore.get;
+ export const applyMermaidDiagrams = mermaidDiagramsStore.apply;
+-const CODE_FRAME_STYLES = new Set(['light', 'full']);
++/** F6: `plain` draws no frame (settings `dsh-tui.codeFrameStyle`). It is the
++ *  default here because the frame is decoration a terminal-level copy carries
++ *  along; `light`/`full` stay selectable in /settings. */
++const CODE_FRAME_STYLES = new Set(['plain', 'light', 'full']);
+ export function normalizeCodeFrameStyle(value) {
+     return typeof value === 'string' && CODE_FRAME_STYLES.has(value)
+         ? value
+-        : 'light';
++        : 'plain';
+ }
+ /** Read at render time, so settled code blocks re-render on change. */
+-const codeFrameStyleStore = createLiveSetting('light', normalizeCodeFrameStyle);
++const codeFrameStyleStore = createLiveSetting('plain', normalizeCodeFrameStyle);
+ export const subscribeCodeFrameStyle = codeFrameStyleStore.subscribe;
+ export const getCodeFrameStyle = codeFrameStyleStore.get;
+ export const applyCodeFrameStyle = codeFrameStyleStore.apply;

@@ -2,7 +2,7 @@
 
 > 📖 **升级后把全部定制补回来，请看 [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md)**（功能清单 + 重打手册）。
 
-Three customizations live here:
+Four customizations live here:
 
 1. **Diff rendering** — `dsh --profile dsh-tui` renders edit/write diffs exactly
    like Claude Code: **unified layout with real line numbers, context lines and
@@ -32,6 +32,13 @@ Three customizations live here:
    face value is what made rows show `@modules/client/…/A` — identical for
    every session that opened on the same file — instead of a name. Only a
    title a provider or a person actually wrote counts.
+4. **Code fences are plain text** — a fenced block in a reply draws **no frame**:
+   no `┌─ php` header, no left rail, no right wall or bottom edge. Those glyphs
+   are decoration, and a terminal-level copy (mouse selection, tmux copy-mode,
+   Shift-drag) reads the screen — so copying a snippet used to drag `┌─ php …`
+   and `│ ` into every line. `/settings → Code frame` still offers **Light
+   rail** and **Full box** for anyone who wants the frame back; **Plain** is the
+   default and what a fresh install of this patch set shows.
 
 **Retired into stock upstream (do not re-add):** the **cwd-scoped input history**
 — 0.15.0 ships the whole chain itself (`historyProjectKey`,
@@ -130,6 +137,8 @@ Sources: `@deepseek-ai/dsh-tool-fs@0.2.1-rc.2`,
 | `dsh-tui .../i18n.js` | `supervisor-hint-list` drops the `←/→ switch pane` wording (the fork has no second pane to advertise) and advertises the fork's own keys (`Ctrl+P/N move · Ctrl+T new`) |
 | `dsh-tui .../dsh-adapter/sessions/digest.js` | **F3 title chain** for `/resume` rows, in Claude Code's own order: a `session/title` event a **provider** (`auto`) or a **person** (`renamed`) wrote wins, else the **most recent** human prompt (`lastPromptOf`, newlines folded and clipped at `LAST_PROMPT_TITLE_CHARS = 200` the way Claude normalizes its `lastPrompt`), else the opening prompt (same normalization), else the working directory's basename. Both prompt levels step over a candidate that is nothing but a filesystem address (`isFileAddress`), and an address-only session still counts as a conversation (`hasPrompt`), so it never reaches the destructive empty-session clean-up. dsh's own **deterministic placeholder** (`source.kind: 'fallback'` — the opening prompt truncated by `dsh-session-title`) is not a name: `titleOf` marks it `strong: false`, all three scan sites (head/tail windows, the deep reverse scan, the appended-suffix update) refuse it, and a tail holding only a placeholder no longer claims `titleComplete` — the provider title may sit in the unseen middle, where the deep scan then finds it. Test: `node ~/.dsh-tui/patches/test-resume-title-chain.mjs` |
 | `dsh-tui .../dsh-adapter/sessions/store.js` | **cache epoch** for that change: `SCHEMA_VERSION` 4 → 5, because a cached `title` means something different now. A version 4 index can hold a placeholder path as a name and would keep serving it forever (the log never changed, so the revision keeps hitting), so version 4 is not in the readable set — the index is dropped whole and every title is re-derived. No manual cache clearing, and an old process writing the index back as version 4 is not trusted either |
+| `dsh-tui .../components/CodeBlockFrame.js` | **F6** — a fenced block draws no frame in the default `plain` style: no `┌─ lang` header, no left rail, no right wall or bottom edge. The frame's header/rail are `NoSelect`, which only keeps them out of the **in-app** copy; a terminal-level copy (mouse selection, tmux copy-mode) reads the screen, so the snippet used to arrive with the decoration. `light` (the open rail) and `full` (the closed box) stay selectable in `/settings`. Test: `node ~/.dsh-tui/patches/test-code-frame-plain.mjs` |
+| `dsh-tui .../tuiDisplayPrefs.js`, `.../settings/definitions.js`, `.../dsh-adapter/plugin.js`, `.../dsh-adapter/index.js` | the `codeFrameStyle` value set widened for F6: `plain` joins `light`/`full` in the normalizer and the live store (**`plain` is the store default**), in the `/settings` select (labelled Plain) and in both schemas that admit the value (cordis `Config` and the channel's display method), so `/settings` and `cordis.yml` can still pick either framed style |
 
 > **Reverted experiments (do not re-add):** a **cwd-scoped input history** was
 > reverted once during the 0.10.1 move, then restored as F2, and finally

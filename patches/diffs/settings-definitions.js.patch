@@ -1,0 +1,16 @@
+--- /home/amei/.dsh-tui/patches/original/settings-definitions.js	2026-11-06 16:39:36.123923982 +0800
++++ /home/amei/.dsh-tui/patches/backup/settings-definitions.js	2026-11-06 16:40:52.264537420 +0800
+@@ -30,10 +30,11 @@
+         label: 'Code frame',
+         descriptions: { zh: '代码框样式' },
+         group: 'rendering',
+-        hint: 'How fenced code blocks in replies frame themselves. Light (default): an open rail — corner + language label on top, a left rail with one padding column per row, no right wall or bottom edge (costs no extra height). Full: closes the box with a right wall that stays continuous across wrapped rows and a bottom edge under the block. Very narrow terminals always keep the plain fence, whatever this says. Applies immediately.',
+-        hintDescriptions: { zh: '回复里代码块的边框形式。轻框（默认）：开放式栏杆——顶部角标加语言标签，每行左侧竖杆加一格内边距，无右墙无底边（不多占高度）。全框：封闭盒子——右墙在折行处保持连续，底部封边。终端太窄时恒为纯 fence（不受此设置影响）。立即生效。' },
++        hint: 'How fenced code blocks in replies frame themselves. Plain (default in this fork): the code only — no corner, no language label, no rail — so a terminal-level copy (mouse selection, tmux copy-mode) carries no decoration. Light: an open rail — corner + language label on top, a left rail with one padding column per row, no right wall or bottom edge (costs no extra height). Full: closes the box with a right wall that stays continuous across wrapped rows and a bottom edge under the block. Very narrow terminals always keep the plain fence, whatever this says. Applies immediately.',
++        hintDescriptions: { zh: '回复里代码块的边框形式。纯文本（本 fork 默认）：只显示代码——无角标、无语言标签、无竖杆，所以终端层面的复制（鼠标选择、tmux copy-mode）不会带上装饰字符。轻框：开放式栏杆——顶部角标加语言标签，每行左侧竖杆加一格内边距，无右墙无底边（不多占高度）。全框：封闭盒子——右墙在折行处保持连续，底部封边。终端太窄时恒为纯 fence（不受此设置影响）。立即生效。' },
+         kind: 'select',
+         options: [
++            { value: 'plain', label: 'Plain', descriptions: { zh: '纯文本（无框）' } },
+             { value: 'light', label: 'Light rail', descriptions: { zh: '轻框（栏杆）' } },
+             { value: 'full', label: 'Full box', descriptions: { zh: '全框（封闭）' } },
+         ],
