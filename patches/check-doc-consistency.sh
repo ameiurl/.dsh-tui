@@ -347,10 +347,20 @@ ck "channel method schema accepts plain" \
    "grep -qF \"codeFrameStyle: Schema.union(['plain', 'light', 'full'])\" '$LIB/types/dsh-adapter/plugin.js'"
 ck "the code-frame behaviour test passes" \
    "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-code-frame-plain.mjs'"
+# The copy half: a tool card's `⎿ `/three-space gutter is chrome. Left
+# selectable, the TUI's own drag-copy gives every line three leading spaces and
+# splices three more into a soft-wrapped line at the break.
+CARD="$LIB/types/components/messages/AssistantToolUseMessage.js"
+ck "tool cards: NoSelect is imported for the body gutter" \
+   "grep -qF \"import { Box, NoSelect, Text, useTerminalSize } from '../../ui.js';\" '$CARD'"
+ck "tool cards: the body gutter is a NoSelect column" \
+   "grep -qF \"_jsx(NoSelect, { width: 3, flexShrink: 0, children: _jsx(Text, { color: line.tone === 'path'\" '$CARD'"
+ck "the tool-card copy test passes" \
+   "DSH_TUI_PKG='$TUI_PKG' node '$DIR/test-tool-card-copy.mjs'"
 ck "CUSTOMIZATIONS.md documents F6" \
-   "grep -q 'F6 — 代码块不画框' '$DIR/CUSTOMIZATIONS.md' && grep -q '终端层面的复制' '$DIR/CUSTOMIZATIONS.md'"
+   "grep -q 'F6 — 代码块不画框' '$DIR/CUSTOMIZATIONS.md' && grep -q '终端层面的复制' '$DIR/CUSTOMIZATIONS.md' && grep -q '工具卡里的代码也一样' '$DIR/CUSTOMIZATIONS.md'"
 ck "README.md documents F6" \
-   "grep -q 'Code fences are plain text' '$DIR/README.md'"
+   "grep -q 'Code fences are plain text' '$DIR/README.md' && grep -q 'The same rule covers' '$DIR/README.md'"
 
 echo "== §2 deliberately stock (must NOT be patched) =="
 ck "vim stays OFF by default"        "! grep -q 'vimMode: true' '$LIB/types/components/PromptInput.js'"

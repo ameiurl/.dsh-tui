@@ -194,11 +194,12 @@
   （45 条断言，合成 zstd 会话日志）。
 
 ### F6 — 代码块不画框：纯文本输出，终端复制不带装饰
-- **涉及文件（5 个）**：`…/dsh-tui/lib/types/components/CodeBlockFrame.js`（渲染分支）、
-  `…/lib/types/tuiDisplayPrefs.js`（`plain` 进样式集并成为默认）、
+- **涉及文件（5 个新目标 + F1 的一个文件）**：`…/dsh-tui/lib/types/components/CodeBlockFrame.js`
+  （渲染分支）、`…/lib/types/tuiDisplayPrefs.js`（`plain` 进样式集并成为默认）、
   `…/lib/types/settings/definitions.js`（`/settings` 的 Plain 选项与说明）、
   `…/lib/types/dsh-adapter/plugin.js` 与 `…/lib/types/dsh-adapter/index.js`（两处
-  `Schema.union` 放行 `plain`）。
+  `Schema.union` 放行 `plain`）；另外 `…/components/messages/AssistantToolUseMessage.js`
+  （**已属 F1**）里加一处：工具卡正文的 3 列缩进（`⎿ `/空格）改成 `NoSelect`。
 - **问题**：stock 的轻框/全框把 `┌─ php` 表头和 `│ ` 竖杆画在正文旁边。它们虽然标了
   `NoSelect`，但那**只对 dsh-tui 自己的选区复制生效**；鼠标选择、tmux copy-mode、
   Shift-drag 读的是屏幕内容，**终端层面的复制**于是把框线一起带走，每行都带装饰。
@@ -208,6 +209,9 @@
     多出两格装饰缩进）。
   - `light` / `full` 原样保留，`/settings → 代码框样式` 可切回；`plain` 只是新的默认档。
   - 侧栏面板里的 fence 走同一个组件，行为一致（`panelMarkdown.js` 不用改）。
+  - **工具卡里的代码也一样**：卡片的 `⎿ `/3 空格缩进列不是内容，标成 `NoSelect` 后拖选复制
+    不再带它；软换行的续行本来会把那 3 个空格插到行中间，现在也消失（续行的 gutter 单元格
+    被跳过，源行接回去仍是原样）。
 - **重移植注意**：`plain` 分支必须放在两个 hook（`headerText`/`decoration` 等）之后、
   窄屏回落分支之前 —— hooks 不能条件调用；store 默认值在 `tuiDisplayPrefs.js` 的
   `createLiveSetting('plain', …)`，正规化器把未知值也落到 `plain`；两处 schema 的 union
@@ -215,6 +219,8 @@
 - **验证**：回复里的代码块没有 `┌─ lang`、没有左竖杆，鼠标选中复制只有代码本身；
   `/settings → 代码框样式` 有 Plain / Light rail / Full box 三档；命令行：
   `node ~/.dsh-tui/patches/test-code-frame-plain.mjs`（19 条断言，无头 ink 三档真渲染）。
+  工具卡那条单独验：`node ~/.dsh-tui/patches/test-tool-card-copy.mjs`（9 条断言，Bash 卡
+  真渲染 + 真选区提取；去掉 `NoSelect` 会挂 5 条）。
 
 ### 仍 stock（别再打补丁）
 vim 默认关且指示在输入框内（`/vim` 开启）；
@@ -367,8 +373,10 @@ dsh-tui 是**两个进程**，补丁住在哪个进程决定了怎么重启：
 - **F3**：`/resume` 行标题=最近一条真实消息／目录名，绝不是路径或占位。
   `node ~/.dsh-tui/patches/test-resume-title-chain.mjs`
 - **F6**：回复里的代码块没有 `┌─ lang` 头、没有左竖杆，鼠标选中复制只有代码本身；
+  从工具卡里拖选代码也没有 `⎿ `/行首 3 空格、长行接回去不插空格；
   `/settings → 代码框样式` 有 Plain / Light rail / Full box，切 Light/Full 后框回来、切回
-  Plain 立刻消失。`node ~/.dsh-tui/patches/test-code-frame-plain.mjs`
+  Plain 立刻消失。`node ~/.dsh-tui/patches/test-code-frame-plain.mjs`、
+  `node ~/.dsh-tui/patches/test-tool-card-copy.mjs`
 - 仍是 stock：会话标题按宽度截断；vim 默认关、指示在输入框内。
 
 ### Step 8 — 文档一致性核对
@@ -395,10 +403,11 @@ F3 的 `isFileAddress`、`lastPromptOf`、`normalizeLastPrompt`、
 `LAST_PROMPT_TITLE_CHARS = 200`、两层 prompt 都跳过地址、`hasPrompt` 取自非过滤候选、
 占位标题判 `strong: false`（四处扫描）、`titleComplete` 不跟占位走、`store.js` 的
 `SCHEMA_VERSION = 5` 且版本 4 不可读 / F6 的 `plain` 分支、store 默认档、`/settings`
-Plain 选项、两处 schema 放行与三档真渲染 / 仍应 stock 的 vim、`ToolFileDiff.d.ts` 与 F5 的
+Plain 选项、两处 schema 放行、三档真渲染与工具卡缩进列的 `NoSelect` / 仍应 stock 的 vim、
+`ToolFileDiff.d.ts` 与 F5 的
 `recapOnOpen`（`test-recap-setting.mjs` 的 stock 契约）/ apply 脚本的断链拷贝、diff 直打路径
 （`patch -p0 --fuzz=3`、`PATCHED-DRIFT`、`OK-PATCHED` 指纹、写不进就 `ABORT`）、hunk 报告取自
 stdout 且「偏移 ≠ fuzz」（`patch.out`、`patch_was_fuzzy`、`PATCHED-FUZZ`、`--read-only=ignore`）、
 分目标守卫与逐包基线 / 目标数 = `original/` = `diffs/` 且命名一致 / 每个 `diffs/*.patch` 都能在
-它自己的 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/` / 六个测试通过。
+它自己的 `original/` 上 `--fuzz=0` 干净贴上且结果 == `backup/` / 七个测试通过。
 失败项会打印 `FAIL` 指出是哪条断言——对着它改代码或改文档，别放着。
